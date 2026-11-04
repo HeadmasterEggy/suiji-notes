@@ -652,7 +652,7 @@ document.addEventListener("visibilitychange", () => {
 const NOTES_KEY = "\u0000notes";
 const DND = "application/x-suiji-item";
 
-function titleOf(t) { const l = (t || "").split("\n").find((s) => s.trim()); return l ? l.trim() : t("无标题"); }
+function titleOf(body) { const l = (body || "").split("\n").find((s) => s.trim()); return l ? l.trim() : t("无标题"); }
 function fmt(iso) {
   const d = new Date(iso), now = new Date(), p = (n) => String(n).padStart(2, "0");
   if (d.toDateString() === now.toDateString()) return t("今天 {time}", { time: `${p(d.getHours())}:${p(d.getMinutes())}` });
@@ -733,6 +733,10 @@ function itemRow(kind, id, label, depth, metaText, title) {
     else openIn(focused, kind, id);
   };
   return b;
+}
+// The Edit button's label (also its tooltip, for narrow panes that show only its icon); "on" swaps the pencil for a tick.
+function editLabel(p, text, on) {
+  p.edit.querySelector(".lbl").textContent = text; p.edit.title = text; p.edit.classList.toggle("on", on);
 }
 function fileRow(f, depth, metaText) {
   const name = baseName(f.name), parent = fullPath(f).slice(-2, -1)[0];
@@ -988,12 +992,12 @@ function makePane(item) {
     }
     const f = files.find((x) => x.id === p.itemId);
     if (!f) return;
-    p.edit.disabled = true;
+    p.edit.disabled = true; editLabel(p, t("载入中…"), false);   // the fresh read takes a moment
     // A fresh signed URL plus a cache-buster, so editing never starts from a stale copy.
     let text = null;
     const s = await sb.storage.from("files").createSignedUrl(f.path, 60);
     if (!s.error) try { const r = await fetch(s.data.signedUrl + "&t=" + Date.now(), { cache: "no-store" }); if (r.ok) text = await r.text(); } catch {}
-    p.edit.disabled = false;
+    p.edit.disabled = false; editLabel(p, t("编辑"), false);
     if (text === null) { showNote(t("读取文件失败，请检查网络。"), "err"); return; }
     p.fileBase = text;
     p.ta.value = p.fileBase; p.fileEdit = true; p.editing = false;
@@ -1148,7 +1152,7 @@ function renderPane(p) {
   p.ta.hidden = !(note || editingFile); p.fv.hidden = !file || editingFile; p.ph.hidden = !!(note || file || waiting);
   p.dl.hidden = !file;
   if (!file || editingFile) p.web.hidden = true;
-  p.edit.hidden = !(file && isEditable(file)); p.edit.textContent = editingFile ? t("完成") : t("编辑");
+  p.edit.hidden = !(file && isEditable(file)); editLabel(p, editingFile ? t("完成") : t("编辑"), editingFile);
   applyToc(p);
   p.ta.placeholder = file ? "" : t("第一行是标题…");
   if (!note && !file) {

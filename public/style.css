@@ -181,6 +181,22 @@ input[type="search"]:focus, input[type="email"]:focus, input[type="password"]:fo
 .ebar .ghost { color: color-mix(in srgb, var(--ink) 72%, transparent); }
 .ebar .ghost:hover { color: var(--ink); }
 .ebar .meta { margin-right: 4px; }
+/* Edit / Web / Download show their names; in a narrow pane (a split, or a phone) only their icons. */
+.pane.editor { container: pane / inline-size; }
+.ebar .ico { display: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.p-edit .tick, .p-edit.on .pen { display: none; }
+.p-edit:disabled { opacity: .55; cursor: progress; }
+.p-edit.on .tick { display: inline; }
+@container pane (max-width: 480px) {
+  .ebar :is(.p-edit, .p-web, .p-dl) { padding: 6px; display: inline-grid; place-items: center; }
+  .ebar :is(.p-edit, .p-web, .p-dl) .ico { display: block; }
+  .ebar :is(.p-edit, .p-web, .p-dl) .lbl { display: none; }
+}
+@container pane (max-width: 340px) {   /* a third of a laptop screen: tighter, so all seven controls fit */
+  .ebar { padding: 8px; gap: 1px; }
+  .ebar .ghost.icon, .ebar :is(.p-edit, .p-web, .p-dl) { padding: 4px; }
+  :root[data-style="blocks"] .ebar .ghost { padding: 2px; border-width: 2px; }
+}
 .ghost.danger:hover, .ghost.danger.armed { color: var(--danger); border-color: var(--danger); }
 .back { display: none; }
 textarea {
@@ -574,6 +590,8 @@ textarea {
 :root[data-style="blocks"] .md-body pre, :root[data-style="blocks"] .md-body code { border-radius: 0; background: #2b2b2b; color: #e6e6e6; }
 :root[data-style="blocks"] .md-body blockquote { border-radius: 0; border-left: 6px solid var(--accent); background: #e9e2cf; }
 :root[data-style="blocks"] .md-tags span { border-radius: 0; }
+/* grass green is too light for text on the cream page, so links and tags take a deeper green */
+:root[data-style="blocks"] .md-tags span, :root[data-style="blocks"] .md-body a, :root[data-style="blocks"] .md-web { color: #2f6b12; }
 :root[data-style="blocks"] .toc-list button, :root[data-style="blocks"] .toc-count { border-radius: 0; }
 :root[data-style="blocks"] .toc-ink { width: 4px; border-radius: 0; }
 :root[data-style="blocks"] .toc-bar { height: 6px; border-radius: 0; background: #555; box-shadow: var(--slot); }
@@ -606,7 +624,7 @@ textarea {
 :root[data-style="terminal"][data-mode="light"] .graph { --g-node: #15803d; --g-edge: rgba(21, 128, 61, .3); --g-glow: 0; }
 
 :root[data-style="blocks"][data-mode="dark"] {
-  --bg: #0d1733; --panel: #4a4a52; --ink: #ececec; --muted: #b4b4bc; --line: #6a6a72;
+  --bg: #0d1733; --panel: #4a4a52; --ink: #ececec; --muted: #cacad1; --line: #6a6a72;
   --accent: #5b9e32; --accent-soft: rgba(255, 255, 255, .12);
   --glass: #4a4a52; --glass-strong: #5a5a62; --rim: #7c7c84; --rim-low: #222226;
   --bevel: inset var(--px) var(--px) 0 rgba(255, 255, 255, .22), inset calc(-1 * var(--px)) calc(-1 * var(--px)) 0 rgba(0, 0, 0, .45);
