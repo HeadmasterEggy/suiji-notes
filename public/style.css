@@ -111,8 +111,21 @@ body.resizing .divider:hover::before { opacity: .6; }
 .p-hint[data-zone="right"] { inset: 8px 8px 8px 50%; }
 .p-hint[data-zone="top"] { inset: 8px 8px 50% 8px; }
 .p-hint[data-zone="bottom"] { inset: 50% 8px 8px 8px; }
-.mermaid-box { margin: 0 0 1em; overflow-x: auto; text-align: center; }
+/* Mermaid: a light card, diagram colours from these variables (see MERMAID_CSS in app.js). */
+.md-body {
+  --mm-node: color-mix(in srgb, var(--ink) 5%, var(--panel));
+  --mm-border: color-mix(in srgb, var(--ink) 24%, transparent);
+  --mm-line: color-mix(in srgb, var(--ink) 45%, transparent);
+  --mm-label-bg: var(--panel);
+  --mm-cluster: color-mix(in srgb, var(--ink) 3%, var(--panel));
+}
+.mermaid-box {
+  margin: 0 0 1.2em; padding: 22px 18px; overflow-x: auto; text-align: center;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: inset 0 1px 0 var(--rim);
+}
 .mermaid-box svg { height: auto; }
+.mermaid-box svg .node { transition: opacity .2s; }
 .pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .listpane { padding: 14px 10px 10px; }
 

@@ -261,10 +261,38 @@ function skeleton() {
 const isMarkdown = (f) => ["md", "markdown"].includes(extOf(f.name)) || f.mime === "text/markdown";
 const CDN = "https://cdn.jsdelivr.net/npm/";
 let mdLibs = null, mermaidLib = null, mermaidSeq = 0;
+const MERMAID_CSS = `
+  .node rect, .node circle, .node ellipse, .node polygon, .node path, .actor, rect.actor, .classGroup rect, .stateGroup rect,
+  .statediagram-state rect, .er.entityBox, .entityBox, .task, .section0, .section1, .section2, .section3 {
+    fill: var(--mm-node) !important; stroke: var(--mm-border) !important; stroke-width: 1px !important; }
+  .node rect, rect.actor, .statediagram-state rect, .entityBox, .classGroup rect { rx: 10px; ry: 10px; }
+  .nodeLabel, .label, .label text, text.actor, .actor > tspan, .messageText, .noteText, .classText, .loopText, .labelText,
+  .er.entityLabel, .entityLabel, span { color: var(--ink) !important; fill: var(--ink) !important; }
+  .flowchart-link, .messageLine0, .messageLine1, .relation, .transition, line, .actor-line, .loopLine {
+    stroke: var(--mm-line) !important; stroke-width: 1.4px !important; }
+  .actor-line { stroke-dasharray: 3 4; }
+  marker path, .arrowheadPath, .arrowMarkerPath, #arrowhead path, .marker { fill: var(--mm-line) !important; stroke: var(--mm-line) !important; }
+  .edgeLabel, .edgeLabel p, .edgeLabel span, .labelBkg { background: var(--mm-label-bg) !important; color: var(--muted) !important; font-size: 13px; }
+  .edgeLabel rect { fill: var(--mm-label-bg) !important; opacity: 1; }
+  .cluster rect { fill: var(--mm-cluster) !important; stroke: var(--mm-border) !important; rx: 14px; ry: 14px; }
+  .cluster .nodeLabel, .cluster-label span { color: var(--muted) !important; }
+  .note { fill: var(--mm-cluster) !important; stroke: var(--mm-border) !important; }
+`;
 function loadMermaid() {
   mermaidLib ||= import(CDN + "mermaid@10.9.1/dist/mermaid.esm.min.mjs").then(({ default: m }) => {
     const dark = matchMedia("(prefers-color-scheme: dark)").matches;
-    m.initialize({ startOnLoad: false, securityLevel: "strict", theme: dark ? "dark" : "neutral", fontFamily: "inherit" });
+    // "base" theme in greys for Mermaid's own colour maths; MERMAID_CSS then repaints everything with the
+    // page's CSS variables, so diagrams match the app and follow light/dark even after they are rendered.
+    const v = dark
+      ? { primaryColor: "#1a1a1a", primaryBorderColor: "#4a4a4a", primaryTextColor: "#f0f0f0", lineColor: "#8c8c8c", edgeLabelBackground: "#0e0e0e", tertiaryColor: "#141414" }
+      : { primaryColor: "#f6f6f6", primaryBorderColor: "#cfcfcf", primaryTextColor: "#111111", lineColor: "#8a8a8a", edgeLabelBackground: "#ffffff", tertiaryColor: "#fafafa" };
+    m.initialize({
+      startOnLoad: false, securityLevel: "strict", theme: "base", darkMode: dark,
+      themeVariables: { ...v, fontFamily: getComputedStyle(document.body).fontFamily, fontSize: "14px" },
+      themeCSS: MERMAID_CSS,
+      flowchart: { curve: "basis", nodeSpacing: 42, rankSpacing: 54, padding: 14, htmlLabels: true },
+      sequence: { actorMargin: 60, boxMargin: 8, mirrorActors: false },
+    });
     return m;
   }).catch((e) => { mermaidLib = null; throw e; });
   return mermaidLib;
@@ -282,9 +310,9 @@ async function renderMermaid(frag) {
       const box = document.createElement("div");
       box.className = "mermaid-box";
       box.innerHTML = svg;
-      // Keep the diagram at its natural size; wide ones scroll sideways instead of shrinking to unreadable.
-      const el = box.querySelector("svg");
-      if (el && el.style.maxWidth) { el.style.width = el.style.maxWidth; el.style.maxWidth = "none"; }
+      // Fit the width, but never shrink below 560px (or the natural size): past that it scrolls sideways.
+      const el = box.querySelector("svg"), natural = parseFloat(el?.style.maxWidth);
+      if (natural) { el.style.width = "100%"; el.style.minWidth = Math.min(natural, 560) + "px"; }
       code.parentElement.replaceWith(box);
     } catch (e) {
       document.getElementById("d" + id)?.remove();
