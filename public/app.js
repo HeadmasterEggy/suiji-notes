@@ -485,6 +485,7 @@ async function showFile(f, p) {
   // The download link is not needed to show the file; fetch it alongside.
   p.dl.removeAttribute("href");
   p.web.hidden = true; p.web.removeAttribute("href");
+  setToc(p, null);
   signedUrls([f.path], f.name).then((m) => { if (token === p.token && m.get(f.path)) p.dl.href = m.get(f.path); }).catch(() => {});
 
   const textish = isTextish(f);
@@ -498,7 +499,9 @@ async function showFile(f, p) {
         if (!staleIds.has(f.id)) keepRender(f, el);
       }
       if (el.dataset.web) { p.web.href = el.dataset.web; p.web.hidden = false; }
-      return show(el);
+      show(el);
+      if (token === p.token) setToc(p, el);
+      return;
     }
     if (textish) {
       const text = await fileText(f);
@@ -685,12 +688,57 @@ const isPhone = matchMedia("(max-width: 720px)");
 const panes = new Map();
 let layout = null, focused = null, paneSeq = 0;
 
+// ---------- outline ----------
+// Headings of the open Markdown file in a panel beside it. Wide panes show it unless it was switched off
+// (remembered); narrow panes and phones open it over the text on demand.
+let outlineWide = (() => { try { return localStorage.getItem("suiji:outline") !== "0"; } catch { return true; } })();
+const isNarrow = (p) => p.el.clientWidth < 760;
+const paneSizes = new ResizeObserver((es) => {
+  for (const e of es) for (const p of panes.values()) if (p.el === e.target) applyToc(p);
+});
+function setToc(p, art) {
+  p.heads = art ? [...art.querySelectorAll("h1, h2, h3, h4")].filter((h) => h.textContent.trim()) : [];
+  if (p.heads.length < 2) p.heads = [];
+  const top = Math.min(...p.heads.map((h) => +h.tagName[1]));
+  p.toc.replaceChildren(...p.heads.map((h, i) => {
+    const b = Object.assign(document.createElement("button"), { type: "button", textContent: h.textContent.trim(), title: h.textContent.trim() });
+    b.dataset.i = i; b.style.setProperty("--lvl", +h.tagName[1] - top);
+    return b;
+  }));
+  if (p.heads.length) p.toc.prepend(Object.assign(document.createElement("div"), { className: "toc-title", textContent: "大纲" }));
+  applyToc(p); markHeading(p);
+}
+function applyToc(p) {
+  const has = p.heads.length > 0 && !p.fv.hidden;
+  const narrow = isNarrow(p), on = has && (narrow ? p.tocNarrow : outlineWide);
+  p.outline.hidden = !has;
+  p.outline.setAttribute("aria-pressed", String(on));
+  p.toc.hidden = !on;
+  p.toc.classList.toggle("overlay", narrow);
+}
+// The current section: the last heading that has scrolled past the top of the pane.
+function markHeading(p) {
+  if (p.toc.hidden || !p.heads.length) return;
+  const top = p.preview.getBoundingClientRect().top + 80;
+  let cur = 0;
+  if (p.tocLock != null) cur = p.tocLock;
+  else p.heads.forEach((h, i) => { if (h.getBoundingClientRect().top <= top) cur = i; });
+  const prev = p.toc.querySelector("[aria-current]");
+  const next = p.toc.querySelector(`[data-i="${cur}"]`);
+  if (prev === next) return;
+  prev?.removeAttribute("aria-current");
+  next?.setAttribute("aria-current", "true");
+  const r = next.getBoundingClientRect(), box = p.toc.getBoundingClientRect();
+  if (r.top < box.top + 30 || r.bottom > box.bottom - 10) p.toc.scrollTo({ top: p.toc.scrollTop + r.top - box.top - box.height / 3 });
+}
+
 function makePane(item) {
   const el = paneTpl.content.firstElementChild.cloneNode(true);
   const q = (c) => el.querySelector("." + c);
   const p = {
     id: ++paneSeq, el, ta: q("p-ta"), ph: q("p-ph"), fv: q("p-fv"), preview: q("p-preview"), meta: q("p-meta"),
     dl: q("p-dl"), hint: q("p-hint"), edit: q("p-edit"), web: q("p-web"), fileEdit: false, fileBase: null,
+    outline: q("p-outline"), toc: q("p-toc"), heads: [], tocNarrow: false, tocLock: null,
     kind: item?.kind || null, itemId: item?.id || null, shown: null, token: 0,
     editing: false, editTimer: null,
   };
@@ -710,6 +758,25 @@ function makePane(item) {
     const a = e.target.closest("a[data-open]");
     if (a) { e.preventDefault(); openIn(p, "file", a.dataset.open); }
   });
+  p.outline.onclick = () => {
+    if (isNarrow(p)) p.tocNarrow = !p.tocNarrow;
+    else { outlineWide = !outlineWide; try { localStorage.setItem("suiji:outline", outlineWide ? "1" : "0"); } catch {} }
+    panes.forEach(applyToc);
+  };
+  p.toc.addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-i]");
+    if (!b) return;
+    const h = p.heads[+b.dataset.i], top = p.preview.getBoundingClientRect().top;
+    p.preview.scrollTo({ top: p.preview.scrollTop + h.getBoundingClientRect().top - top - 12, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    if (isNarrow(p)) { p.tocNarrow = false; applyToc(p); }
+    p.tocLock = +b.dataset.i; markHeading(p);   // keep the clicked heading marked while the scroll settles
+  });
+  let spy = 0, settle = 0;
+  p.preview.addEventListener("scroll", () => {
+    clearTimeout(settle); settle = setTimeout(() => { p.tocLock = null; }, 200);
+    if (!spy) spy = requestAnimationFrame(() => { spy = 0; markHeading(p); });
+  }, { passive: true });
+  paneSizes.observe(el);
   q("p-back").onclick = () => { commitAll(); app.dataset.view = "list"; };
   q("p-split-r").onclick = () => split(p, "row", false, p.kind && { kind: p.kind, id: p.itemId });
   q("p-split-d").onclick = () => split(p, "col", false, p.kind && { kind: p.kind, id: p.itemId });
@@ -888,6 +955,7 @@ function renderPane(p) {
   if (p.kind !== "graph" && p.graph) { p.graph.destroy(); p.graph = null; }
   if (p.kind === "graph") {
     p.ta.hidden = true; p.ph.hidden = true; p.fv.hidden = false; p.dl.hidden = true; p.edit.hidden = true; p.web.hidden = true;
+    setToc(p, null);
     const key = graphKey(p);
     if (p.shown !== key) { p.shown = key; showGraph(p); }
     return;
@@ -898,6 +966,7 @@ function renderPane(p) {
   p.dl.hidden = !file;
   if (!file || editingFile) p.web.hidden = true;
   p.edit.hidden = !(file && isEditable(file)); p.edit.textContent = editingFile ? "完成" : "编辑";
+  applyToc(p);
   p.ta.placeholder = file ? "" : "第一行是标题…";
   if (!note && !file) {
     p.meta.textContent = waiting ? "载入中…" : ""; p.shown = null;
@@ -968,9 +1037,41 @@ function closePane(p) {
   const leaf = findLeaf(layout, p), parent = parentOf(layout, leaf);
   const sibling = parent.a === leaf ? parent.b : parent.a;
   layout = replaceNode(layout, parent, sibling);
-  panes.delete(p.id); p.el.remove(); p.graph?.destroy();
+  panes.delete(p.id); p.el.remove(); p.graph?.destroy(); paneSizes.unobserve(p.el);
   if (focused === p) focused = firstPane(sibling);
   buildLayout(); saveLayout(); render();
+}
+
+// ---------- sidebar width ----------
+// Drag the handle between the sidebar and the panes; double-click resets it, arrow keys nudge it.
+const SIDE_MIN = 220, SIDE_DEFAULT = 320;
+const sideMax = () => Math.max(SIDE_MIN, Math.min(560, (app.clientWidth || innerWidth) - 380));   // the app is hidden until sign-in
+function setSide(px, save) {
+  const w = Math.round(Math.min(sideMax(), Math.max(SIDE_MIN, px)));
+  app.style.setProperty("--side", w + "px");
+  if (save) try { localStorage.setItem("suiji:side", String(w)); } catch {}
+}
+try { const w = +localStorage.getItem("suiji:side"); if (w) setSide(w); } catch {}
+addEventListener("resize", () => { const w = parseFloat(app.style.getPropertyValue("--side")); if (w > sideMax()) setSide(w); });
+{
+  const h = $("sideHandle");
+  h.onpointerdown = (e) => {
+    e.preventDefault();
+    const left = app.getBoundingClientRect().left;
+    document.body.classList.add("resizing", "resizing-row");
+    const move = (ev) => setSide(ev.clientX - left - 6);
+    const up = () => {
+      document.body.classList.remove("resizing", "resizing-row");
+      removeEventListener("pointermove", move); removeEventListener("pointerup", up);
+      setSide(parseFloat(app.style.getPropertyValue("--side")) || SIDE_DEFAULT, true);
+    };
+    addEventListener("pointermove", move); addEventListener("pointerup", up);
+  };
+  h.ondblclick = () => setSide(SIDE_DEFAULT, true);
+  h.onkeydown = (e) => {
+    const d = e.key === "ArrowLeft" ? -16 : e.key === "ArrowRight" ? 16 : 0;
+    if (d) { e.preventDefault(); setSide((parseFloat(app.style.getPropertyValue("--side")) || SIDE_DEFAULT) + d, true); }
+  };
 }
 
 function buildLayout() {

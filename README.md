@@ -10,6 +10,7 @@ Live: <https://suiji-notes.vercel.app>
 
 - **One tree.** Quick notes written in the app sit in a 「随手记」 folder at the top, and the synced folders sit below it.
 - **Edit anywhere.** Edit a file on the phone, and the Mac agent writes it back to disk within a few seconds.
+- **Outline.** A panel beside each Markdown file lists its headings; click one to jump, and the current section stays marked as you scroll.
 - **Split panes.** Split up, down, left or right, by dragging a file onto a pane's edge or with ⌘-click. The layout is remembered.
 - **Relationship graph.** Like Obsidian's graph, built from `[[wikilinks]]`, relative `.md` links and front-matter tags.
 - **Markdown.** Math (KaTeX) and Mermaid diagrams.
