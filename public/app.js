@@ -1,0 +1,932 @@
+// 随记: offline-first notes. Edits land in localStorage first, then sync to Supabase;
+// other devices get them through Supabase Realtime. Conflicts: the newer updated_at wins.
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm";
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
+import { mdMeta } from "./mdmeta.js";
+import { mountGraph } from "./graph.js";
+
+const $ = (id) => document.getElementById(id);
+const app = $("app"), list = $("list"), search = $("search");
+
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+  $("setup").hidden = false;
+  throw new Error("Supabase is not configured");
+}
+
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { persistSession: true, autoRefreshToken: true },
+});
+
+// ---------- local store ----------
+let uid = null;
+let store = { notes: {} };   // id -> {id, body, created_at, updated_at, deleted, dirty}
+const storeKey = () => "suiji:" + uid;
+function load() {
+  try { store = JSON.parse(localStorage.getItem(storeKey())) || { notes: {} }; }
+  catch { store = { notes: {} }; }
+}
+function persist() {
+  try { localStorage.setItem(storeKey(), JSON.stringify(store)); }
+  catch { showNote("本机存储已满，最新改动可能只在内存里，请保持联网让它同步。", "err"); }
+}
+const visible = () => Object.values(store.notes).filter((n) => !n.deleted)
+  .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+
+// Remote row wins only if it is newer than what this device has.
+function merge(row) {
+  const local = store.notes[row.id];
+  if (local && local.updated_at >= row.updated_at) return false;
+  store.notes[row.id] = { id: row.id, body: row.body, created_at: row.created_at, updated_at: row.updated_at, deleted: row.deleted, dirty: false };
+  return true;
+}
+
+// ---------- sync ----------
+let syncing = false, again = false, channel = null;
+function setSync(state, text) { $("sync").dataset.s = state; $("syncText").textContent = text; }
+function showNote(text, kind) { const n = $("note"); n.hidden = !text; n.textContent = text || ""; n.dataset.kind = kind || ""; }
+
+async function sync() {
+  if (!uid) return;
+  if (!navigator.onLine) { setSync("err", "离线 · 已存在本机"); return; }
+  if (syncing) { again = true; return; }
+  syncing = true; setSync("saving", "同步中…");
+  try {
+    const dirty = Object.values(store.notes).filter((n) => n.dirty);
+    if (dirty.length) {
+      const rows = dirty.map(({ id, body, created_at, updated_at, deleted }) => ({ id, user_id: uid, body, created_at, updated_at, deleted }));
+      const { error } = await sb.from("notes").upsert(rows);
+      if (error) throw error;
+      for (const d of dirty) {
+        const cur = store.notes[d.id];
+        if (cur && cur.updated_at === d.updated_at) cur.dirty = false;
+      }
+    }
+    const { data, error } = await sb.from("notes").select("id,body,created_at,updated_at,deleted").limit(5000);
+    if (error) throw error;
+    let changed = false;
+    for (const row of data) changed = merge(row) || changed;
+    persist();
+    if (changed) render();
+    else renderList();
+    setSync("ok", "已同步");
+    showNote("");
+  } catch (e) {
+    console.error(e);
+    setSync("err", "同步失败");
+    showNote("没能同步到云端，改动已保存在本机，联网后会自动重试。", "err");
+  } finally {
+    syncing = false;
+    if (again) { again = false; sync(); }
+  }
+}
+
+let syncTimer = null;
+function scheduleSync(ms = 800) { clearTimeout(syncTimer); syncTimer = setTimeout(sync, ms); }
+
+function subscribe() {
+  channel = sb.channel("sync-" + uid)
+    .on("postgres_changes", { event: "*", schema: "public", table: "notes", filter: "user_id=eq." + uid }, (p) => {
+      if (p.new && p.new.id && merge(p.new)) { persist(); render(); }
+    })
+    .on("postgres_changes", { event: "*", schema: "public", table: "files", filter: "user_id=eq." + uid }, () => loadFiles())
+    .subscribe();
+}
+
+// ---------- files ----------
+// File bytes live in the private "files" bucket at <uid>/<id>.<ext>; the files table keeps the real name.
+const MAX_FILE = 50 * 1024 * 1024;
+let files = [], filesLoaded = false;
+const isImage = (f) => f.mime.startsWith("image/");
+const extOf = (name) => { const m = /\.([a-z0-9]{1,6})$/i.exec(name); return m ? m[1].toLowerCase() : ""; };
+function fmtSize(n) {
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(0) + " KB";
+  return (n / 1024 / 1024).toFixed(1) + " MB";
+}
+
+async function loadFiles() {
+  if (!uid || !navigator.onLine) return;
+  const { data, error } = await sb.from("files").select("id,name,folder,path,size,mime,created_at,updated_at,links,tags").order("updated_at", { ascending: false }).limit(5000);
+  if (error) { console.error(error); return; }
+  files = data; filesLoaded = true;
+  render();
+}
+
+// Folder name and path inside it. Files picked from a folder carry webkitRelativePath "Folder/sub/a.txt".
+function placeOf(file) {
+  const rel = file.webkitRelativePath || "";
+  const i = rel.indexOf("/");
+  return i > 0 ? { folder: rel.slice(0, i), name: rel.slice(i + 1) } : { folder: "", name: file.name || "未命名" };
+}
+const baseName = (n) => n.split("/").pop();
+
+let uploading = 0;
+async function uploadFiles(input) {
+  if (!uid) return;
+  const all = [...input].filter((f) => !baseName(f.webkitRelativePath || f.name).startsWith("."));
+  const tooBig = all.filter((f) => f.size > MAX_FILE);
+  if (tooBig.length) showNote(`${tooBig.map((f) => f.name).join("、")} 超过 50 MB，没有上传。`, "err");
+  const ok = all.filter((f) => f.size <= MAX_FILE);
+  uploading += ok.length;
+  for (const file of ok) {
+    setSync("saving", `上传中 · 剩 ${uploading} 个`);
+    const id = crypto.randomUUID(), ext = extOf(file.name);
+    const path = `${uid}/${id}${ext ? "." + ext : ""}`;
+    const mime = file.type || "application/octet-stream";
+    const { folder, name } = placeOf(file);
+    try {
+      const up = await sb.storage.from("files").upload(path, file, { contentType: mime });
+      if (up.error) throw up.error;
+      const ins = await sb.from("files").insert({ id, user_id: uid, name, folder, path, size: file.size, mime });
+      if (ins.error) { await sb.storage.from("files").remove([path]); throw ins.error; }
+    } catch (e) {
+      console.error(e);
+      showNote(`「${file.name}」上传失败：${e.message || "网络问题"}。`, "err");
+    } finally {
+      uploading--;
+    }
+  }
+  setSync("ok", "已同步");
+  await loadFiles();
+}
+
+
+// ---------- markdown ----------
+// Renders blog-style Markdown: Hexo front matter, $…$ / $$…$$ math (KaTeX), and images
+// referenced by relative path, which are looked up among the synced files.
+const isMarkdown = (f) => ["md", "markdown"].includes(extOf(f.name)) || f.mime === "text/markdown";
+const CDN = "https://cdn.jsdelivr.net/npm/";
+let mdLibs = null, mermaidLib = null, mermaidSeq = 0;
+function loadMermaid() {
+  mermaidLib ||= import(CDN + "mermaid@10.9.1/dist/mermaid.esm.min.mjs").then(({ default: m }) => {
+    const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+    m.initialize({ startOnLoad: false, securityLevel: "strict", theme: dark ? "dark" : "neutral", fontFamily: "inherit" });
+    return m;
+  }).catch((e) => { mermaidLib = null; throw e; });
+  return mermaidLib;
+}
+// ```mermaid blocks become diagrams; a block with a syntax error stays as code with a note.
+async function renderMermaid(frag) {
+  const blocks = [...frag.querySelectorAll("pre > code.language-mermaid")];
+  if (!blocks.length) return;
+  let mermaid;
+  try { mermaid = await loadMermaid(); } catch (e) { console.error(e); return; }
+  for (const code of blocks) {
+    const id = "mmd" + ++mermaidSeq;
+    try {
+      const { svg } = await mermaid.render(id, code.textContent);
+      const box = document.createElement("div");
+      box.className = "mermaid-box";
+      box.innerHTML = svg;
+      // Keep the diagram at its natural size; wide ones scroll sideways instead of shrinking to unreadable.
+      const el = box.querySelector("svg");
+      if (el && el.style.maxWidth) { el.style.width = el.style.maxWidth; el.style.maxWidth = "none"; }
+      code.parentElement.replaceWith(box);
+    } catch (e) {
+      document.getElementById("d" + id)?.remove();
+      code.parentElement.before(Object.assign(document.createElement("p"), { className: "md-missing", textContent: "这段 Mermaid 图表有语法错误，下面显示原文：" }));
+    }
+  }
+}
+function loadScript(src) {
+  return new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = rej; document.head.append(s); });
+}
+function loadMarkdownLibs() {
+  return mdLibs ||= (async () => {
+    const css = Object.assign(document.createElement("link"), { rel: "stylesheet", href: CDN + "katex@0.16.11/dist/katex.min.css" });
+    document.head.append(css);
+    await Promise.all([
+      loadScript(CDN + "marked@12.0.2/marked.min.js"),
+      loadScript(CDN + "dompurify@3.1.6/dist/purify.min.js"),
+      loadScript(CDN + "katex@0.16.11/dist/katex.min.js"),
+    ]);
+  })().catch((e) => { mdLibs = null; throw e; });
+}
+
+function parseFrontMatter(src) {
+  const m = /^﻿?---\r?\n([\s\S]*?)\r?\n---[ \t]*(\r?\n|$)/.exec(src);
+  if (!m) return { body: src, meta: {} };
+  const meta = {};
+  let listKey = null;
+  for (const line of m[1].split(/\r?\n/)) {
+    const item = /^\s+-\s+(.*)$/.exec(line);
+    if (item && listKey) { meta[listKey].push(item[1].replace(/^["']|["']$/g, "")); continue; }
+    const kv = /^([A-Za-z_]+):\s*(.*)$/.exec(line);
+    if (!kv) continue;
+    const [, k, v] = kv;
+    listKey = null;
+    if (!v) { meta[k] = []; listKey = k; }
+    else if (/^\[.*\]$/.test(v)) meta[k] = v.slice(1, -1).split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+    else meta[k] = v.replace(/^["']|["']$/g, "");
+  }
+  return { body: src.slice(m[0].length), meta };
+}
+
+function resolveRel(dir, href) {
+  const out = [...dir];
+  for (const seg of decodeURIComponent(href.split(/[?#]/)[0]).split("/")) {
+    if (!seg || seg === ".") continue;
+    if (seg === "..") out.pop(); else out.push(seg);
+  }
+  return out.join("/");
+}
+
+async function renderMarkdown(src, f) {
+  await loadMarkdownLibs();
+  const { body, meta: fm } = parseFrontMatter(src);
+  let text = body
+    .replace(/\{%\s*asset_img\s+(\S+)\s*(.*?)%\}/g, (_, file, alt) => `![${alt.trim()}](${file})`)
+    .replace(/^\s*\{%[^%]*%\}\s*$/gm, "");
+
+  // Pull math out before Markdown sees it (so _ and * inside formulas stay intact), skipping code.
+  const math = [];
+  const keep = (tex, display) => {
+    math.push(window.katex.renderToString(tex.trim(), { displayMode: display, throwOnError: false, output: "html" }));
+    return display ? `\n\nKATEXBLOCK${math.length - 1}END\n\n` : `KATEXINLINE${math.length - 1}END`;
+  };
+  text = text.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]+`)/g).map((part, i) => i % 2 ? part : part
+    .replace(/\$\$([\s\S]+?)\$\$/g, (_, t) => keep(t, true))
+    .replace(/\\\[([\s\S]+?)\\\]/g, (_, t) => keep(t, true))
+    .replace(/\\\(([\s\S]+?)\\\)/g, (_, t) => keep(t, false))
+    .replace(/(?<![\\$\w])\$(?!\s)([^\n$]+?)(?<![\s\\])\$(?!\d)/g, (_, t) => keep(t, false))
+  ).join("");
+
+  let html = window.DOMPurify.sanitize(window.marked.parse(text, { gfm: true, breaks: false }));
+  html = html
+    .replace(/<p>KATEXBLOCK(\d+)END<\/p>/g, (_, i) => `<div class="math-block">${math[i]}</div>`)
+    .replace(/KATEX(?:BLOCK|INLINE)(\d+)END/g, (_, i) => math[i]);
+
+  const art = document.createElement("article");
+  art.className = "md-body";
+  if (fm.title || (fm.tags && fm.tags.length)) {
+    const head = document.createElement("header");
+    head.className = "md-head";
+    if (fm.title) head.append(Object.assign(document.createElement("h1"), { textContent: fm.title }));
+    const tags = [].concat(fm.tags || []);
+    if (tags.length) {
+      const t = document.createElement("div"); t.className = "md-tags";
+      for (const tag of tags) t.append(Object.assign(document.createElement("span"), { textContent: tag }));
+      head.append(t);
+    }
+    art.append(head);
+  }
+  // Parse inside a <template> so relative images aren't fetched from this site before we resolve them.
+  const tpl = document.createElement("template");
+  tpl.innerHTML = html;
+  const frag = tpl.content;
+  await renderMermaid(frag);
+
+  // Relative images and links point at sibling files in the synced folder.
+  const dir = fullPath(f).slice(0, -1);
+  const byPath = new Map(files.map((x) => [fullPath(x).join("/"), x]));
+  const isRel = (u) => u && !/^([a-z]+:|\/\/|#|data:)/i.test(u);
+  const imgs = [...frag.querySelectorAll("img")].filter((img) => isRel(img.getAttribute("src")));
+  const targets = imgs.map((img) => byPath.get(resolveRel(dir, img.getAttribute("src"))));
+  const paths = [...new Set(targets.filter(Boolean).map((t) => t.path))];
+  const signed = new Map();
+  if (paths.length) {
+    const { data } = await sb.storage.from("files").createSignedUrls(paths, 3600);
+    for (const u of data || []) if (u.signedUrl) signed.set(u.path, u.signedUrl);
+  }
+  imgs.forEach((img, i) => {
+    const url = targets[i] && signed.get(targets[i].path);
+    if (url) img.src = url;
+    else img.replaceWith(Object.assign(document.createElement("span"), { className: "md-missing", textContent: `[图片：${img.alt || img.getAttribute("src")}]` }));
+  });
+  for (const img of frag.querySelectorAll("img")) img.loading = "lazy";
+  const content = document.createElement("div");
+  content.append(frag);
+  art.append(content);
+  for (const a of content.querySelectorAll("a[href]")) {
+    const href = a.getAttribute("href");
+    const target = isRel(href) && byPath.get(resolveRel(dir, href));
+    if (target) a.onclick = (e) => { e.preventDefault(); openFile(target.id); };
+    else if (!href.startsWith("#")) { a.target = "_blank"; a.rel = "noopener"; }
+  }
+  return art;
+}
+
+async function showFile(f, p) {
+  const token = ++p.token, preview = p.preview;
+  p.meta.textContent = `${baseName(f.name)} · ${fmtSize(f.size)} · ${fmt(f.updated_at || f.created_at)}`;
+  preview.replaceChildren(Object.assign(document.createElement("div"), { className: "big-ext", textContent: "…" }));
+  const [view, dl] = await Promise.all([
+    sb.storage.from("files").createSignedUrl(f.path, 3600),
+    sb.storage.from("files").createSignedUrl(f.path, 3600, { download: f.name }),
+  ]);
+  if (token !== p.token) return;
+  if (view.error) { preview.firstChild.textContent = "打不开"; showNote("拿不到文件链接，请检查网络。", "err"); return; }
+  const url = view.data.signedUrl;
+  p.dl.href = dl.data ? dl.data.signedUrl : url;
+  let el;
+  const md = isMarkdown(f);
+  preview.classList.toggle("doc", md);
+  if (md && f.size < 2 * 1024 * 1024) {
+    try { el = await renderMarkdown(await (await fetch(url)).text(), f); }
+    catch (e) { console.error(e); el = Object.assign(document.createElement("div"), { className: "big-ext", textContent: "读取失败，点「打开」查看" }); }
+    if (token !== p.token) return;
+  } else if (isImage(f)) el = Object.assign(document.createElement("img"), { src: url, alt: f.name });
+  else if (f.mime.startsWith("video/") || f.mime.startsWith("audio/")) el = Object.assign(document.createElement(f.mime.startsWith("video/") ? "video" : "audio"), { src: url, controls: true, playsInline: true });
+  else if (f.mime === "application/pdf") el = Object.assign(document.createElement("iframe"), { src: url, title: f.name });
+  else if ((f.mime.startsWith("text/") || /json|xml|javascript|markdown/.test(f.mime) || ["md", "txt", "csv", "log"].includes(extOf(f.name))) && f.size < 300 * 1024) {
+    el = document.createElement("pre");
+    try { el.textContent = await (await fetch(url)).text(); } catch { el.textContent = "读取失败，点「打开」查看。"; }
+    if (token !== p.token) return;
+  } else el = Object.assign(document.createElement("div"), { className: "big-ext", textContent: extOf(f.name) || "文件" });
+  preview.replaceChildren(el);
+}
+
+window.addEventListener("online", () => sync());
+window.addEventListener("offline", () => setSync("err", "离线 · 已存在本机"));
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { commitAll(); sync(); } else sync();
+});
+
+// ---------- UI ----------
+// One list holds everything: notes written here live in the 随手记 folder at the top of the tree,
+// synced and uploaded files below it. Clicking an item opens it in the focused pane.
+const NOTES_KEY = "\u0000notes";
+const DND = "application/x-suiji-item";
+
+function titleOf(t) { const l = (t || "").split("\n").find((s) => s.trim()); return l ? l.trim() : "无标题"; }
+function fmt(iso) {
+  const d = new Date(iso), now = new Date(), p = (n) => String(n).padStart(2, "0");
+  if (d.toDateString() === now.toDateString()) return `今天 ${p(d.getHours())}:${p(d.getMinutes())}`;
+  if (d.getFullYear() === now.getFullYear()) return `${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+// ---------- folder tree ----------
+// Every file sits at fullPath = [folder, ...name segments]. Folders open and close in place,
+// like a file explorer sidebar; which ones are open is remembered per device.
+const fullPath = (f) => [f.folder, ...f.name.split("/")].filter(Boolean);
+const byName = (a, b) => a.localeCompare(b, "zh", { numeric: true });
+let expanded = new Set();
+try { expanded = new Set(JSON.parse(localStorage.getItem("suiji:open")) || []); } catch {}
+const saveExpanded = () => { try { localStorage.setItem("suiji:open", JSON.stringify([...expanded])); } catch {} };
+
+function buildTree() {
+  const root = { dirs: new Map(), files: [], count: 0 };
+  for (const f of files) {
+    const p = fullPath(f);
+    let node = root;
+    node.count++;
+    for (const seg of p.slice(0, -1)) {
+      if (!node.dirs.has(seg)) node.dirs.set(seg, { dirs: new Map(), files: [], count: 0 });
+      node = node.dirs.get(seg);
+      node.count++;
+    }
+    node.files.push(f);
+  }
+  return root;
+}
+
+// "COMP5318-Week01" inside folder COMP5318 reads as "Week01"; the full name stays in the tooltip.
+function shortName(name, parent) {
+  if (!parent || name.length <= parent.length + 1) return name;
+  return name.startsWith(parent) && /[-_ ·.]/.test(name[parent.length]) ? name.slice(parent.length + 1).replace(/^[-_ ]+/, "") : name;
+}
+
+// An item row: click opens it in the focused pane, ⌘/Ctrl-click opens it in a new pane on the right,
+// and it can be dragged onto any edge of a pane to split there.
+function itemRow(kind, id, label, depth, metaText, title) {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "tree-row tree-file";
+  b.style.setProperty("--depth", depth);
+  b.setAttribute("aria-current", String(!!focused && focused.kind === kind && focused.itemId === id));
+  b.classList.toggle("shown", [...panes.values()].some((p) => p.kind === kind && p.itemId === id));
+  b.title = title;
+  b.append(Object.assign(document.createElement("span"), { className: "tree-name", textContent: label }));
+  if (metaText) b.append(Object.assign(document.createElement("span"), { className: "tree-meta", textContent: metaText }));
+  b.dataset.kind = kind; b.dataset.id = id;
+  b.draggable = true;
+  b.ondragstart = (e) => { e.dataTransfer.setData(DND, JSON.stringify({ kind, id })); e.dataTransfer.effectAllowed = "copy"; };
+  b.onclick = (e) => {
+    if ((e.metaKey || e.ctrlKey) && !isPhone.matches) split(focused, "row", false, { kind, id });
+    else openIn(focused, kind, id);
+  };
+  return b;
+}
+function fileRow(f, depth, metaText) {
+  const name = baseName(f.name), parent = fullPath(f).slice(-2, -1)[0];
+  return itemRow("file", f.id, metaText ? name : shortName(name, parent), depth, metaText,
+    `${name}\n${fmtSize(f.size)} · ${fmt(f.updated_at || f.created_at)}`);
+}
+function noteRow(n, depth, metaText) {
+  return itemRow("note", n.id, titleOf(n.body), depth, n.dirty ? "未同步" : metaText, "修改于 " + fmt(n.updated_at));
+}
+
+// A folder row plus its drawer; children are built the first time it opens.
+function folderRow(box, key, name, count, depth, fillChildren) {
+  const open = expanded.has(key);
+  const head = document.createElement("button");
+  head.type = "button"; head.className = "tree-row tree-folder";
+  head.style.setProperty("--depth", depth);
+  head.setAttribute("aria-expanded", String(open));
+  head.append(
+    Object.assign(document.createElement("span"), { className: "chev", ariaHidden: "true" }),
+    Object.assign(document.createElement("span"), { className: "tree-name", textContent: name }),
+    Object.assign(document.createElement("span"), { className: "tree-count", textContent: count }),
+  );
+  const drawer = document.createElement("div");
+  drawer.className = "drawer" + (open ? " open" : "");
+  const inner = document.createElement("div");
+  inner.className = "drawer-inner";
+  inner.style.setProperty("--depth", depth);
+  drawer.append(inner);
+  let filled = false;
+  const fill = () => { if (!filled) { fillChildren(inner); filled = true; } };
+  if (open) fill();
+  head.onclick = () => {
+    const now = !expanded.has(key);
+    if (now) {
+      expanded.add(key); fill();
+      // The cascade-in animation plays only when the user opens a folder, never on re-render.
+      drawer.classList.add("opening");
+      setTimeout(() => drawer.classList.remove("opening"), 600);
+    } else expanded.delete(key);
+    saveExpanded();
+    head.setAttribute("aria-expanded", String(now));
+    drawer.classList.toggle("open", now);
+  };
+  box.append(head, drawer);
+}
+
+function renderNode(node, path, depth, box) {
+  for (const [name, child] of [...node.dirs].sort((a, b) => byName(a[0], b[0]))) {
+    folderRow(box, [...path, name].join("/"), name, child.count, depth, (inner) => renderNode(child, [...path, name], depth + 1, inner));
+  }
+  for (const f of node.files.sort((a, b) => byName(baseName(a.name), baseName(b.name)))) box.append(fileRow(f, depth));
+}
+
+function renderList() {
+  const q = search.value.trim().toLowerCase();
+  const keepScroll = list.scrollTop;
+  list.replaceChildren();
+  const notes = visible();
+  const hitNotes = q ? notes.filter((n) => n.body.toLowerCase().includes(q)) : notes;
+  const hitFiles = q ? files.filter((f) => fullPath(f).join("/").toLowerCase().includes(q)) : files;
+  if (!hitNotes.length && !hitFiles.length) {
+    const li = document.createElement("li");
+    li.className = "empty";
+    li.innerHTML = q ? "<strong>没有找到</strong>换个关键词试试。"
+                     : "<strong>这里还是空的</strong>点「新建」写一条笔记，或者点「上传」放文件进来。Mac 上运行同步程序后，选中的文件夹会自动出现在这里。";
+    list.append(li);
+    return;
+  }
+  const li = document.createElement("li");
+  li.className = "tree";
+  if (q) {
+    for (const n of hitNotes) li.append(noteRow(n, 0, "随手记"));
+    for (const f of hitFiles.sort((a, b) => byName(baseName(a.name), baseName(b.name)))) li.append(fileRow(f, 0, fullPath(f).slice(0, -1).join("/")));
+  } else {
+    if (notes.length) folderRow(li, NOTES_KEY, "随手记", notes.length, 0, (inner) => { for (const n of notes) inner.append(noteRow(n, 1)); });
+    renderNode(buildTree(), [], 0, li);
+  }
+  list.append(li);
+  list.scrollTop = keepScroll;
+}
+
+// ---------- panes ----------
+// The editor area is a tree of splits. A leaf {pane} holds one pane; a split {dir, ratio, a, b} holds two
+// children side by side ("row") or stacked ("col"). Each pane shows one note or one file. On phones only
+// the focused pane is shown. The layout and what each pane shows are remembered per device.
+const ws = $("ws"), paneTpl = $("paneTpl");
+const isPhone = matchMedia("(max-width: 720px)");
+const panes = new Map();
+let layout = null, focused = null, paneSeq = 0;
+
+function makePane(item) {
+  const el = paneTpl.content.firstElementChild.cloneNode(true);
+  const q = (c) => el.querySelector("." + c);
+  const p = {
+    id: ++paneSeq, el, ta: q("p-ta"), ph: q("p-ph"), fv: q("p-fv"), preview: q("p-preview"), meta: q("p-meta"),
+    dl: q("p-dl"), hint: q("p-hint"), edit: q("p-edit"), fileEdit: false, fileBase: null,
+    kind: item?.kind || null, itemId: item?.id || null, shown: null, token: 0,
+    editing: false, editTimer: null,
+  };
+  if (p.kind === "note") p.ta.value = store.notes[p.itemId]?.body || "";
+  panes.set(p.id, p);
+  el.classList.add("fresh");
+  el.addEventListener("animationend", () => el.classList.remove("fresh"), { once: true });
+  el.addEventListener("pointerdown", () => focusPane(p), true);
+  el.addEventListener("focusin", () => focusPane(p));
+
+  p.ta.addEventListener("input", () => {
+    p.editing = true; setSync("saving", "待保存…");
+    clearTimeout(p.editTimer); p.editTimer = setTimeout(() => commit(p), p.kind === "file" ? 1200 : 600);
+  });
+  p.ta.addEventListener("blur", () => commit(p));
+  q("p-back").onclick = () => { commitAll(); app.dataset.view = "list"; };
+  q("p-split-r").onclick = () => split(p, "row", false, p.kind && { kind: p.kind, id: p.itemId });
+  q("p-split-d").onclick = () => split(p, "col", false, p.kind && { kind: p.kind, id: p.itemId });
+  q("p-close").onclick = () => closePane(p);
+  // Text files can be edited in place; saving replaces the cloud copy, and the Mac agent writes it back to disk.
+  p.edit.onclick = async () => {
+    if (p.fileEdit) { commit(p); p.fileEdit = false; p.shown = null; renderPane(p); return; }
+    const f = files.find((x) => x.id === p.itemId);
+    if (!f) return;
+    p.edit.disabled = true;
+    // A fresh signed URL plus a cache-buster, so editing never starts from a stale copy.
+    let text = null;
+    const s = await sb.storage.from("files").createSignedUrl(f.path, 60);
+    if (!s.error) try { const r = await fetch(s.data.signedUrl + "&t=" + Date.now(), { cache: "no-store" }); if (r.ok) text = await r.text(); } catch {}
+    p.edit.disabled = false;
+    if (text === null) { showNote("读取文件失败，请检查网络。", "err"); return; }
+    p.fileBase = text;
+    p.ta.value = p.fileBase; p.fileEdit = true; p.editing = false;
+    renderPane(p); p.ta.focus();
+  };
+
+
+  // Tree items dropped on an edge split this pane that way; dropped in the middle they replace it.
+  const zoneOf = (e) => {
+    const r = el.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+    const d = Math.min(x, 1 - x, y, 1 - y);
+    return d > 0.25 ? "center" : d === x ? "left" : d === 1 - x ? "right" : d === y ? "top" : "bottom";
+  };
+  el.addEventListener("dragover", (e) => {
+    if (!e.dataTransfer.types.includes(DND)) return;
+    e.preventDefault(); e.dataTransfer.dropEffect = "copy";
+    p.hint.dataset.zone = zoneOf(e); p.hint.hidden = false;
+  });
+  el.addEventListener("dragleave", (e) => { if (!el.contains(e.relatedTarget)) p.hint.hidden = true; });
+  el.addEventListener("drop", (e) => {
+    const raw = e.dataTransfer.getData(DND);
+    p.hint.hidden = true;
+    if (!raw) return;
+    e.preventDefault(); e.stopPropagation();
+    const item = JSON.parse(raw), z = zoneOf(e);
+    if (z === "center") openIn(p, item.kind, item.id);
+    else split(p, z === "left" || z === "right" ? "row" : "col", z === "left" || z === "top", item);
+  });
+  return p;
+}
+
+
+function commit(p) {
+  clearTimeout(p.editTimer);
+  if (!p.editing) return;
+  if (p.kind === "file") { saveFile(p); return; }
+  if (p.kind !== "note") return;
+  p.editing = false;
+  const n = store.notes[p.itemId];
+  if (!n || n.body === p.ta.value) return;
+  n.body = p.ta.value; n.updated_at = new Date().toISOString(); n.dirty = true;
+  persist(); render(); scheduleSync();
+}
+const commitAll = () => panes.forEach(commit);
+
+const TEXT_EXT = ["md", "markdown", "txt", "csv", "log", "json", "yml", "yaml", "toml", "tex", "py", "js", "ts", "html", "css", "sh"];
+const isEditable = (f) => f.size < 2 * 1024 * 1024 && (f.mime.startsWith("text/") || /json|xml/.test(f.mime) || TEXT_EXT.includes(extOf(f.name)));
+
+async function saveFile(p) {
+  p.editing = false;
+  const f = files.find((x) => x.id === p.itemId), text = p.ta.value;
+  if (!f || text === p.fileBase) { setSync("ok", "已同步"); return; }
+  setSync("saving", "保存中…");
+  const blob = new Blob([text], { type: f.mime || "text/plain" });
+  const now = new Date().toISOString();
+  const up = await sb.storage.from("files").upload(f.path, blob, { upsert: true, contentType: f.mime || "text/plain", cacheControl: "0" });
+  const meta = isMarkdown(f) ? mdMeta(text) : {};
+  const row = up.error ? up : await sb.from("files").update({ size: blob.size, updated_at: now, ...meta }).eq("id", f.id);
+  if (up.error || row.error) {
+    console.error(up.error || row.error);
+    p.editing = true;   // keep it unsaved so the next edit or blur retries
+    setSync("err", "保存失败");
+    showNote(`「${baseName(f.name)}」没保存上，请联网后再改一下或点「完成」重试。`, "err");
+    return;
+  }
+  p.fileBase = text; Object.assign(f, { size: blob.size, updated_at: now }, meta);
+  p.shown = f.id + "@" + now;   // the preview refreshes when editing ends, not now
+  setSync("ok", "已同步"); showNote("");
+  if (!p.fileEdit) renderPane(p);
+}
+
+// ---------- graph ----------
+// Nodes: Markdown files and notes (plus tags when switched on). Edges: [[links]] and relative .md links,
+// resolved the way Obsidian does: relative to the file, then from the vault root, then by unique file name.
+const stripMd = (n) => n.replace(/\.(md|markdown)$/i, "");
+function graphData(withTags) {
+  const nodes = [], edges = new Set(), idx = new Map();
+  const add = (key, node) => { if (!idx.has(key)) { idx.set(key, nodes.length); nodes.push(node); } return idx.get(key); };
+  const byPath = new Map(), byBase = new Map();
+  const md = files.filter(isMarkdown);
+  for (const f of md) {
+    const i = add("file:" + f.id, { label: stripMd(baseName(f.name)), kind: "file", ref: f.id });
+    byPath.set(stripMd(f.name).toLowerCase(), i);
+    byPath.set(stripMd(fullPath(f).join("/")).toLowerCase(), i);
+    const b = stripMd(baseName(f.name)).toLowerCase();
+    byBase.set(b, byBase.has(b) ? -1 : i);
+  }
+  const resolve = (dir, target) => {
+    const t = stripMd(target.trim()).replace(/^\/+/, "");
+    let rel = t;
+    try { rel = resolveRel(dir, t); } catch {}
+    const hit = byPath.get(rel.toLowerCase()) ?? byPath.get(t.toLowerCase()) ?? byBase.get(baseName(t).toLowerCase());
+    return hit >= 0 ? hit : undefined;
+  };
+  const link = (a, b) => { if (b !== undefined && a !== b) edges.add(a < b ? a + "," + b : b + "," + a); };
+  for (const f of md) {
+    const i = idx.get("file:" + f.id), dir = f.name.split("/").slice(0, -1);
+    for (const l of f.links || []) link(i, resolve(dir, l));
+    if (withTags) for (const t of f.tags || []) link(i, add("tag:" + t, { label: "#" + t, kind: "tag", ref: t }));
+  }
+  for (const n of visible()) {
+    const i = add("note:" + n.id, { label: titleOf(n.body), kind: "note", ref: n.id });
+    const meta = mdMeta(n.body);
+    for (const l of meta.links) link(i, resolve([], l));
+    if (withTags) for (const t of meta.tags) link(i, add("tag:" + t, { label: "#" + t, kind: "tag", ref: t }));
+  }
+  return { nodes, edges: [...edges].map((e) => e.split(",").map(Number)) };
+}
+
+function graphKey(p) {
+  let latest = "";
+  for (const f of files) if ((f.updated_at || "") > latest) latest = f.updated_at;
+  return ["graph", files.length, latest, visible().length, p.graphTags ? 1 : 0].join("@");
+}
+
+function showGraph(p) {
+  p.graph?.destroy();
+  const data = graphData(p.graphTags);
+  p.meta.textContent = `关系图谱 · ${data.nodes.length} 个节点 · ${data.edges.length} 条链接`;
+  const wrap = document.createElement("div");
+  wrap.className = "graph";
+  const tools = document.createElement("div");
+  tools.className = "graph-tools";
+  const tagBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: p.graphTags ? "隐藏标签" : "显示标签" });
+  tagBtn.onclick = () => { p.graphTags = !p.graphTags; p.shown = null; saveLayout(); renderPane(p); };
+  const fitBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: "居中" });
+  fitBtn.onclick = () => p.graph?.fit();
+  tools.append(tagBtn, fitBtn);
+  wrap.append(tools);
+  if (!data.nodes.length) wrap.append(Object.assign(document.createElement("p"), { className: "graph-empty", textContent: "还没有 Markdown 文件或笔记。" }));
+  p.preview.classList.remove("doc");
+  p.preview.replaceChildren(wrap);
+  p.graph = mountGraph(wrap, data, {
+    isActive: (n) => n.kind !== "tag" && [...panes.values()].some((x) => x !== p && x.kind === n.kind && x.itemId === n.ref),
+    onOpen: (n) => {
+      if (n.kind === "tag") { search.value = n.ref; if (isPhone.matches) app.dataset.view = "list"; renderList(); return; }
+      // Open beside the graph: in another pane if there is one, otherwise in a new pane on the right.
+      const other = [...panes.values()].find((x) => x !== p && x.kind !== "graph");
+      if (isPhone.matches) openIn(p, n.kind, n.ref);
+      else if (other) openIn(other, n.kind, n.ref);
+      else split(p, "row", false, { kind: n.kind, id: n.ref });
+    },
+  });
+}
+
+function renderPane(p) {
+  if (p.kind === "note" && !(store.notes[p.itemId] && !store.notes[p.itemId].deleted)) p.kind = p.itemId = null;
+  if (p.kind === "file" && filesLoaded && !files.some((f) => f.id === p.itemId)) p.kind = p.itemId = null;
+  const note = p.kind === "note" && store.notes[p.itemId];
+  const file = p.kind === "file" && files.find((f) => f.id === p.itemId);
+  const waiting = p.kind === "file" && !file;   // files list not loaded yet
+  if (p.kind !== "graph" && p.graph) { p.graph.destroy(); p.graph = null; }
+  if (p.kind === "graph") {
+    p.ta.hidden = true; p.ph.hidden = true; p.fv.hidden = false; p.dl.hidden = true; p.edit.hidden = true;
+    const key = graphKey(p);
+    if (p.shown !== key) { p.shown = key; showGraph(p); }
+    return;
+  }
+  const editingFile = !!file && p.fileEdit;
+  if (!file) p.fileEdit = false;
+  p.ta.hidden = !(note || editingFile); p.fv.hidden = !file || editingFile; p.ph.hidden = !!(note || file || waiting);
+  p.dl.hidden = !file;
+  p.edit.hidden = !(file && isEditable(file)); p.edit.textContent = editingFile ? "完成" : "编辑";
+  p.ta.placeholder = file ? "" : "第一行是标题…";
+  if (!note && !file) {
+    p.meta.textContent = waiting ? "载入中…" : ""; p.shown = null;
+    if (p === focused && !p.kind) app.dataset.view = "list";
+    return;
+  }
+  if (note) {
+    p.shown = null;
+    p.meta.textContent = "修改于 " + fmt(note.updated_at);
+    // Never overwrite what the user is in the middle of typing.
+    if (!p.editing && p.ta.value !== note.body) p.ta.value = note.body;
+    return;
+  }
+  if (editingFile) { p.meta.textContent = `${baseName(file.name)} · 编辑中，自动保存`; return; }
+  const key = file.id + "@" + (file.updated_at || file.created_at);
+  if (p.shown !== key) { p.shown = key; showFile(file, p); }
+}
+function render() { renderList(); panes.forEach(renderPane); }
+// Moves the tree highlight without rebuilding the tree (rebuilding makes it flicker).
+function markCurrent() {
+  for (const b of list.querySelectorAll(".tree-file[data-id]")) {
+    const { kind, id } = b.dataset;
+    b.setAttribute("aria-current", String(!!focused && focused.kind === kind && focused.itemId === id));
+    b.classList.toggle("shown", [...panes.values()].some((p) => p.kind === kind && p.itemId === id));
+  }
+  for (const p of panes.values()) p.graph?.redraw();
+}
+
+function openIn(p, kind, id) {
+  focusPane(p);
+  app.dataset.view = "edit";
+  if (p.kind === kind && p.itemId === id) { if (kind === "note" && !isPhone.matches) p.ta.focus(); return; }
+  commit(p);
+  p.kind = kind; p.itemId = id; p.shown = null; p.fileEdit = false; p.editing = false;
+  if (kind === "note") p.ta.value = store.notes[id]?.body || "";
+  saveLayout(); markCurrent(); renderPane(p);
+  if (kind === "note" && !isPhone.matches) p.ta.focus();
+}
+function openFile(id) { openIn(focused, "file", id); }
+
+function focusPane(p) {
+  if (focused === p) return;
+  focused = p;
+  for (const x of panes.values()) x.el.classList.toggle("focused", x === p);
+  if (isPhone.matches) buildLayout();
+  saveLayout(); markCurrent();
+}
+
+const firstPane = (n) => n.pane || firstPane(n.a);
+const replaceNode = (tree, target, repl) => tree === target ? repl
+  : tree.pane ? tree : Object.assign(tree, { a: replaceNode(tree.a, target, repl), b: replaceNode(tree.b, target, repl) });
+const findLeaf = (tree, p) => tree.pane ? (tree.pane === p ? tree : null) : findLeaf(tree.a, p) || findLeaf(tree.b, p);
+const parentOf = (tree, node) => tree.pane ? null : tree.a === node || tree.b === node ? tree : parentOf(tree.a, node) || parentOf(tree.b, node);
+
+function split(p, dir, before, item) {
+  commit(p);
+  const np = makePane(item || null);
+  const leaf = findLeaf(layout, p), fresh = { pane: np }, self = { pane: p };
+  layout = replaceNode(layout, leaf, { dir, ratio: 0.5, a: before ? fresh : self, b: before ? self : fresh });
+  focused = np;
+  buildLayout(); saveLayout(); render();
+  if (np.kind === "note") np.ta.focus();
+}
+
+function closePane(p) {
+  if (panes.size < 2) return;
+  commit(p);
+  const leaf = findLeaf(layout, p), parent = parentOf(layout, leaf);
+  const sibling = parent.a === leaf ? parent.b : parent.a;
+  layout = replaceNode(layout, parent, sibling);
+  panes.delete(p.id); p.el.remove(); p.graph?.destroy();
+  if (focused === p) focused = firstPane(sibling);
+  buildLayout(); saveLayout(); render();
+}
+
+function buildLayout() {
+  const mk = (node) => {
+    if (node.pane) { node.pane.el.classList.toggle("focused", node.pane === focused); return node.pane.el; }
+    const box = document.createElement("div");
+    box.className = "split " + node.dir;
+    const a = mk(node.a), b = mk(node.b);
+    const size = () => { a.style.flex = `${node.ratio} 1 0`; b.style.flex = `${1 - node.ratio} 1 0`; };
+    size();
+    const bar = document.createElement("div");
+    bar.className = "divider"; bar.setAttribute("role", "separator");
+    bar.setAttribute("aria-orientation", node.dir === "row" ? "vertical" : "horizontal");
+    bar.onpointerdown = (e) => {
+      e.preventDefault();
+      const r = box.getBoundingClientRect(), row = node.dir === "row";
+      document.body.classList.add("resizing", row ? "resizing-row" : "resizing-col");
+      const move = (ev) => {
+        const t = row ? (ev.clientX - r.left) / r.width : (ev.clientY - r.top) / r.height;
+        node.ratio = Math.min(0.85, Math.max(0.15, t)); size();
+      };
+      const up = () => {
+        document.body.classList.remove("resizing", "resizing-row", "resizing-col");
+        removeEventListener("pointermove", move); removeEventListener("pointerup", up); saveLayout();
+      };
+      addEventListener("pointermove", move); addEventListener("pointerup", up);
+    };
+    bar.ondblclick = () => { node.ratio = 0.5; size(); saveLayout(); };
+    box.append(a, bar, b);
+    return box;
+  };
+  const root = isPhone.matches ? focused.el : mk(layout);
+  root.style.flex = "1 1 0";
+  ws.replaceChildren(root);
+  ws.dataset.multi = String(panes.size > 1);
+}
+isPhone.addEventListener("change", () => layout && buildLayout());
+
+const layoutKey = () => "suiji:layout:" + uid;
+function saveLayout() {
+  const ser = (n) => n.pane ? { kind: n.pane.kind, id: n.pane.itemId, f: n.pane === focused ? 1 : 0, t: n.pane.graphTags ? 1 : 0 }
+                            : { dir: n.dir, ratio: n.ratio, a: ser(n.a), b: ser(n.b) };
+  try { localStorage.setItem(layoutKey(), JSON.stringify(ser(layout))); } catch {}
+}
+function restoreLayout() {
+  for (const p of panes.values()) { p.el.remove(); p.graph?.destroy(); }
+  panes.clear(); focused = null;
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(layoutKey())); } catch {}
+  const de = (s) => {
+    if (!s || !s.dir) {
+      const p = makePane(s && s.kind ? { kind: s.kind, id: s.id } : null);
+      if (s && s.f) focused = p;
+      p.graphTags = !!(s && s.t);
+      return { pane: p };
+    }
+    return { dir: s.dir === "col" ? "col" : "row", ratio: Math.min(0.85, Math.max(0.15, +s.ratio || 0.5)), a: de(s.a), b: de(s.b) };
+  };
+  layout = de(saved);
+  focused ||= firstPane(layout);
+  buildLayout();
+}
+
+$("newBtn").onclick = () => {
+  const now = new Date().toISOString();
+  const id = crypto.randomUUID();
+  store.notes[id] = { id, body: "", created_at: now, updated_at: now, deleted: false, dirty: true };
+  persist(); search.value = "";
+  expanded.add(NOTES_KEY); saveExpanded();
+  openIn(focused, "note", id); focused.ta.focus();
+  scheduleSync();
+};
+
+$("graphBtn").onclick = () => {
+  // One graph is enough: focus it if it is already open.
+  const g = [...panes.values()].find((x) => x.kind === "graph");
+  if (g) { focusPane(g); app.dataset.view = "edit"; return; }
+  openIn(focused, "graph", "all");
+};
+$("upBtn").onclick = () => $("fileInput").click();
+$("fileInput").addEventListener("change", (e) => { const fl = e.target.files; if (fl.length) uploadFiles(fl); e.target.value = ""; });
+$("folderBtn").onclick = () => $("folderInput").click();
+$("folderInput").addEventListener("change", (e) => { const fl = e.target.files; if (fl.length) uploadFiles(fl); e.target.value = ""; });
+
+// Drag files from Finder anywhere onto the window, or paste them.
+let dragDepth = 0;
+const hasFiles = (e) => uid && [...(e.dataTransfer?.types || [])].includes("Files");
+window.addEventListener("dragenter", (e) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth++; $("dropzone").hidden = false; });
+window.addEventListener("dragover", (e) => { if (hasFiles(e)) e.preventDefault(); });
+window.addEventListener("dragleave", (e) => { if (!hasFiles(e)) return; if (--dragDepth <= 0) { dragDepth = 0; $("dropzone").hidden = true; } });
+window.addEventListener("drop", (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault(); dragDepth = 0; $("dropzone").hidden = true;
+  if (e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files);
+});
+window.addEventListener("paste", (e) => {
+  if (!uid || document.activeElement?.tagName === "TEXTAREA") return;
+  const fl = e.clipboardData?.files;
+  if (fl && fl.length) { e.preventDefault(); uploadFiles(fl); }
+});
+search.addEventListener("input", renderList);
+$("outBtn").onclick = async () => {
+  commitAll();
+  if (Object.values(store.notes).some((n) => n.dirty)) await sync();
+  await sb.auth.signOut();
+};
+
+// ---------- auth ----------
+let signUp = false;
+const authMsg = (t, kind) => { const m = $("authMsg"); m.hidden = !t; m.textContent = t || ""; m.dataset.kind = kind || ""; };
+$("modeBtn").onclick = () => {
+  signUp = !signUp;
+  $("authBtn").textContent = signUp ? "注册" : "登录";
+  $("modeBtn").textContent = signUp ? "已有账号？登录" : "还没有账号？注册";
+  $("password").autocomplete = signUp ? "new-password" : "current-password";
+  authMsg("");
+};
+$("authForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const email = $("email").value.trim(), password = $("password").value;
+  if (!email || password.length < 6) { authMsg("请填写邮箱，密码至少 6 位。", "err"); return; }
+  $("authBtn").disabled = true; authMsg(signUp ? "正在注册…" : "正在登录…");
+  const { data, error } = signUp
+    ? await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin } })
+    : await sb.auth.signInWithPassword({ email, password });
+  $("authBtn").disabled = false;
+  if (error) {
+    const msg = /invalid login/i.test(error.message) ? "邮箱或密码不对。"
+      : /not confirmed/i.test(error.message) ? "这个邮箱还没确认，请先点邮件里的确认链接。"
+      : /already registered/i.test(error.message) ? "这个邮箱已经注册过了，直接登录吧。"
+      : "出错了：" + error.message;
+    authMsg(msg, "err"); return;
+  }
+  if (signUp && !data.session) authMsg("确认邮件已发到 " + email + "，点里面的链接后回来登录。");
+});
+
+function enter(session) {
+  if (session && session.user.id === uid) return;
+  if (channel) { sb.removeChannel(channel); channel = null; }
+  uid = session ? session.user.id : null;
+  $("auth").hidden = !!session; app.hidden = !session;
+  if (!session) { store = { notes: {} }; files = []; filesLoaded = false; return; }
+  $("who").textContent = session.user.email;
+  load(); filesLoaded = false; restoreLayout(); render(); sync(); loadFiles(); subscribe();
+}
+sb.auth.onAuthStateChange((_ev, session) => enter(session));
+const { data: { session } } = await sb.auth.getSession();
+enter(session);
+
+// Glass highlight follows the pointer (desktop only; CSS keeps it off until hover).
+if (matchMedia("(hover: hover)").matches) {
+  window.addEventListener("pointermove", (e) => {
+    const g = e.target.closest?.(".glass");
+    if (!g) return;
+    const r = g.getBoundingClientRect();
+    g.style.setProperty("--mx", e.clientX - r.left + "px");
+    g.style.setProperty("--my", e.clientY - r.top + "px");
+  }, { passive: true });
+}

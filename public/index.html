@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>随记</title>
+<meta name="theme-color" content="#f4f4f4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="随记">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app" id="app" data-view="list" hidden>
+  <section class="pane listpane glass">
+    <header class="head">
+      <h1 class="brand">随记</h1>
+      <span class="sync" id="sync" data-s="wait"><span class="dot"></span><span id="syncText">连接中…</span></span>
+      <button class="ghost small graph-btn" id="graphBtn" type="button">图谱</button>
+    </header>
+    <div class="note" id="note" hidden></div>
+    <div class="tools">
+      <input class="search" id="search" type="search" placeholder="搜索" aria-label="搜索">
+      <button class="btn-primary" id="newBtn" type="button">新建</button>
+      <button class="ghost bordered" id="upBtn" type="button">上传</button>
+      <button class="ghost bordered" id="folderBtn" type="button" hidden>上传文件夹</button>
+      <input id="fileInput" type="file" multiple hidden>
+      <input id="folderInput" type="file" webkitdirectory multiple hidden>
+    </div>
+    <div class="chips" id="chips" hidden></div>
+    <ul class="list" id="list"></ul>
+    <footer class="foot">
+      <span id="who"></span>
+      <button class="ghost small" id="outBtn" type="button">退出登录</button>
+    </footer>
+  </section>
+
+  <main class="workspace" id="ws" data-multi="false"></main>
+</div>
+<div class="dropzone" id="dropzone" hidden><div>松开即可上传到随记</div></div>
+
+<main class="auth" id="auth" hidden>
+  <form class="card glass" id="authForm" novalidate>
+    <h1 class="brand big">随记</h1>
+    <p class="lede">在手机和电脑上登录同一个账号，笔记就会自动同步。</p>
+    <label for="email">邮箱</label>
+    <input id="email" type="email" autocomplete="email" required>
+    <label for="password">密码</label>
+    <input id="password" type="password" autocomplete="current-password" minlength="6" required>
+    <p class="note" id="authMsg" hidden></p>
+    <button class="btn-primary wide" id="authBtn" type="submit">登录</button>
+    <button class="ghost wide" id="modeBtn" type="button">还没有账号？注册</button>
+  </form>
+</main>
+
+<main class="auth" id="setup" hidden>
+  <div class="card glass">
+    <h1 class="brand big">随记</h1>
+    <p class="lede">还没有连接数据库。部署时设置 Supabase 的地址和公开密钥（SUPABASE_URL、SUPABASE_ANON_KEY）后重新构建即可。</p>
+  </div>
+</main>
+
+<!-- One editor pane; app.js clones it for every split. -->
+<template id="paneTpl">
+  <section class="pane editor glass">
+    <div class="ebar">
+      <button class="ghost back p-back" type="button">← 列表</button>
+      <span class="meta p-meta"></span>
+      <button class="ghost icon p-split-r" type="button" title="左右分屏" aria-label="左右分屏"><svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2.5"/><path d="M8 2.5v11"/></svg></button>
+      <button class="ghost icon p-split-d" type="button" title="上下分屏" aria-label="上下分屏"><svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2.5"/><path d="M1.5 8h13"/></svg></button>
+      <button class="ghost p-edit" type="button" hidden>编辑</button>
+      <a class="ghost p-dl" rel="noopener" hidden>下载</a>
+      <button class="ghost icon p-close" type="button" title="关闭这个窗格" aria-label="关闭这个窗格"><svg viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg></button>
+    </div>
+    <div class="placeholder p-ph"><div><b>从左边打开一个文件，或新建一条笔记</b><span>新建的笔记放在「随手记」里，第一行是标题，输入后自动保存。把左边的文件拖到窗格的上下左右边缘，就能分屏打开。</span></div></div>
+    <textarea class="p-ta" hidden aria-label="笔记内容" placeholder="第一行是标题…"></textarea>
+    <div class="fileview p-fv" hidden><div class="preview p-preview"></div></div>
+    <div class="p-hint" hidden></div>
+  </section>
+</template>
+<script type="module" src="app.js"></script>
+</body>
+</html>
