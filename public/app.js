@@ -112,6 +112,7 @@ async function loadFiles() {
   if (error) { console.error(error); return; }
   files = data; filesLoaded = true;
   render();
+  schedulePrefetch();
 }
 
 // Folder name and path inside it. Files picked from a folder carry webkitRelativePath "Folder/sub/a.txt".
@@ -152,6 +153,107 @@ async function uploadFiles(input) {
   await loadFiles();
 }
 
+
+// ---------- file content cache ----------
+// Opening a document used to cost two signed-URL requests plus a download every time. Signed URLs are
+// reused until shortly before they expire, and text files are kept in Cache Storage keyed by
+// id@updated_at, so a document opens instantly the second time (offline too) and refreshes when it changes.
+const signed = new Map();   // "path|download" -> { url, exp }
+async function signedUrls(paths, download) {
+  const now = Date.now(), out = new Map(), need = [];
+  for (const p of paths) {
+    const hit = signed.get(p + "|" + (download || ""));
+    if (hit && hit.exp > now) out.set(p, hit.url); else need.push(p);
+  }
+  if (need.length) {
+    const res = download
+      ? await Promise.all(need.map((p) => sb.storage.from("files").createSignedUrl(p, 3600, { download }).then((r) => ({ path: p, signedUrl: r.data?.signedUrl }))))
+      : (await sb.storage.from("files").createSignedUrls(need, 3600)).data || [];
+    for (const r of res) if (r.signedUrl) { out.set(r.path, r.signedUrl); signed.set(r.path + "|" + (download || ""), { url: r.signedUrl, exp: now + 50 * 60 * 1000 }); }
+  }
+  return out;
+}
+const signedUrl = async (f) => (await signedUrls([f.path])).get(f.path);
+
+const FILE_CACHE = "suiji-files";
+const versionOf = (f) => f.id + "@" + (f.updated_at || f.created_at);
+const cacheReq = (f) => new Request(new URL("__files/" + encodeURIComponent(versionOf(f)), location.href));
+// id -> cached request for that file, built once from the cache, so replacing a version is cheap.
+let cacheIndex = null;
+function loadCacheIndex(store) {
+  return cacheIndex ||= store.keys().then((ks) => {
+    const m = new Map();
+    for (const k of ks) m.set(decodeURIComponent(k.url.split("__files/")[1] || "").split("@")[0], k);
+    return m;
+  }).catch(() => new Map());
+}
+const inflight = new Map();   // version -> Promise<text>
+function fileText(f) {
+  const v = versionOf(f);
+  if (!inflight.has(v)) inflight.set(v, readText(f).finally(() => inflight.delete(v)));
+  return inflight.get(v);
+}
+async function readText(f) {
+  let store = null;
+  try { store = await caches.open(FILE_CACHE); const hit = await store.match(cacheReq(f)); if (hit) return await hit.text(); } catch {}
+  const url = await signedUrl(f);
+  if (!url) throw new Error("no url");
+  const r = await fetch(url);
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  const text = await r.text();
+  if (store) {
+    try {
+      const index = await loadCacheIndex(store), old = index.get(f.id);
+      if (old) await store.delete(old);
+      const req = cacheReq(f);
+      await store.put(req, new Response(text, { headers: { "content-type": "text/plain;charset=utf-8" } }));
+      index.set(f.id, req);
+    } catch {}
+  }
+  return text;
+}
+const isTextish = (f) => (f.mime.startsWith("text/") || /json|xml|javascript|markdown/.test(f.mime) || ["md", "txt", "csv", "log"].includes(extOf(f.name))) && f.size < 300 * 1024;
+
+// Downloads every text document in the background (a few at a time) so they all open instantly and
+// can be read offline. Skipped in data-saver mode; already-cached versions are not fetched again.
+let prefetching = false, prefetchTimer = null;
+function schedulePrefetch(ms = 3000) { clearTimeout(prefetchTimer); prefetchTimer = setTimeout(prefetchDocs, ms); }
+async function prefetchDocs() {
+  if (prefetching || !uid || !navigator.onLine || navigator.connection?.saveData) return;
+  prefetching = true;
+  try {
+    const store = await caches.open(FILE_CACHE), index = await loadCacheIndex(store);
+    const have = new Set([...index.values()].map((k) => decodeURIComponent(k.url.split("__files/")[1] || "")));
+    const todo = files.filter((f) => isTextish(f) && !have.has(versionOf(f)));
+    for (let i = 0; i < todo.length && uid; i += 60) {
+      const batch = todo.slice(i, i + 60);
+      await signedUrls(batch.map((f) => f.path));
+      for (let j = 0; j < batch.length && uid; j += 4) await Promise.all(batch.slice(j, j + 4).map((f) => fileText(f).catch(() => {})));
+    }
+  } catch (e) { console.error(e); }
+  prefetching = false;
+}
+
+// Rendered Markdown kept in memory for a while (its images use signed URLs that expire after an hour).
+const rendered = new Map();   // version -> { node, exp }
+function cachedRender(f) {
+  const hit = rendered.get(versionOf(f));
+  if (!hit || hit.exp < Date.now()) return null;
+  rendered.delete(versionOf(f)); rendered.set(versionOf(f), hit);   // most recent last
+  return hit.node.cloneNode(true);
+}
+function keepRender(f, node) {
+  rendered.set(versionOf(f), { node: node.cloneNode(true), exp: Date.now() + 45 * 60 * 1000 });
+  while (rendered.size > 30) rendered.delete(rendered.keys().next().value);
+}
+
+function skeleton() {
+  const d = document.createElement("div");
+  d.className = "skeleton";
+  d.setAttribute("aria-label", "加载中");
+  for (let i = 0; i < 9; i++) d.append(document.createElement("i"));
+  return d;
+}
 
 // ---------- markdown ----------
 // Renders blog-style Markdown: Hexo front matter, $…$ / $$…$$ math (KaTeX), and images
@@ -285,13 +387,9 @@ async function renderMarkdown(src, f) {
   const imgs = [...frag.querySelectorAll("img")].filter((img) => isRel(img.getAttribute("src")));
   const targets = imgs.map((img) => byPath.get(resolveRel(dir, img.getAttribute("src"))));
   const paths = [...new Set(targets.filter(Boolean).map((t) => t.path))];
-  const signed = new Map();
-  if (paths.length) {
-    const { data } = await sb.storage.from("files").createSignedUrls(paths, 3600);
-    for (const u of data || []) if (u.signedUrl) signed.set(u.path, u.signedUrl);
-  }
+  const urls = paths.length ? await signedUrls(paths) : new Map();
   imgs.forEach((img, i) => {
-    const url = targets[i] && signed.get(targets[i].path);
+    const url = targets[i] && urls.get(targets[i].path);
     if (url) img.src = url;
     else img.replaceWith(Object.assign(document.createElement("span"), { className: "md-missing", textContent: `[图片：${img.alt || img.getAttribute("src")}]` }));
   });
@@ -302,7 +400,7 @@ async function renderMarkdown(src, f) {
   for (const a of content.querySelectorAll("a[href]")) {
     const href = a.getAttribute("href");
     const target = isRel(href) && byPath.get(resolveRel(dir, href));
-    if (target) a.onclick = (e) => { e.preventDefault(); openFile(target.id); };
+    if (target) a.dataset.open = target.id;   // handled by the pane's click listener, so cached copies keep working
     else if (!href.startsWith("#")) { a.target = "_blank"; a.rel = "noopener"; }
   }
   return art;
@@ -311,31 +409,45 @@ async function renderMarkdown(src, f) {
 async function showFile(f, p) {
   const token = ++p.token, preview = p.preview;
   p.meta.textContent = `${baseName(f.name)} · ${fmtSize(f.size)} · ${fmt(f.updated_at || f.created_at)}`;
-  preview.replaceChildren(Object.assign(document.createElement("div"), { className: "big-ext", textContent: "…" }));
-  const [view, dl] = await Promise.all([
-    sb.storage.from("files").createSignedUrl(f.path, 3600),
-    sb.storage.from("files").createSignedUrl(f.path, 3600, { download: f.name }),
-  ]);
-  if (token !== p.token) return;
-  if (view.error) { preview.firstChild.textContent = "打不开"; showNote("拿不到文件链接，请检查网络。", "err"); return; }
-  const url = view.data.signedUrl;
-  p.dl.href = dl.data ? dl.data.signedUrl : url;
-  let el;
-  const md = isMarkdown(f);
+  const md = isMarkdown(f) && f.size < 2 * 1024 * 1024;
   preview.classList.toggle("doc", md);
-  if (md && f.size < 2 * 1024 * 1024) {
-    try { el = await renderMarkdown(await (await fetch(url)).text(), f); }
-    catch (e) { console.error(e); el = Object.assign(document.createElement("div"), { className: "big-ext", textContent: "读取失败，点「打开」查看" }); }
-    if (token !== p.token) return;
-  } else if (isImage(f)) el = Object.assign(document.createElement("img"), { src: url, alt: f.name });
-  else if (f.mime.startsWith("video/") || f.mime.startsWith("audio/")) el = Object.assign(document.createElement(f.mime.startsWith("video/") ? "video" : "audio"), { src: url, controls: true, playsInline: true });
-  else if (f.mime === "application/pdf") el = Object.assign(document.createElement("iframe"), { src: url, title: f.name });
-  else if ((f.mime.startsWith("text/") || /json|xml|javascript|markdown/.test(f.mime) || ["md", "txt", "csv", "log"].includes(extOf(f.name))) && f.size < 300 * 1024) {
-    el = document.createElement("pre");
-    try { el.textContent = await (await fetch(url)).text(); } catch { el.textContent = "读取失败，点「打开」查看。"; }
-    if (token !== p.token) return;
-  } else el = Object.assign(document.createElement("div"), { className: "big-ext", textContent: extOf(f.name) || "文件" });
-  preview.replaceChildren(el);
+  const show = (el) => { if (token === p.token) { clearTimeout(wait); preview.replaceChildren(el); preview.scrollTop = 0; } };
+  // The skeleton only appears if loading takes a noticeable moment, so cached documents never flash.
+  const wait = setTimeout(() => { if (token === p.token) preview.replaceChildren(skeleton()); }, 120);
+  // The download link is not needed to show the file; fetch it alongside.
+  p.dl.removeAttribute("href");
+  signedUrls([f.path], f.name).then((m) => { if (token === p.token && m.get(f.path)) p.dl.href = m.get(f.path); }).catch(() => {});
+
+  const textish = isTextish(f);
+  try {
+    if (md) {
+      const hit = cachedRender(f);
+      if (hit) return show(hit);
+      const [text] = await Promise.all([fileText(f), loadMarkdownLibs()]);
+      if (token !== p.token) return;
+      const el = await renderMarkdown(text, f);
+      keepRender(f, el);
+      return show(el);
+    }
+    if (textish) {
+      const text = await fileText(f);
+      return show(Object.assign(document.createElement("pre"), { textContent: text }));
+    }
+    const url = await signedUrl(f);
+    if (!url) throw new Error("no url");
+    if (!p.dl.href) p.dl.href = url;
+    if (isImage(f)) {
+      const img = Object.assign(document.createElement("img"), { src: url, alt: f.name });
+      img.decode().catch(() => {}).finally(() => show(img));   // swap in once decoded, no half-painted image
+      return;
+    }
+    if (f.mime.startsWith("video/") || f.mime.startsWith("audio/")) return show(Object.assign(document.createElement(f.mime.startsWith("video/") ? "video" : "audio"), { src: url, controls: true, playsInline: true }));
+    if (f.mime === "application/pdf") return show(Object.assign(document.createElement("iframe"), { src: url, title: f.name }));
+    show(Object.assign(document.createElement("div"), { className: "big-ext", textContent: extOf(f.name) || "文件" }));
+  } catch (e) {
+    console.error(e);
+    show(Object.assign(document.createElement("div"), { className: "big-ext", textContent: navigator.onLine ? "读取失败" : "离线，这个文件还没缓存过" }));
+  }
 }
 
 window.addEventListener("online", () => sync());
@@ -401,6 +513,10 @@ function itemRow(kind, id, label, depth, metaText, title) {
   b.append(Object.assign(document.createElement("span"), { className: "tree-name", textContent: label }));
   if (metaText) b.append(Object.assign(document.createElement("span"), { className: "tree-meta", textContent: metaText }));
   b.dataset.kind = kind; b.dataset.id = id;
+  if (kind === "file") b.onpointerenter = b.ontouchstart = () => {
+    const f = files.find((x) => x.id === id);
+    if (f && isTextish(f)) fileText(f).catch(() => {});
+  };
   b.draggable = true;
   b.ondragstart = (e) => { e.dataTransfer.setData(DND, JSON.stringify({ kind, id })); e.dataTransfer.effectAllowed = "copy"; };
   b.onclick = (e) => {
@@ -519,6 +635,10 @@ function makePane(item) {
     clearTimeout(p.editTimer); p.editTimer = setTimeout(() => commit(p), p.kind === "file" ? 1200 : 600);
   });
   p.ta.addEventListener("blur", () => commit(p));
+  p.preview.addEventListener("click", (e) => {
+    const a = e.target.closest("a[data-open]");
+    if (a) { e.preventDefault(); openIn(p, "file", a.dataset.open); }
+  });
   q("p-back").onclick = () => { commitAll(); app.dataset.view = "list"; };
   q("p-split-r").onclick = () => split(p, "row", false, p.kind && { kind: p.kind, id: p.itemId });
   q("p-split-d").onclick = () => split(p, "col", false, p.kind && { kind: p.kind, id: p.itemId });
@@ -912,9 +1032,16 @@ function enter(session) {
   if (channel) { sb.removeChannel(channel); channel = null; }
   uid = session ? session.user.id : null;
   $("auth").hidden = !!session; app.hidden = !session;
-  if (!session) { store = { notes: {} }; files = []; filesLoaded = false; return; }
+  if (!session) {
+    store = { notes: {} }; files = []; filesLoaded = false; rendered.clear(); signed.clear();
+    // Another account may sign in on this device; its documents must not mix with these.
+    caches.delete(FILE_CACHE).catch(() => {}); cacheIndex = null;
+    return;
+  }
   $("who").textContent = session.user.email;
-  load(); filesLoaded = false; restoreLayout(); render(); sync(); loadFiles(); subscribe();
+  load(); filesLoaded = false; restoreLayout(); render();
+  // Warm up the Markdown renderer in the background so the first document opens without waiting for it.
+  (window.requestIdleCallback || ((fn) => setTimeout(fn, 1500)))(() => loadMarkdownLibs().catch(() => {})); sync(); loadFiles(); subscribe();
 }
 sb.auth.onAuthStateChange((_ev, session) => enter(session));
 const { data: { session } } = await sb.auth.getSession();

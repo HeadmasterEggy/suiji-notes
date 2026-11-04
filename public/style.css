@@ -312,3 +312,21 @@ textarea {
 .graph-tools { position: absolute; top: 10px; right: 10px; z-index: 1; display: flex; gap: 6px; }
 .graph-tools .ghost.bordered.small { padding: 4px 10px; font-size: 12px; }
 .graph-empty { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: var(--muted); pointer-events: none; }
+
+/* Loading skeleton: shimmering lines shaped like a document (title, paragraph, short line…). */
+.skeleton { align-self: start; justify-self: stretch; display: grid; gap: 12px; padding: 28px 32px; animation: fade .3s ease both; }
+.skeleton i {
+  display: block; height: 11px; border-radius: 6px;
+  background: linear-gradient(90deg, var(--accent-soft) 20%, color-mix(in srgb, var(--ink) 9%, transparent) 50%, var(--accent-soft) 80%);
+  background-size: 300% 100%; animation: shimmer 1.4s ease-in-out infinite;
+}
+.skeleton i:nth-child(1) { height: 22px; width: 55%; margin-bottom: 10px; }
+.skeleton i:nth-child(2) { width: 30%; height: 9px; margin-bottom: 14px; }
+.skeleton i:nth-child(3), .skeleton i:nth-child(7) { width: 96%; }
+.skeleton i:nth-child(4), .skeleton i:nth-child(8) { width: 88%; }
+.skeleton i:nth-child(5) { width: 92%; }
+.skeleton i:nth-child(6) { width: 64%; margin-bottom: 14px; }
+.skeleton i:nth-child(9) { width: 40%; }
+.skeleton i:nth-child(odd) { animation-delay: .08s; }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@media (max-width: 720px) { .skeleton { padding: 18px 16px; } }
