@@ -4,9 +4,9 @@
 #   --publish  also writes public/mac/Suiji.zip and version.json; installed apps update to it after the next deploy
 # Raise BUILD for every release you publish; installed apps only update to a higher BUILD.
 set -e
-VERSION=${VERSION:-1.1}
-BUILD=${BUILD:-2}
-NOTES="自动更新：新版本会在后台下载，重启或退出时安装。"
+VERSION=${VERSION:-1.2}
+BUILD=${BUILD:-3}
+NOTES="新图标；网页端新增设置页面。"
 cd "$(dirname "$0")"
 APP="build/随记.app"
 rm -rf build && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -16,14 +16,13 @@ swiftc -O -swift-version 5 -target x86_64-apple-macos13 -o build/suiji-x86_64 Su
 lipo -create build/suiji-arm64 build/suiji-x86_64 -output "$APP/Contents/MacOS/Suiji"
 rm build/suiji-arm64 build/suiji-x86_64
 
-# App icon from the web app's icon
+# App icon: AppIcon.png is 1024 px, drawn inside the macOS rounded square (the web icons fill the square)
 ICONSET=build/AppIcon.iconset
 mkdir -p "$ICONSET"
 for s in 16 32 128 256 512; do
-  sips -z $s $s ../public/icon-512.png --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
-  d=$((s * 2)); [ $d -le 512 ] && sips -z $d $d ../public/icon-512.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
+  sips -z $s $s AppIcon.png --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
+  d=$((s * 2)); sips -z $d $d AppIcon.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
 done
-cp ../public/icon-512.png "$ICONSET/icon_512x512@2x.png"
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 rm -rf "$ICONSET"
 

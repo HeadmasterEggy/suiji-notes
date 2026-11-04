@@ -28,11 +28,12 @@
 - **Edit anywhere.** Edit a file on the phone, and the Mac agent writes it back to disk within a few seconds.
 - **Outline.** Every document has its own outline beside it: click a heading to jump, and the current section stays marked as you scroll. Drag its edge to resize it.
 - **Split panes.** Split up, down, left or right, by dragging a file onto a pane's edge or with ⌘-click. The layout is remembered.
-- **Styles.** Four looks, picked from 风格 at the bottom of the sidebar:
+- **Styles.** Four looks, picked in 设置 (Settings):
   - 玻璃 *Glass*: follows the system's light / dark
   - 纸张 *Paper*: warm paper and serif text
   - 终端 *Terminal*: green on black, monospace
   - 方块 *Blocks*: a pixel-art world of sky, grass and stone panels
+- **Settings.** 设置 at the bottom of the sidebar holds the style, text size, whether new documents show their outline, widths, sync, the local cache, the account and update checks.
 - **Relationship graph.** Like Obsidian's graph, built from `[[wikilinks]]`, relative `.md` links and front-matter tags.
 - **Markdown.** Math (KaTeX) and Mermaid diagrams.
 - **Blog links.** Every published post links to its page on the blog (`https://qiao1.top/posts/<abbrlink>.html`).

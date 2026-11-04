@@ -14,8 +14,12 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="stylesheet" href="style.css">
-<!-- The chosen style goes on before first paint, so the page never flashes the default one. -->
-<script>try { const s = localStorage.getItem("suiji:style"); if (s) document.documentElement.dataset.style = s; } catch {}</script>
+<!-- The chosen style and text size go on before first paint, so the page never flashes the default one. -->
+<script>try {
+  const s = localStorage.getItem("suiji:style"), f = localStorage.getItem("suiji:font");
+  if (s) document.documentElement.dataset.style = s;
+  if (f) document.documentElement.style.setProperty("--doc-size", f + "px");
+} catch {}</script>
 </head>
 <body>
 <div class="app" id="app" data-view="list" hidden>
@@ -38,8 +42,7 @@
     <ul class="list" id="list"></ul>
     <footer class="foot">
       <span id="who"></span>
-      <button class="ghost small" id="styleBtn" type="button" aria-haspopup="menu" aria-expanded="false">风格</button>
-      <button class="ghost small" id="outBtn" type="button">退出登录</button>
+      <button class="ghost small" id="setBtn" type="button" aria-haspopup="dialog">设置</button>
     </footer>
   </section>
 
@@ -90,13 +93,70 @@
   </section>
 </template>
 <button class="update-toast glass" id="updateToast" type="button" hidden>有新版本 · 点此刷新</button>
-<div class="style-menu glass" id="styleMenu" role="menu" aria-label="风格" hidden>
-  <h3>风格</h3>
-  <button type="button" role="menuitemradio" data-style=""><span class="swatch glass-sw"></span><span>玻璃<small>跟随系统的浅色 / 深色</small></span></button>
-  <button type="button" role="menuitemradio" data-style="paper"><span class="swatch paper-sw"></span><span>纸张<small>暖色纸面，衬线字</small></span></button>
-  <button type="button" role="menuitemradio" data-style="terminal"><span class="swatch terminal-sw"></span><span>终端<small>黑底绿字，等宽</small></span></button>
-  <button type="button" role="menuitemradio" data-style="blocks"><span class="swatch blocks-sw"></span><span>方块<small>像素方块世界</small></span></button>
-</div>
+<dialog class="settings glass" id="settings" aria-labelledby="setTitle">
+  <header class="set-head">
+    <h2 id="setTitle">设置</h2>
+    <button class="ghost icon" id="setClose" type="button" title="关闭" aria-label="关闭"><svg viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg></button>
+  </header>
+  <div class="set-body">
+    <section>
+      <h3>外观</h3>
+      <div class="set-styles" id="styleChoices" role="radiogroup" aria-label="风格">
+        <button type="button" role="radio" data-style=""><span class="swatch glass-sw"></span><b>玻璃</b><small>跟随系统的浅色 / 深色</small></button>
+        <button type="button" role="radio" data-style="paper"><span class="swatch paper-sw"></span><b>纸张</b><small>暖色纸面，衬线字</small></button>
+        <button type="button" role="radio" data-style="terminal"><span class="swatch terminal-sw"></span><b>终端</b><small>黑底绿字，等宽</small></button>
+        <button type="button" role="radio" data-style="blocks"><span class="swatch blocks-sw"></span><b>方块</b><small>像素方块世界</small></button>
+      </div>
+      <div class="set-row">
+        <span>正文字号<small>文档预览和编辑时的文字大小</small></span>
+        <div class="seg" id="fontChoices" role="radiogroup" aria-label="正文字号">
+          <button type="button" role="radio" data-size="15">小</button>
+          <button type="button" role="radio" data-size="16">标准</button>
+          <button type="button" role="radio" data-size="18">大</button>
+        </div>
+      </div>
+    </section>
+    <section>
+      <h3>阅读</h3>
+      <label class="set-row">
+        <span>新打开的文档显示大纲<small>只对宽窗格有效，窄窗格和手机上点 ☰ 打开</small></span>
+        <input class="switch" id="tocAuto" type="checkbox">
+      </label>
+    </section>
+    <section>
+      <h3>布局</h3>
+      <div class="set-row">
+        <span>侧边栏和大纲宽度<small id="widthInfo"></small></span>
+        <button class="ghost bordered small" id="resetWidths" type="button">恢复默认</button>
+      </div>
+    </section>
+    <section>
+      <h3>同步</h3>
+      <div class="set-row">
+        <span><b id="setSync"></b><small id="setCounts"></small></span>
+        <button class="ghost bordered small" id="syncNow" type="button">立即同步</button>
+      </div>
+      <div class="set-row">
+        <span>本机缓存<small id="cacheInfo">计算中…</small></span>
+        <button class="ghost bordered small" id="clearCache" type="button">清除</button>
+      </div>
+    </section>
+    <section>
+      <h3>账号</h3>
+      <div class="set-row">
+        <span><b id="setWho"></b><small>在其他设备上登录同一个账号即可同步</small></span>
+        <button class="ghost bordered small danger" id="outBtn" type="button">退出登录</button>
+      </div>
+    </section>
+    <section>
+      <h3>关于</h3>
+      <div class="set-row">
+        <span>随记<small id="verInfo"></small></span>
+        <button class="ghost bordered small" id="checkUpd" type="button">检查更新</button>
+      </div>
+    </section>
+  </div>
+</dialog>
 <script type="module" src="app.js"></script>
 </body>
 </html>

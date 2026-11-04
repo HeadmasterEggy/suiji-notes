@@ -20,34 +20,21 @@ function applyStyle(name, save) {
     document.head.append(Object.assign(document.createElement("link"), { id: "pixelFonts", rel: "stylesheet", href: PIXEL_FONTS }));
   }
   if (save) try { name ? localStorage.setItem("suiji:style", name) : localStorage.removeItem("suiji:style"); } catch {}
-  for (const b of $("styleMenu").querySelectorAll("[data-style]")) b.setAttribute("aria-checked", String(b.dataset.style === (name || "")));
+  for (const b of $("styleChoices").querySelectorAll("[data-style]")) b.setAttribute("aria-checked", String(b.dataset.style === (name || "")));
   const bar = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
   for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.content = name ? bar : (m.media.includes("dark") ? "#000000" : "#f4f4f4");
 }
 applyStyle(document.documentElement.dataset.style || "");
-{
-  const menu = $("styleMenu"), btn = $("styleBtn");
-  const close = () => { menu.hidden = true; btn.setAttribute("aria-expanded", "false"); };
-  btn.onclick = (e) => {
-    e.stopPropagation();
-    if (!menu.hidden) return close();
-    const r = btn.getBoundingClientRect();
-    menu.hidden = false; btn.setAttribute("aria-expanded", "true");
-    menu.style.left = Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8)) + "px";
-    menu.style.top = Math.max(8, r.top - menu.offsetHeight - 8) + "px";
-    menu.querySelector('[aria-checked="true"]')?.focus();
-  };
-  menu.onclick = (e) => {
-    const b = e.target.closest("[data-style]");
-    if (!b) return;
-    applyStyle(b.dataset.style, true); close();
-    // Diagrams and cached renders were drawn with the old colours.
-    mermaidLib = null; rendered.clear();
-    for (const p of panes.values()) { if (p.kind === "file") { p.shown = null; renderPane(p); } p.graph?.redraw(); }
-  };
-  document.addEventListener("click", (e) => { if (!menu.hidden && !menu.contains(e.target)) close(); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !menu.hidden) { close(); btn.focus(); } });
+// Text size of documents and the note editor: --doc-size on the root, saved as "suiji:font".
+const FONT_DEFAULT = 16;
+const fontSize = () => parseFloat(document.documentElement.style.getPropertyValue("--doc-size")) || FONT_DEFAULT;
+function applyFont(px, save) {
+  if (px === FONT_DEFAULT) document.documentElement.style.removeProperty("--doc-size");
+  else document.documentElement.style.setProperty("--doc-size", px + "px");
+  if (save) try { px === FONT_DEFAULT ? localStorage.removeItem("suiji:font") : localStorage.setItem("suiji:font", String(px)); } catch {}
+  for (const b of $("fontChoices").querySelectorAll("[data-size]")) b.setAttribute("aria-checked", String(+b.dataset.size === px));
 }
+applyFont(fontSize());
 
 // ---------- updates ----------
 // Every deploy changes the cache name in sw.js. Open windows (the Mac app, a PWA left open) check it every
@@ -752,14 +739,28 @@ let layout = null, focused = null, paneSeq = 0;
 
 // ---------- outline ----------
 // Headings of the open Markdown file in a panel beside it. Each pane opens and closes its own outline
-// (kept with the layout); wide panes start with it open, narrow panes and phones open it over the text on demand.
-const isNarrow = (p) => p.el.clientWidth < 760;
+// (kept with the layout). It sits beside the text while the text keeps at least TEXT_MIN, shrinking to fit,
+// so side-by-side panes each keep theirs; narrower panes and phones open it over the text on demand.
+const TOC_MIN = 180, TOC_DEFAULT = 240, TEXT_MIN = 340;
+const isNarrow = (p) => p.el.clientWidth < TOC_MIN + TEXT_MIN;
 const paneSizes = new ResizeObserver((es) => {
   for (const e of es) for (const p of panes.values()) if (p.el === e.target) applyToc(p);
 });
 // Its width is shared by all panes: drag the grip on its left edge, double-click to reset.
-const TOC_MIN = 180, TOC_DEFAULT = 240;
-const tocMax = (p) => Math.max(TOC_MIN, Math.min(440, p.el.clientWidth - 380));
+const tocMax = (p) => Math.max(TOC_MIN, Math.min(440, p.el.clientWidth - TEXT_MIN));
+// A pane too narrow for the shared width gets a slimmer outline of its own.
+function fitToc(p) {
+  const w = isNarrow(p) ? 0 : Math.min(tocWidth(), p.el.clientWidth - TEXT_MIN);
+  p.toc.style.flexBasis = w && w < tocWidth() ? w + "px" : "";
+}
+const refitTocs = () => panes.forEach((x) => { fitToc(x); x.tocCur = null; markHeading(x); });
+// Escape closes an outline that is open over the text, the one in the focused pane first.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || $("settings").open) return;
+  const open = [...panes.values()].filter((p) => p.tocNarrow && isNarrow(p) && !p.toc.hidden);
+  const p = open.includes(focused) ? focused : open[0];
+  if (p) { p.tocNarrow = false; applyToc(p); p.outline.focus(); }
+});
 function setTocWidth(px, p, save) {
   const w = Math.round(Math.min(p ? tocMax(p) : 440, Math.max(TOC_MIN, px)));
   document.documentElement.style.setProperty("--toc-w", w + "px");
@@ -783,7 +784,8 @@ function setToc(p, art) {
   const bar = el$("div", "toc-bar"); p.tocBar = el$("i"); bar.append(p.tocBar);
   p.tocList = el$("div", "toc-list"); p.tocInk = el$("span", "toc-ink");
   p.tocList.append(p.tocInk, ...p.heads.map((h, i) => {
-    const t = h.textContent.trim(), b = el$("button", null, t);
+    const t = h.textContent.trim(), b = el$("button");
+    b.append(el$("span", null, t));
     b.type = "button"; b.title = t; b.dataset.i = i; b.dataset.lvl = Math.min(+h.tagName[1] - top, 3);
     return b;
   }));
@@ -797,6 +799,7 @@ function applyToc(p) {
   p.outline.setAttribute("aria-pressed", String(on));
   p.toc.hidden = !on;
   p.toc.classList.toggle("overlay", narrow);
+  fitToc(p);
   if (on) { p.tocCur = null; markHeading(p); }
 }
 // The current section: the last heading that has scrolled past the top of the pane.
@@ -827,7 +830,7 @@ function makePane(item) {
   const p = {
     id: ++paneSeq, el, ta: q("p-ta"), ph: q("p-ph"), fv: q("p-fv"), preview: q("p-preview"), meta: q("p-meta"),
     dl: q("p-dl"), hint: q("p-hint"), edit: q("p-edit"), web: q("p-web"), fileEdit: false, fileBase: null,
-    outline: q("p-outline"), toc: q("p-toc"), heads: [], tocOpen: true, tocNarrow: false, tocLock: null, tocCur: null,
+    outline: q("p-outline"), toc: q("p-toc"), heads: [], tocOpen: tocAuto, tocNarrow: false, tocLock: null, tocCur: null,
     tocList: null, tocInk: null, tocBar: null,
     kind: item?.kind || null, itemId: item?.id || null, shown: null, token: 0,
     editing: false, editTimer: null,
@@ -858,15 +861,17 @@ function makePane(item) {
     e.preventDefault();
     const x0 = e.clientX, w0 = tocWidth();
     document.body.classList.add("resizing", "resizing-row");
-    const move = (ev) => setTocWidth(w0 + x0 - ev.clientX, p);
+    const move = (ev) => { setTocWidth(w0 + x0 - ev.clientX, p); panes.forEach(fitToc); };
     const up = () => {
       document.body.classList.remove("resizing", "resizing-row");
       removeEventListener("pointermove", move); removeEventListener("pointerup", up);
-      setTocWidth(tocWidth(), p, true); panes.forEach((x) => { x.tocCur = null; markHeading(x); });
+      setTocWidth(tocWidth(), p, true); refitTocs();
     };
     addEventListener("pointermove", move); addEventListener("pointerup", up);
   });
-  p.toc.addEventListener("dblclick", (e) => { if (e.target.closest(".toc-grip")) { setTocWidth(TOC_DEFAULT, p, true); panes.forEach((x) => { x.tocCur = null; markHeading(x); }); } });
+  p.toc.addEventListener("dblclick", (e) => { if (e.target.closest(".toc-grip")) { setTocWidth(TOC_DEFAULT, p, true); refitTocs(); } });
+  // An outline open over the text closes again on a click in the text.
+  p.preview.addEventListener("pointerdown", () => { if (p.tocNarrow && isNarrow(p)) { p.tocNarrow = false; applyToc(p); } });
   p.toc.addEventListener("click", (e) => {
     if (e.target.closest("[data-close]")) { if (isNarrow(p)) p.tocNarrow = false; else { p.tocOpen = false; saveLayout(); } applyToc(p); return; }
     const b = e.target.closest("button[data-i]");
@@ -1231,7 +1236,7 @@ function restoreLayout() {
       const p = makePane(s && s.kind ? { kind: s.kind, id: s.id } : null);
       if (s && s.f) focused = p;
       p.graphTags = !!(s && s.t);
-      p.tocOpen = !s || s.o !== 0;   // each pane keeps its own outline open or closed
+      p.tocOpen = s && "o" in s ? s.o !== 0 : tocAuto;   // each pane keeps its own outline open or closed
       return { pane: p };
     }
     return { dir: s.dir === "col" ? "col" : "row", ratio: Math.min(0.85, Math.max(0.15, +s.ratio || 0.5)), a: de(s.a), b: de(s.b) };
@@ -1279,7 +1284,69 @@ window.addEventListener("paste", (e) => {
   if (fl && fl.length) { e.preventDefault(); uploadFiles(fl); }
 });
 search.addEventListener("input", renderList);
+// ---------- settings ----------
+// One dialog for the per-device preferences, sync, the local cache, the account and updates.
+let tocAuto = true;
+try { tocAuto = localStorage.getItem("suiji:toc-auto") !== "0"; } catch {}
+{
+  const dlg = $("settings");
+  const px = (v) => Math.round(v) + "px";
+  async function cacheSummary() {
+    let n = 0;
+    try { n = (await (await caches.open(FILE_CACHE)).keys()).length; } catch {}
+    const est = await navigator.storage?.estimate?.().catch(() => null);
+    $("cacheInfo").textContent = `${n} 个文档已存在本机` + (est?.usage ? ` · 共用 ${fmtSize(est.usage)}` : "") + "，离线也能打开";
+  }
+  function fill() {
+    $("tocAuto").checked = tocAuto;
+    $("widthInfo").textContent = `侧边栏 ${px(parseFloat(app.style.getPropertyValue("--side")) || SIDE_DEFAULT)} · 大纲 ${px(tocWidth())}，拖动边缘调整，双击恢复`;
+    $("setSync").textContent = $("syncText").textContent;
+    $("setCounts").textContent = `${visible().length} 条随手记 · ${files.length} 个文件`;
+    $("setWho").textContent = $("who").textContent;
+    loadedVersion.then((v) => { $("verInfo").textContent = "版本 " + (v ? v.replace(/^suiji-/, "") : "未知"); });
+    cacheSummary();
+  }
+  $("setBtn").onclick = () => { fill(); dlg.showModal(); };
+  $("setClose").onclick = () => dlg.close();
+  dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });   // a click on the backdrop
+  $("styleChoices").onclick = (e) => {
+    const b = e.target.closest("[data-style]");
+    if (!b || b.getAttribute("aria-checked") === "true") return;
+    applyStyle(b.dataset.style, true);
+    // Diagrams and cached renders were drawn with the old colours.
+    mermaidLib = null; rendered.clear();
+    for (const p of panes.values()) { if (p.kind === "file") { p.shown = null; renderPane(p); } p.graph?.redraw(); }
+  };
+  $("fontChoices").onclick = (e) => { const b = e.target.closest("[data-size]"); if (b) applyFont(+b.dataset.size, true); };
+  $("tocAuto").onchange = (e) => {
+    tocAuto = e.target.checked;
+    try { localStorage.setItem("suiji:toc-auto", tocAuto ? "1" : "0"); } catch {}
+  };
+  $("resetWidths").onclick = () => {
+    setSide(SIDE_DEFAULT, true); setTocWidth(TOC_DEFAULT, null, true); refitTocs();
+    fill();
+  };
+  $("syncNow").onclick = async (e) => {
+    e.target.disabled = true;
+    await Promise.all([sync(), loadFiles()]);
+    e.target.disabled = false; fill();
+  };
+  $("clearCache").onclick = async () => {
+    await caches.delete(FILE_CACHE).catch(() => {});
+    cacheIndex = null; rendered.clear();
+    $("cacheInfo").textContent = "已清除，文档会在打开时重新下载";
+  };
+  $("checkUpd").onclick = async (e) => {
+    const b = e.target; b.disabled = true; b.textContent = "检查中…";
+    const [was, now] = await Promise.all([loadedVersion, swVersion()]);
+    b.disabled = false; b.textContent = "检查更新";
+    if (!now) { $("verInfo").textContent = "没能连上网站，稍后再试"; return; }
+    if (was && now !== was) { dlg.close(); $("updateToast").hidden = false; return; }
+    $("verInfo").textContent = "版本 " + now.replace(/^suiji-/, "") + " · 已是最新";
+  };
+}
 $("outBtn").onclick = async () => {
+  $("settings").close();
   commitAll();
   if (Object.values(store.notes).some((n) => n.dirty)) await sync();
   await sb.auth.signOut();
