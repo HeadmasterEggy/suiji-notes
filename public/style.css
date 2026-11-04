@@ -251,11 +251,10 @@ textarea {
 }
 .toc-close {
   all: unset; cursor: pointer; margin-left: auto; width: 22px; height: 22px; border-radius: 7px;
-  display: none; place-items: center; color: var(--muted);
+  display: grid; place-items: center; color: var(--muted);
 }
 .toc-close svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
 .toc-close:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 8%, transparent); }
-.toc.overlay .toc-close { display: grid; }
 .toc-bar { flex: none; height: 2px; margin: 9px 16px 6px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--ink) 8%, transparent); }
 .toc-bar > i { display: block; height: 100%; background: var(--accent); transform-origin: left; transform: scaleX(0); transition: transform .12s linear; }
 .toc-list {
@@ -435,3 +434,13 @@ textarea {
 }
 .md-web::after { content: "↗"; font-family: var(--font-body); }
 .md-web:hover { color: var(--ink); border-bottom-color: var(--line); }
+
+/* New version deployed: a pill at the bottom of the window. */
+.update-toast {
+  position: fixed; z-index: 50; left: 0; right: 0; margin: 0 auto; width: max-content; bottom: max(18px, env(safe-area-inset-bottom, 0px));
+  padding: 9px 16px; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: 13px; color: var(--ink); background: var(--glass-strong);
+  animation: rise .35s var(--spring) both;
+}
+.update-toast[hidden] { display: none; }
+.update-toast:hover { background: var(--panel); }

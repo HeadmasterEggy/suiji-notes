@@ -41,7 +41,10 @@ Live: <https://suiji-notes.vercel.app>
 ```bash
 ./mac/build.sh             # builds mac/build/随记.app (universal, ad-hoc signed)
 ./mac/build.sh --install   # also copies it to /Applications
+./mac/build.sh --publish   # writes public/mac/Suiji.zip and version.json for the next deploy
 ```
+
+**Updates.** The window loads the live site, so web changes arrive with every deploy. An open window checks for a new deploy every 10 minutes and when it comes to the front. It reloads by itself when nothing is being edited, and otherwise shows a 「有新版本」 button. The app itself checks `mac/version.json` on the site at launch and every 6 hours. A newer build downloads in the background, is verified, then installs on restart or on quit. To release one, raise `BUILD` in `mac/build.sh`, run it with `--publish`, and deploy.
 
 It needs Xcode's command line tools. The app keeps you signed in between launches. Links to other sites open in your default browser, and downloads go to `~/Downloads`. The menu bar item shows whether the folder agent is running, and has 立即同步 (sync now), the synced folder and the sync log.
 

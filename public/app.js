@@ -10,6 +10,29 @@ const app = $("app"), list = $("list"), search = $("search");
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 
+// ---------- updates ----------
+// Every deploy changes the cache name in sw.js. Open windows (the Mac app, a PWA left open) check it every
+// 10 minutes and whenever they come back to the front. A window in the background with nothing being edited
+// reloads by itself; otherwise a button offers the reload.
+const swVersion = () => fetch("sw.js?v=" + Date.now(), { cache: "no-store" }).then((r) => r.text())
+  .then((t) => /CACHE = "([^"]+)"/.exec(t)?.[1] || null).catch(() => null);
+const loadedVersion = swVersion();
+async function checkUpdate() {
+  if (!navigator.onLine) return;
+  const [was, now] = await Promise.all([loadedVersion, swVersion()]);
+  if (!was || !now || was === now) return;
+  const busy = [...panes.values()].some((p) => p.editing || p.fileEdit || p.saving);
+  if (document.hidden && !busy) return location.reload();
+  $("updateToast").hidden = false;
+}
+$("updateToast").onclick = async () => {
+  commitAll();
+  await Promise.all([...panes.values()].map((p) => p.saving));
+  location.reload();
+};
+setInterval(checkUpdate, 10 * 60 * 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkUpdate(); });
+
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   $("setup").hidden = false;
   throw new Error("Supabase is not configured");
@@ -689,9 +712,8 @@ const panes = new Map();
 let layout = null, focused = null, paneSeq = 0;
 
 // ---------- outline ----------
-// Headings of the open Markdown file in a panel beside it. Wide panes show it unless it was switched off
-// (remembered); narrow panes and phones open it over the text on demand.
-let outlineWide = (() => { try { return localStorage.getItem("suiji:outline") !== "0"; } catch { return true; } })();
+// Headings of the open Markdown file in a panel beside it. Each pane opens and closes its own outline
+// (kept with the layout); wide panes start with it open, narrow panes and phones open it over the text on demand.
 const isNarrow = (p) => p.el.clientWidth < 760;
 const paneSizes = new ResizeObserver((es) => {
   for (const e of es) for (const p of panes.values()) if (p.el === e.target) applyToc(p);
@@ -731,7 +753,7 @@ function setToc(p, art) {
 }
 function applyToc(p) {
   const has = p.heads.length > 0 && !p.fv.hidden;
-  const narrow = isNarrow(p), on = has && (narrow ? p.tocNarrow : outlineWide);
+  const narrow = isNarrow(p), on = has && (narrow ? p.tocNarrow : p.tocOpen);
   p.outline.hidden = !has;
   p.outline.setAttribute("aria-pressed", String(on));
   p.toc.hidden = !on;
@@ -766,7 +788,7 @@ function makePane(item) {
   const p = {
     id: ++paneSeq, el, ta: q("p-ta"), ph: q("p-ph"), fv: q("p-fv"), preview: q("p-preview"), meta: q("p-meta"),
     dl: q("p-dl"), hint: q("p-hint"), edit: q("p-edit"), web: q("p-web"), fileEdit: false, fileBase: null,
-    outline: q("p-outline"), toc: q("p-toc"), heads: [], tocNarrow: false, tocLock: null, tocCur: null,
+    outline: q("p-outline"), toc: q("p-toc"), heads: [], tocOpen: true, tocNarrow: false, tocLock: null, tocCur: null,
     tocList: null, tocInk: null, tocBar: null,
     kind: item?.kind || null, itemId: item?.id || null, shown: null, token: 0,
     editing: false, editTimer: null,
@@ -789,8 +811,8 @@ function makePane(item) {
   });
   p.outline.onclick = () => {
     if (isNarrow(p)) p.tocNarrow = !p.tocNarrow;
-    else { outlineWide = !outlineWide; try { localStorage.setItem("suiji:outline", outlineWide ? "1" : "0"); } catch {} }
-    panes.forEach(applyToc);
+    else { p.tocOpen = !p.tocOpen; saveLayout(); }
+    applyToc(p);
   };
   p.toc.addEventListener("pointerdown", (e) => {
     if (!e.target.closest(".toc-grip")) return;
@@ -807,7 +829,7 @@ function makePane(item) {
   });
   p.toc.addEventListener("dblclick", (e) => { if (e.target.closest(".toc-grip")) { setTocWidth(TOC_DEFAULT, p, true); panes.forEach((x) => { x.tocCur = null; markHeading(x); }); } });
   p.toc.addEventListener("click", (e) => {
-    if (e.target.closest("[data-close]")) { if (isNarrow(p)) p.tocNarrow = false; else { outlineWide = false; try { localStorage.setItem("suiji:outline", "0"); } catch {} } panes.forEach(applyToc); return; }
+    if (e.target.closest("[data-close]")) { if (isNarrow(p)) p.tocNarrow = false; else { p.tocOpen = false; saveLayout(); } applyToc(p); return; }
     const b = e.target.closest("button[data-i]");
     if (!b) return;
     const h = p.heads[+b.dataset.i], top = p.preview.getBoundingClientRect().top;
@@ -1156,7 +1178,7 @@ isPhone.addEventListener("change", () => layout && buildLayout());
 
 const layoutKey = () => "suiji:layout:" + uid;
 function saveLayout() {
-  const ser = (n) => n.pane ? { kind: n.pane.kind, id: n.pane.itemId, f: n.pane === focused ? 1 : 0, t: n.pane.graphTags ? 1 : 0 }
+  const ser = (n) => n.pane ? { kind: n.pane.kind, id: n.pane.itemId, f: n.pane === focused ? 1 : 0, t: n.pane.graphTags ? 1 : 0, o: n.pane.tocOpen ? 1 : 0 }
                             : { dir: n.dir, ratio: n.ratio, a: ser(n.a), b: ser(n.b) };
   try { localStorage.setItem(layoutKey(), JSON.stringify(ser(layout))); } catch {}
 }
@@ -1170,6 +1192,7 @@ function restoreLayout() {
       const p = makePane(s && s.kind ? { kind: s.kind, id: s.id } : null);
       if (s && s.f) focused = p;
       p.graphTags = !!(s && s.t);
+      p.tocOpen = !s || s.o !== 0;   // each pane keeps its own outline open or closed
       return { pane: p };
     }
     return { dir: s.dir === "col" ? "col" : "row", ratio: Math.min(0.85, Math.max(0.15, +s.ratio || 0.5)), a: de(s.a), b: de(s.b) };

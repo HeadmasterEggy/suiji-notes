@@ -6,6 +6,11 @@ import WebKit
 let appURL = URL(string: "https://suiji-notes.vercel.app/")!
 let agentLabel = "app.suiji.sync"
 let suijiHome = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".suiji")
+// Published by `mac/build.sh --publish`; `defaults write app.suiji.mac updateFeed <url>` points it elsewhere for testing.
+let updateFeed = URL(string: UserDefaults.standard.string(forKey: "updateFeed") ?? "https://suiji-notes.vercel.app/mac/version.json")!
+let currentBuild = Int(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0") ?? 0
+
+struct Release: Decodable { let version: String; let build: Int; let url: String; let notes: String? }
 
 @discardableResult
 func run(_ path: String, _ args: [String]) -> (status: Int32, out: String) {
@@ -41,6 +46,97 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     buildWindow()
     buildStatusItem()
     NSApp.activate(ignoringOtherApps: true)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.checkForUpdates(manual: false) }
+    Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { _ in self.checkForUpdates(manual: false) }
+  }
+
+  func applicationWillTerminate(_ n: Notification) {
+    if let next = stagedUpdate { install(next, relaunch: false) }   // 「退出时更新」
+  }
+
+  // MARK: self-update
+  // The web content updates itself on every deploy; this replaces the app bundle when a newer build is published.
+  // A newer build is downloaded in the background, checked, then installed on restart or on quit.
+
+  var stagedUpdate: URL?
+  var checking = false
+
+  @objc func checkNow() { checkForUpdates(manual: true) }
+
+  func checkForUpdates(manual: Bool) {
+    if checking { return }
+    if let next = stagedUpdate { if manual { offerRestart(next) }; return }
+    checking = true
+    var req = URLRequest(url: updateFeed); req.cachePolicy = .reloadIgnoringLocalCacheData
+    URLSession.shared.dataTask(with: req) { data, _, err in
+      let release = data.flatMap { try? JSONDecoder().decode(Release.self, from: $0) }
+      DispatchQueue.main.async {
+        guard let r = release, let zip = URL(string: r.url, relativeTo: updateFeed)?.absoluteURL else {
+          self.checking = false
+          if manual { self.tell("检查更新失败", err?.localizedDescription ?? "没有读到版本信息。") }
+          return
+        }
+        guard r.build > currentBuild else {
+          self.checking = false
+          if manual { self.tell("已是最新版本", "随记 \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] ?? "") 是最新的。") }
+          return
+        }
+        self.download(zip, release: r, manual: manual)
+      }
+    }.resume()
+  }
+
+  func download(_ zip: URL, release r: Release, manual: Bool) {
+    URLSession.shared.downloadTask(with: zip) { file, _, err in
+      var staged: URL? = nil, problem = err?.localizedDescription ?? "下载失败。"
+      if let file {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("suiji-update-\(r.build)")
+        try? FileManager.default.removeItem(at: dir)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        if run("/usr/bin/ditto", ["-x", "-k", file.path, dir.path]).status == 0,
+           let app = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))?.first(where: { $0.pathExtension == "app" }),
+           let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")),
+           info["CFBundleIdentifier"] as? String == Bundle.main.bundleIdentifier,
+           Int(info["CFBundleVersion"] as? String ?? "") == r.build,
+           run("/usr/bin/codesign", ["--verify", "--deep", app.path]).status == 0 {
+          staged = app
+        } else { problem = "下载的安装包不完整或签名不对，已丢弃。" }
+      }
+      DispatchQueue.main.async {
+        self.checking = false
+        if let staged { self.stagedUpdate = staged; self.offerRestart(staged, release: r) }
+        else if manual { self.tell("更新失败", problem) }
+      }
+    }.resume()
+  }
+
+  func offerRestart(_ next: URL, release r: Release? = nil) {
+    let a = NSAlert()
+    a.messageText = r.map { "随记 \($0.version) 已下载" } ?? "新版本已下载"
+    a.informativeText = (r?.notes.map { $0 + "\n\n" } ?? "") + "重启随记就能用上新版本；也可以等下次退出时再更新。"
+    a.addButton(withTitle: "立即重启"); a.addButton(withTitle: "退出时更新")
+    if a.runModal() == .alertFirstButtonReturn { install(next, relaunch: true); NSApp.terminate(nil) }
+  }
+
+  // Swaps the bundle once this process has exited (a running app cannot replace itself), then optionally reopens it.
+  func install(_ next: URL, relaunch: Bool) {
+    stagedUpdate = nil
+    let script = """
+    while kill -0 "$1" 2>/dev/null; do sleep 0.2; done
+    old="$2"; new="$3"
+    rm -rf "$old.previous" && mv "$old" "$old.previous" && mv "$new" "$old" && rm -rf "$old.previous" || { [ -d "$old" ] || mv "$old.previous" "$old"; }
+    xattr -dr com.apple.quarantine "$old" 2>/dev/null
+    [ "$4" = 1 ] && open "$old"
+    exit 0
+    """
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/bin/sh")
+    p.arguments = ["-c", script, "sh", String(getpid()), Bundle.main.bundlePath, next.path, relaunch ? "1" : "0"]
+    try? p.run()
+  }
+
+  func tell(_ title: String, _ text: String) {
+    let a = NSAlert(); a.messageText = title; a.informativeText = text; a.runModal()
   }
 
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -169,6 +265,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     m.addItem(withTitle: "立即同步", action: #selector(syncNow), keyEquivalent: "")
     m.addItem(withTitle: "打开同步的文件夹", action: #selector(openFolder), keyEquivalent: "")
     m.addItem(withTitle: "查看同步日志", action: #selector(openLog), keyEquivalent: "")
+    m.addItem(withTitle: "检查更新…", action: #selector(checkNow), keyEquivalent: "")
     m.addItem(.separator())
     m.addItem(withTitle: "打开随记", action: #selector(showWindow), keyEquivalent: "")
     m.addItem(withTitle: "退出随记", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
@@ -207,7 +304,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func mi(_ t: String, _ a: Selector?, _ k: String, _ mods: NSEvent.ModifierFlags = .command) -> NSMenuItem {
       let i = NSMenuItem(title: t, action: a, keyEquivalent: k); i.keyEquivalentModifierMask = mods; return i
     }
-    sub("随记", [mi("关于随记", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), ""), .separator(),
+    sub("随记", [mi("关于随记", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), ""), mi("检查更新…", #selector(checkNow), ""), .separator(),
                mi("隐藏随记", #selector(NSApplication.hide(_:)), "h"),
                mi("隐藏其他", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option]), .separator(),
                mi("退出随记", #selector(NSApplication.terminate(_:)), "q")])
