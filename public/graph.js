@@ -86,7 +86,9 @@ export function mountGraph(host, data, { onOpen, isActive }) {
     for (const [a, b] of E) { if (focus && (a === focus.i || b === focus.i)) continue; ctx.moveTo(N[a].x, N[a].y); ctx.lineTo(N[b].x, N[b].y); }
     ctx.stroke();
     if (focus) {
-      ctx.globalAlpha = 0.9; ctx.strokeStyle = ink; ctx.lineWidth = 1.4 / view.k;
+      // A hub has hundreds of links; drawing them all solid turns into a white burst.
+      ctx.globalAlpha = focus.nb.size > 40 ? 0.3 : focus.nb.size > 12 ? 0.55 : 0.9;
+      ctx.strokeStyle = ink; ctx.lineWidth = 1.2 / view.k;
       ctx.beginPath();
       for (const j of focus.nb) { ctx.moveTo(focus.x, focus.y); ctx.lineTo(N[j].x, N[j].y); }
       ctx.stroke();
@@ -102,19 +104,42 @@ export function mountGraph(host, data, { onOpen, isActive }) {
       if (active) { ctx.lineWidth = 2 / view.k; ctx.strokeStyle = ink; ctx.beginPath(); ctx.arc(p.x, p.y, r + 3 / view.k, 0, Math.PI * 2); ctx.stroke(); }
     }
 
-    // Labels: everything once zoomed in, otherwise only the hovered node and its neighbours.
-    const fs = 11 / view.k;
-    ctx.font = `${fs}px ${cs.getPropertyValue("--font-body") || "sans-serif"}`;
+    // Labels never overlap. They are placed in priority order — hovered node, open files, then the
+    // best-connected neighbours (or, when zoomed in, the best-connected nodes on screen) — and any label
+    // that would collide with one already placed is skipped.
+    const fs = 11 / view.k, pad = 3 / view.k, font = cs.getPropertyValue("--font-body") || "sans-serif";
     ctx.textAlign = "center"; ctx.textBaseline = "top";
     const zoomLabels = Math.min(1, Math.max(0, (view.k - 1.1) / 0.6));
-    for (const p of N) {
-      const on = p === focus || (lit && lit.has(p.i)) || isActive(p);
-      const a = on ? 1 : focus ? 0 : zoomLabels;
-      if (a <= 0.02) continue;
-      ctx.globalAlpha = a;
-      ctx.fillStyle = on ? ink : muted;
-      const text = p.label.length > 28 ? p.label.slice(0, 27) + "…" : p.label;
-      ctx.fillText(text, p.x, p.y + radius(p) + 3 / view.k);
+    const byDeg = (a, b) => b.deg - a.deg;
+    const order = [];
+    if (focus) order.push(focus);
+    order.push(...N.filter((p) => p !== focus && isActive(p)));
+    if (focus) order.push(...[...focus.nb].map((j) => N[j]).sort(byDeg).slice(0, 30));
+    else if (zoomLabels > 0.02) order.push(...[...N].sort(byDeg));
+    const [vx0, vy0] = toWorld([0, 0]), [vx1, vy1] = toWorld([W, H]);
+    const placed = [], seen = new Set();
+    const free = (x, y, w, h) => !placed.some((r) => x < r[0] + r[2] && x + w > r[0] && y < r[1] + r[3] && y + h > r[1]);
+    for (const p of order) {
+      if (seen.has(p)) continue;
+      seen.add(p);
+      if (p.x < vx0 || p.x > vx1 || p.y < vy0 || p.y > vy1) continue;
+      const main = p === focus;
+      ctx.font = `${main ? 600 : 400} ${main ? fs * 1.15 : fs}px ${font}`;
+      const max = main ? 48 : 22;
+      const text = p.label.length > max ? p.label.slice(0, max - 1) + "…" : p.label;
+      const w = ctx.measureText(text).width + pad * 2, h = (main ? fs * 1.15 : fs) + pad * 2;
+      const x = p.x - w / 2, y = p.y + radius(p) + 2 / view.k;
+      if (!main && !free(x, y, w, h)) continue;
+      placed.push([x, y, w, h]);
+      if (main) {
+        ctx.globalAlpha = 0.92; ctx.fillStyle = bg;
+        ctx.beginPath(); ctx.roundRect(x, y, w, h, h / 2); ctx.fill();
+        ctx.globalAlpha = 1; ctx.fillStyle = ink;
+      } else {
+        ctx.globalAlpha = focus || isActive(p) ? 0.9 : zoomLabels;
+        ctx.fillStyle = focus || isActive(p) ? ink : muted;
+      }
+      ctx.fillText(text, p.x, y + pad);
     }
     ctx.globalAlpha = 1;
   }
