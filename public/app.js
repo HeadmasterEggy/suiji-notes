@@ -10,6 +10,45 @@ const app = $("app"), list = $("list"), search = $("search");
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 
+// ---------- styles ----------
+// Glass (no attribute) follows the system; the others set their own colours and color-scheme.
+const PIXEL_FONTS = "https://fonts.googleapis.com/css2?family=DotGothic16&family=Pixelify+Sans:wght@400;600&display=swap";
+const isDark = () => getComputedStyle(document.documentElement).colorScheme.includes("dark");
+function applyStyle(name, save) {
+  if (name) document.documentElement.dataset.style = name; else delete document.documentElement.dataset.style;
+  if (name === "blocks" && !document.getElementById("pixelFonts")) {
+    document.head.append(Object.assign(document.createElement("link"), { id: "pixelFonts", rel: "stylesheet", href: PIXEL_FONTS }));
+  }
+  if (save) try { name ? localStorage.setItem("suiji:style", name) : localStorage.removeItem("suiji:style"); } catch {}
+  for (const b of $("styleMenu").querySelectorAll("[data-style]")) b.setAttribute("aria-checked", String(b.dataset.style === (name || "")));
+  const bar = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
+  for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.content = name ? bar : (m.media.includes("dark") ? "#000000" : "#f4f4f4");
+}
+applyStyle(document.documentElement.dataset.style || "");
+{
+  const menu = $("styleMenu"), btn = $("styleBtn");
+  const close = () => { menu.hidden = true; btn.setAttribute("aria-expanded", "false"); };
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    if (!menu.hidden) return close();
+    const r = btn.getBoundingClientRect();
+    menu.hidden = false; btn.setAttribute("aria-expanded", "true");
+    menu.style.left = Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8)) + "px";
+    menu.style.top = Math.max(8, r.top - menu.offsetHeight - 8) + "px";
+    menu.querySelector('[aria-checked="true"]')?.focus();
+  };
+  menu.onclick = (e) => {
+    const b = e.target.closest("[data-style]");
+    if (!b) return;
+    applyStyle(b.dataset.style, true); close();
+    // Diagrams and cached renders were drawn with the old colours.
+    mermaidLib = null; rendered.clear();
+    for (const p of panes.values()) { if (p.kind === "file") { p.shown = null; renderPane(p); } p.graph?.redraw(); }
+  };
+  document.addEventListener("click", (e) => { if (!menu.hidden && !menu.contains(e.target)) close(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !menu.hidden) { close(); btn.focus(); } });
+}
+
 // ---------- updates ----------
 // Every deploy changes the cache name in sw.js. Open windows (the Mac app, a PWA left open) check it every
 // 10 minutes and whenever they come back to the front. A window in the background with nothing being edited
@@ -330,7 +369,7 @@ const MERMAID_CSS = `
 `;
 function loadMermaid() {
   mermaidLib ||= import(CDN + "mermaid@10.9.1/dist/mermaid.esm.min.mjs").then(({ default: m }) => {
-    const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+    const dark = isDark();
     // "base" theme in greys for Mermaid's own colour maths; MERMAID_CSS then repaints everything with the
     // page's CSS variables, so diagrams match the app and follow light/dark even after they are rendered.
     const v = dark

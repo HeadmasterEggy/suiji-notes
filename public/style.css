@@ -165,6 +165,7 @@ input[type="search"]:focus, input[type="email"]:focus, input[type="password"]:fo
 .empty strong { color: var(--ink); display: block; font-family: var(--font-display); font-size: 19px; margin-bottom: 4px; }
 .foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 8px 0; border-top: 1px solid var(--rim-low); margin-top: 8px; font-size: 12px; color: var(--muted); }
 .foot span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.foot button { flex-shrink: 0; white-space: nowrap; }
 
 .editor { overflow: hidden; }
 .ebar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--rim-low); background: var(--glass-strong); }
@@ -444,3 +445,143 @@ textarea {
 }
 .update-toast[hidden] { display: none; }
 .update-toast:hover { background: var(--panel); }
+
+/* ===================== Styles =====================
+   html[data-style] picks one (saved per device, applied before first paint by the script in index.html).
+   No attribute: liquid glass, following the system's light/dark. The others fix their own colours. */
+
+/* ---- 纸张: warm paper, serif text, no glass ---- */
+:root[data-style="paper"] {
+  --bg: #efe8da; --panel: #fbf7ef; --ink: #2b2520; --muted: #8a7d6b; --line: #e2d8c5;
+  --accent: #8b5e34; --on-accent: #fffaf0; --accent-soft: rgba(139, 94, 52, .09); --danger: #a33a2a; --warn: #b39a74;
+  --glass: rgba(251, 247, 239, .88); --glass-strong: #fffaf2; --rim: rgba(255, 255, 255, .7); --rim-low: rgba(80, 60, 30, .1);
+  --shadow: 0 1px 0 rgba(80, 60, 30, .06), 0 8px 24px rgba(80, 60, 30, .08); --blob: rgba(190, 150, 90, .16);
+  --font-body: "Songti SC", "Noto Serif SC", "Source Han Serif SC", Georgia, serif;
+  color-scheme: light;
+}
+:root[data-style="paper"] .glass { -webkit-backdrop-filter: none; backdrop-filter: none; border-radius: 14px; }
+:root[data-style="paper"] body {
+  background-color: var(--bg);
+  background-image: radial-gradient(rgba(120, 90, 40, .05) 1px, transparent 1px); background-size: 4px 4px;
+}
+:root[data-style="paper"] .md-body { font-size: 17px; line-height: 1.9; }
+:root[data-style="paper"] .md-body blockquote { font-style: italic; }
+
+/* ---- 终端: green phosphor on black, monospace ---- */
+:root[data-style="terminal"] {
+  --bg: #050805; --panel: #0a110a; --ink: #b8f5b0; --muted: #5f8f5a; --line: #173017;
+  --accent: #4ade80; --on-accent: #031203; --accent-soft: rgba(74, 222, 128, .1); --danger: #ff6b5b; --warn: #c9b458;
+  --glass: rgba(8, 16, 8, .82); --glass-strong: rgba(10, 22, 10, .95); --rim: rgba(74, 222, 128, .18); --rim-low: rgba(74, 222, 128, .14);
+  --shadow: 0 0 0 1px rgba(74, 222, 128, .06), 0 0 30px rgba(74, 222, 128, .05); --blob: rgba(74, 222, 128, .1);
+  --font-display: ui-monospace, "SF Mono", Menlo, monospace; --font-body: ui-monospace, "SF Mono", Menlo, "PingFang SC", monospace;
+  color-scheme: dark;
+}
+:root[data-style="terminal"] .glass { border-radius: 6px; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+:root[data-style="terminal"] body { text-shadow: 0 0 6px rgba(74, 222, 128, .25); }
+:root[data-style="terminal"] body::after {   /* faint scanlines instead of the second blob */
+  inset: 0; width: auto; height: auto; border-radius: 0; filter: none; animation: none; z-index: 100; opacity: .5;
+  background: repeating-linear-gradient(transparent 0 2px, rgba(0, 0, 0, .18) 2px 3px);
+}
+:root[data-style="terminal"] .ghost, :root[data-style="terminal"] .btn-primary,
+:root[data-style="terminal"] input[type="search"], :root[data-style="terminal"] .tree-row, :root[data-style="terminal"] .toc-list button { border-radius: 4px; }
+:root[data-style="terminal"] .md-body h1::before { content: "# "; color: var(--muted); }
+:root[data-style="terminal"] .md-body h2::before { content: "## "; color: var(--muted); }
+:root[data-style="terminal"] .md-body h3::before { content: "### "; color: var(--muted); }
+
+/* ---- 方块: a blocky, pixel-art world — sky, grass and dirt, stone panels, chunky bevels ---- */
+:root[data-style="blocks"] {
+  --bg: #8fcdf6; --panel: #c6c6c6; --ink: #1e1e1e; --muted: #4f4f4f; --line: #8b8b8b;
+  --accent: #5b9e32; --on-accent: #ffffff; --accent-soft: rgba(255, 255, 255, .35); --danger: #b02e26; --warn: #e0a22b;
+  --glass: #c6c6c6; --glass-strong: #d9d9d9; --rim: #ffffff; --rim-low: #555555;
+  --shadow: none; --blob: transparent;
+  --px: 3px;   /* one "pixel" of the bevels */
+  --bevel: inset var(--px) var(--px) 0 rgba(255, 255, 255, .75), inset calc(-1 * var(--px)) calc(-1 * var(--px)) 0 rgba(0, 0, 0, .35);
+  --slot: inset var(--px) var(--px) 0 rgba(0, 0, 0, .45), inset calc(-1 * var(--px)) calc(-1 * var(--px)) 0 rgba(255, 255, 255, .55);
+  --font-pixel: "Pixelify Sans", "DotGothic16", "PingFang SC", monospace;
+  --font-display: var(--font-pixel); --font-body: "DotGothic16", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  color-scheme: light;
+}
+:root[data-style="blocks"] body { background: linear-gradient(#6fbdf3, #b5e0fb 75%) fixed; }
+/* a strip of grass on dirt along the bottom, in 8px blocks */
+:root[data-style="blocks"] body::after {
+  display: block; inset: auto 0 0 0; width: auto; height: 40px; border-radius: 0; filter: none; animation: none;
+  background:
+    linear-gradient(#6cb33f 0 8px, #4f8a2b 8px 12px, transparent 12px),
+    repeating-conic-gradient(#8a5a35 0 25%, #7a4f2e 0 50%) 0 0 / 16px 16px;
+}
+/* one blocky cloud drifting across the sky */
+:root[data-style="blocks"] body::before {
+  display: block; top: 70px; left: 0; width: 16px; height: 16px; border-radius: 0; filter: none;
+  background: #fff; opacity: .9;
+  box-shadow: 16px 0 #fff, 32px 0 #fff, 48px 0 #fff, 64px 0 #fff, 16px -16px #fff, 32px -16px #fff, 48px -16px #fff,
+    160px 40px #fff, 176px 40px #fff, 192px 40px #fff, 176px 24px #fff;
+  animation: cloud 140s linear infinite;
+}
+@keyframes cloud { from { transform: translateX(-260px); } to { transform: translateX(110vw); } }
+:root[data-style="blocks"] .glass {
+  border-radius: 0; border: var(--px) solid #1e1e1e; background: var(--panel);
+  -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: var(--bevel), 0 6px 0 rgba(0, 0, 0, .25);
+}
+:root[data-style="blocks"] .glass::after { display: none; }
+:root[data-style="blocks"] .ebar { background: #b4b4b4; border-bottom: var(--px) solid #8b8b8b; }
+:root[data-style="blocks"] .brand, :root[data-style="blocks"] .md-body h1, :root[data-style="blocks"] .md-body h2,
+:root[data-style="blocks"] .md-body h3, :root[data-style="blocks"] .md-head h1 { font-family: var(--font-pixel); letter-spacing: .02em; }
+:root[data-style="blocks"] .brand { color: #fff; text-shadow: 3px 3px 0 #3f3f3f; }
+/* buttons are blocks: grass on top for the main one, stone for the rest; pressing pushes them in */
+:root[data-style="blocks"] .btn-primary, :root[data-style="blocks"] .ghost.bordered, :root[data-style="blocks"] .ghost {
+  border-radius: 0; border: var(--px) solid #1e1e1e; font-family: var(--font-pixel);
+}
+:root[data-style="blocks"] .btn-primary {
+  background: linear-gradient(#79c05a 0 30%, #5b9e32 30% 100%); color: #fff; text-shadow: 2px 2px 0 #2d5a12;
+  box-shadow: var(--bevel);
+}
+:root[data-style="blocks"] .ghost.bordered, :root[data-style="blocks"] .ghost { background: #a8a8a8; color: #1e1e1e; box-shadow: var(--bevel); }
+:root[data-style="blocks"] .ghost.icon { padding: 4px; }
+:root[data-style="blocks"] .ghost:hover, :root[data-style="blocks"] .ghost.bordered:hover { background: #bdbdbd; outline: 2px solid #fff; outline-offset: -5px; }
+:root[data-style="blocks"] .btn-primary:active, :root[data-style="blocks"] .ghost:active { box-shadow: var(--slot); transform: none; }
+:root[data-style="blocks"] input[type="search"], :root[data-style="blocks"] input[type="email"], :root[data-style="blocks"] input[type="password"] {
+  border-radius: 0; border: var(--px) solid #1e1e1e; background: #000; color: #fff; box-shadow: none; font-family: var(--font-body);
+}
+:root[data-style="blocks"] input::placeholder { color: #a0a0a0; }
+/* the file tree reads like an inventory: hover outlines a slot, the open file is a dark slot */
+:root[data-style="blocks"] .tree-row { border-radius: 0; }
+:root[data-style="blocks"] .tree-row:hover { background: rgba(255, 255, 255, .45); transform: none; }
+:root[data-style="blocks"] .tree-file[aria-current="true"] { background: #8b8b8b; color: #fff; box-shadow: var(--slot); text-shadow: 2px 2px 0 #3f3f3f; }
+:root[data-style="blocks"] .chev::before { border-color: #1e1e1e; border-width: 0 3px 3px 0; }
+:root[data-style="blocks"] .drawer-inner::before { width: 3px; background: #8b8b8b; }
+/* the document is a sheet of paper inside the stone frame */
+:root[data-style="blocks"] .preview.doc { background: #f4efe2; box-shadow: var(--slot); margin: 8px; }
+:root[data-style="blocks"] .md-body { --mm-node: #ffffff; --mm-border: #1e1e1e; --mm-cluster: #e9e2cf; }
+:root[data-style="blocks"] .md-body pre, :root[data-style="blocks"] .md-body code { border-radius: 0; background: #2b2b2b; color: #e6e6e6; }
+:root[data-style="blocks"] .md-body blockquote { border-radius: 0; border-left: 6px solid var(--accent); background: #e9e2cf; }
+:root[data-style="blocks"] .md-tags span { border-radius: 0; }
+:root[data-style="blocks"] .toc-list button, :root[data-style="blocks"] .toc-count { border-radius: 0; }
+:root[data-style="blocks"] .toc-ink { width: 4px; border-radius: 0; }
+:root[data-style="blocks"] .toc-bar { height: 6px; border-radius: 0; background: #555; box-shadow: var(--slot); }
+:root[data-style="blocks"] .toc-bar > i { background: linear-gradient(#8ee05a, #5b9e32); }   /* an experience bar */
+:root[data-style="blocks"] .divider::before { border-radius: 0; width: 6px; }
+:root[data-style="blocks"] ::-webkit-scrollbar { width: 12px; height: 12px; }
+:root[data-style="blocks"] ::-webkit-scrollbar-thumb { background: #8b8b8b; border: 3px solid #c6c6c6; box-shadow: inset 2px 2px 0 #bdbdbd, inset -2px -2px 0 #555; }
+:root[data-style="blocks"] .update-toast { border-radius: 0; border: var(--px) solid #1e1e1e; background: #3f3f3f; color: #ffff55; font-family: var(--font-pixel); }
+
+/* ---- the picker ---- */
+.style-menu {
+  position: fixed; z-index: 60; width: 236px; padding: 8px; border-radius: 16px;
+  display: flex; flex-direction: column; gap: 2px; animation: rise .25s var(--spring) both;
+}
+.style-menu[hidden] { display: none; }
+.style-menu h3 { margin: 2px 8px 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em; color: var(--muted); }
+.style-menu button {
+  all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; gap: 10px;
+  padding: 8px; border-radius: 10px; font-size: 13.5px; color: var(--ink);
+}
+.style-menu button:hover { background: var(--accent-soft); }
+.style-menu button:focus-visible { outline: 2px solid var(--accent); }
+.style-menu button[aria-checked="true"]::after { content: "✓"; margin-left: auto; color: var(--accent); }
+.style-menu small { display: block; font-size: 11px; color: var(--muted); }
+.swatch { flex: none; width: 34px; height: 24px; border-radius: 7px; border: 1px solid rgba(0, 0, 0, .12); }
+.swatch.glass-sw { background: linear-gradient(135deg, #f4f4f4 50%, #111 50%); }
+.swatch.paper-sw { background: linear-gradient(#fbf7ef 60%, #8b5e34 60%); }
+.swatch.terminal-sw { background: #050805; box-shadow: inset 0 0 0 5px #050805, inset 0 0 0 7px #4ade80; }
+.swatch.blocks-sw { border-radius: 0; background: linear-gradient(#79c05a 0 35%, #8a5a35 35%); image-rendering: pixelated; }
+:root[data-style="blocks"] .style-menu, :root[data-style="blocks"] .style-menu button { border-radius: 0; }

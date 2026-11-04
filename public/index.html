@@ -14,6 +14,8 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="stylesheet" href="style.css">
+<!-- The chosen style goes on before first paint, so the page never flashes the default one. -->
+<script>try { const s = localStorage.getItem("suiji:style"); if (s) document.documentElement.dataset.style = s; } catch {}</script>
 </head>
 <body>
 <div class="app" id="app" data-view="list" hidden>
@@ -36,6 +38,7 @@
     <ul class="list" id="list"></ul>
     <footer class="foot">
       <span id="who"></span>
+      <button class="ghost small" id="styleBtn" type="button" aria-haspopup="menu" aria-expanded="false">风格</button>
       <button class="ghost small" id="outBtn" type="button">退出登录</button>
     </footer>
   </section>
@@ -87,6 +90,13 @@
   </section>
 </template>
 <button class="update-toast glass" id="updateToast" type="button" hidden>有新版本 · 点此刷新</button>
+<div class="style-menu glass" id="styleMenu" role="menu" aria-label="风格" hidden>
+  <h3>风格</h3>
+  <button type="button" role="menuitemradio" data-style=""><span class="swatch glass-sw"></span><span>玻璃<small>跟随系统的浅色 / 深色</small></span></button>
+  <button type="button" role="menuitemradio" data-style="paper"><span class="swatch paper-sw"></span><span>纸张<small>暖色纸面，衬线字</small></span></button>
+  <button type="button" role="menuitemradio" data-style="terminal"><span class="swatch terminal-sw"></span><span>终端<small>黑底绿字，等宽</small></span></button>
+  <button type="button" role="menuitemradio" data-style="blocks"><span class="swatch blocks-sw"></span><span>方块<small>像素方块世界</small></span></button>
+</div>
 <script type="module" src="app.js"></script>
 </body>
 </html>
