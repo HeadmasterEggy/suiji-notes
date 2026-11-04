@@ -110,6 +110,8 @@ async function loadFiles() {
   if (!uid || !navigator.onLine) return;
   const { data, error } = await sb.from("files").select("id,name,folder,path,size,mime,created_at,updated_at,links,tags").order("updated_at", { ascending: false }).limit(5000);
   if (error) { console.error(error); return; }
+  const before = new Map(files.map((f) => [f.id, versionOf(f)]));
+  for (const f of data) if (before.has(f.id) && before.get(f.id) !== versionOf(f)) forgetUrls(f.path);
   files = data; filesLoaded = true;
   render();
   schedulePrefetch();
@@ -174,9 +176,13 @@ async function signedUrls(paths, download) {
   return out;
 }
 const signedUrl = async (f) => (await signedUrls([f.path])).get(f.path);
+// A URL signed before an upload can keep serving the old copy for half a minute or more, even with a
+// cache-buster; one signed afterwards is current. So a file's URLs are dropped whenever its version changes.
+function forgetUrls(path) { for (const k of signed.keys()) if (k.startsWith(path + "|")) signed.delete(k); }
 
-const FILE_CACHE = "suiji-files";
-const versionOf = (f) => f.id + "@" + (f.updated_at || f.created_at);
+const FILE_CACHE = "suiji-files-2";   // renamed when old entries must not be trusted
+// In milliseconds: the database and this app write the same time in different formats (+00:00 vs Z).
+const versionOf = (f) => f.id + "@" + Date.parse(f.updated_at || f.created_at);
 const cacheReq = (f) => new Request(new URL("__files/" + encodeURIComponent(versionOf(f)), location.href));
 // id -> cached request for that file, built once from the cache, so replacing a version is cheap.
 let cacheIndex = null;
@@ -193,24 +199,35 @@ function fileText(f) {
   if (!inflight.has(v)) inflight.set(v, readText(f).finally(() => inflight.delete(v)));
   return inflight.get(v);
 }
+// Storage can serve the previous copy for a moment after an upload, so reads bypass caches and must match
+// the size in the row; a mismatched read is retried and never cached under the new version. If it is still
+// the old copy after that, the id goes in staleIds and the pane tries again a little later.
+const staleIds = new Set(), retried = new Set();   // retried: versions already given their one extra try
 async function readText(f) {
-  let store = null;
-  try { store = await caches.open(FILE_CACHE); const hit = await store.match(cacheReq(f)); if (hit) return await hit.text(); } catch {}
+  try { const hit = await (await caches.open(FILE_CACHE)).match(cacheReq(f)); if (hit) return await hit.text(); } catch {}
   const url = await signedUrl(f);
   if (!url) throw new Error("no url");
-  const r = await fetch(url);
-  if (!r.ok) throw new Error("HTTP " + r.status);
-  const text = await r.text();
-  if (store) {
-    try {
-      const index = await loadCacheIndex(store), old = index.get(f.id);
-      if (old) await store.delete(old);
-      const req = cacheReq(f);
-      await store.put(req, new Response(text, { headers: { "content-type": "text/plain;charset=utf-8" } }));
-      index.set(f.id, req);
-    } catch {}
+  let text;
+  for (let i = 0; i < 5; i++) {
+    if (i) await new Promise((r) => setTimeout(r, 800 * i));
+    const r = await fetch(url + "&t=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const buf = await r.arrayBuffer();
+    text = new TextDecoder().decode(buf);
+    if (buf.byteLength === f.size) { await cacheText(f, text); staleIds.delete(f.id); return text; }
   }
+  staleIds.add(f.id);
   return text;
+}
+async function cacheText(f, text) {
+  try {
+    const store = await caches.open(FILE_CACHE);
+    const index = await loadCacheIndex(store), old = index.get(f.id);
+    if (old) await store.delete(old);
+    const req = cacheReq(f);
+    await store.put(req, new Response(text, { headers: { "content-type": "text/plain;charset=utf-8" } }));
+    index.set(f.id, req);
+  } catch {}
 }
 const isTextish = (f) => (f.mime.startsWith("text/") || /json|xml|javascript|markdown/.test(f.mime) || ["md", "txt", "csv", "log"].includes(extOf(f.name))) && f.size < 300 * 1024;
 
@@ -455,7 +472,14 @@ async function showFile(f, p) {
   p.meta.textContent = `${baseName(f.name)} · ${fmtSize(f.size)} · ${fmt(f.updated_at || f.created_at)}`;
   const md = isMarkdown(f) && f.size < 2 * 1024 * 1024;
   preview.classList.toggle("doc", md);
-  const show = (el) => { if (token === p.token) { clearTimeout(wait); preview.replaceChildren(el); preview.scrollTop = 0; } };
+  const show = (el) => {
+    if (token !== p.token) return;
+    clearTimeout(wait); preview.replaceChildren(el); preview.scrollTop = 0;
+    if (staleIds.has(f.id) && !retried.has(versionOf(f))) {
+      retried.add(versionOf(f));
+      setTimeout(() => { if (token === p.token) { p.shown = null; renderPane(p); } }, 5000);
+    }
+  };
   // The skeleton only appears if loading takes a noticeable moment, so cached documents never flash.
   const wait = setTimeout(() => { if (token === p.token) preview.replaceChildren(skeleton()); }, 120);
   // The download link is not needed to show the file; fetch it alongside.
@@ -471,7 +495,7 @@ async function showFile(f, p) {
         const [text] = await Promise.all([fileText(f), loadMarkdownLibs()]);
         if (token !== p.token) return;
         el = await renderMarkdown(text, f);
-        keepRender(f, el);
+        if (!staleIds.has(f.id)) keepRender(f, el);
       }
       if (el.dataset.web) { p.web.href = el.dataset.web; p.web.hidden = false; }
       return show(el);
@@ -692,7 +716,13 @@ function makePane(item) {
   q("p-close").onclick = () => closePane(p);
   // Text files can be edited in place; saving replaces the cloud copy, and the Mac agent writes it back to disk.
   p.edit.onclick = async () => {
-    if (p.fileEdit) { commit(p); p.fileEdit = false; p.shown = null; renderPane(p); return; }
+    if (p.fileEdit) {
+      // Wait for the save (this one or an autosave already under way), so the preview shows the new version.
+      p.edit.disabled = true;
+      await commit(p); await p.saving;
+      p.edit.disabled = false;
+      p.fileEdit = false; p.shown = null; renderPane(p); return;
+    }
     const f = files.find((x) => x.id === p.itemId);
     if (!f) return;
     p.edit.disabled = true;
@@ -737,7 +767,7 @@ function makePane(item) {
 function commit(p) {
   clearTimeout(p.editTimer);
   if (!p.editing) return;
-  if (p.kind === "file") { saveFile(p); return; }
+  if (p.kind === "file") return (p.saving = saveFile(p).finally(() => { p.saving = null; }));
   if (p.kind !== "note") return;
   p.editing = false;
   const n = store.notes[p.itemId];
@@ -768,7 +798,9 @@ async function saveFile(p) {
     return;
   }
   p.fileBase = text; Object.assign(f, { size: blob.size, updated_at: now }, meta);
-  p.shown = f.id + "@" + now;   // the preview refreshes when editing ends, not now
+  forgetUrls(f.path);
+  await cacheText(f, text);   // the preview shows exactly what was saved, without downloading it again
+  p.shown = versionOf(f);   // the preview refreshes when editing ends, not now
   setSync("ok", "已同步"); showNote("");
   if (!p.fileEdit) renderPane(p);
 }
@@ -880,7 +912,7 @@ function renderPane(p) {
     return;
   }
   if (editingFile) { p.meta.textContent = `${baseName(file.name)} · 编辑中，自动保存`; return; }
-  const key = file.id + "@" + (file.updated_at || file.created_at);
+  const key = versionOf(file);
   if (p.shown !== key) { p.shown = key; showFile(file, p); }
 }
 function render() { renderList(); panes.forEach(renderPane); }

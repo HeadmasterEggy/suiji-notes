@@ -1,5 +1,5 @@
 // App shell cache so 随记 opens offline. Supabase API calls always go to the network.
-const CACHE = "suiji-v16";
+const CACHE = "suiji-v17";
 const SHELL = ["./", "index.html", "style.css", "app.js", "graph.js", "mdmeta.js", "config.js", "manifest.webmanifest", "icon.svg", "icon-180.png", "icon-512.png",
   "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm"];
 
@@ -7,7 +7,7 @@ self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });
 self.addEventListener("activate", (e) => {
-  e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE && k !== "suiji-files").map((k) => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE && k !== "suiji-files-2").map((k) => caches.delete(k)))).then(() => self.clients.claim()));
 });
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
