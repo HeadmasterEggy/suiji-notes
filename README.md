@@ -14,11 +14,19 @@
 ![macOS](https://img.shields.io/badge/macOS-native%20app-black?style=flat-square&logo=apple)
 ![Supabase](https://img.shields.io/badge/data-Supabase-3ECF8E?style=flat-square&logo=supabase&logoColor=white)
 
-<img src="docs/style-glass.jpg" width="820" alt="A document with its outline">
+<img src="docs/style-glass-light.jpg" width="820" alt="A document with its outline">
 
-<img src="docs/style-glass-dark.jpg" width="200" alt="Glass, dark">&nbsp;<img src="docs/style-paper.jpg" width="200" alt="Paper">&nbsp;<img src="docs/style-terminal.jpg" width="200" alt="Terminal">&nbsp;<img src="docs/style-blocks.jpg" width="200" alt="Blocks">
+<img src="docs/style-glass-light.jpg" width="200" alt="Glass · light">&nbsp;<img src="docs/style-paper-light.jpg" width="200" alt="Paper · light">&nbsp;<img src="docs/style-terminal-light.jpg" width="200" alt="Terminal · light">&nbsp;<img src="docs/style-blocks-light.jpg" width="200" alt="Blocks · light">
 
-<img src="docs/phone-list.jpg" width="200" alt="Folder tree on a phone">&nbsp;&nbsp;<img src="docs/phone-doc.jpg" width="200" alt="A document on a phone">
+<img src="docs/style-glass-dark.jpg" width="200" alt="Glass · dark">&nbsp;<img src="docs/style-paper-dark.jpg" width="200" alt="Paper · dark">&nbsp;<img src="docs/style-terminal-dark.jpg" width="200" alt="Terminal · dark">&nbsp;<img src="docs/style-blocks-dark.jpg" width="200" alt="Blocks · dark">
+
+<sub>Glass, Paper, Terminal and Blocks, each in light (top) and dark (bottom)</sub>
+
+<img src="docs/graph-glass.jpg" width="200" alt="Graph · Glass">&nbsp;<img src="docs/graph-paper.jpg" width="200" alt="Graph · Paper">&nbsp;<img src="docs/graph-terminal.jpg" width="200" alt="Graph · Terminal">&nbsp;<img src="docs/graph-blocks.jpg" width="200" alt="Graph · Blocks">
+
+<sub>The relationship graph in each style</sub>
+
+<img src="docs/phone-list.jpg" width="200" alt="Folder tree on a phone">&nbsp;&nbsp;<img src="docs/phone-doc.jpg" width="200" alt="A document on a phone">&nbsp;&nbsp;<img src="docs/phone-terminal.jpg" width="200" alt="Terminal style on a phone">
 
 </div>
 
@@ -106,4 +114,5 @@ To release a new build: raise `BUILD` in `mac/build.sh`, run it with `--publish`
 - The menu bar item shows whether the folder agent is running, and has 立即同步 (sync now), the synced folder and the sync log. Links to other sites open in your default browser, and downloads go to `~/Downloads`.
 - The folder agent skips hidden files, `node_modules` and `.git`, and does not upload files over 50 MB. Settings, state and the log live in `~/.suiji/`; the log is `~/.suiji/sync.log`.
 - Storage can serve the previous copy of a file for a while after an upload, through a URL signed earlier. So reads use freshly signed URLs and must match the size in the row.
-- Styles are saved per device. 方块 loads two pixel fonts from Google Fonts, and only when it is picked.
+- The interface is in Chinese or English (设置 → 语言; by default it follows the system), and the Mac app's menus follow it.
+- Styles, light / dark and the sort order are saved per device. 方块 loads two pixel fonts from Google Fonts, and only when it is picked.

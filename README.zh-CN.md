@@ -14,11 +14,19 @@
 ![macOS](https://img.shields.io/badge/macOS-原生%20App-black?style=flat-square&logo=apple)
 ![Supabase](https://img.shields.io/badge/数据-Supabase-3ECF8E?style=flat-square&logo=supabase&logoColor=white)
 
-<img src="docs/style-glass.jpg" width="820" alt="文档和它的大纲">
+<img src="docs/style-glass-light.jpg" width="820" alt="文档和它的大纲">
 
-<img src="docs/style-glass-dark.jpg" width="200" alt="玻璃·深色">&nbsp;<img src="docs/style-paper.jpg" width="200" alt="纸张">&nbsp;<img src="docs/style-terminal.jpg" width="200" alt="终端">&nbsp;<img src="docs/style-blocks.jpg" width="200" alt="方块">
+<img src="docs/style-glass-light.jpg" width="200" alt="玻璃 · 浅色">&nbsp;<img src="docs/style-paper-light.jpg" width="200" alt="纸张 · 浅色">&nbsp;<img src="docs/style-terminal-light.jpg" width="200" alt="终端 · 浅色">&nbsp;<img src="docs/style-blocks-light.jpg" width="200" alt="方块 · 浅色">
 
-<img src="docs/phone-list.jpg" width="200" alt="手机上的目录树">&nbsp;&nbsp;<img src="docs/phone-doc.jpg" width="200" alt="手机上的文档">
+<img src="docs/style-glass-dark.jpg" width="200" alt="玻璃 · 深色">&nbsp;<img src="docs/style-paper-dark.jpg" width="200" alt="纸张 · 深色">&nbsp;<img src="docs/style-terminal-dark.jpg" width="200" alt="终端 · 深色">&nbsp;<img src="docs/style-blocks-dark.jpg" width="200" alt="方块 · 深色">
+
+<sub>玻璃、纸张、终端、方块，上排浅色，下排深色</sub>
+
+<img src="docs/graph-glass.jpg" width="200" alt="图谱 · 玻璃">&nbsp;<img src="docs/graph-paper.jpg" width="200" alt="图谱 · 纸张">&nbsp;<img src="docs/graph-terminal.jpg" width="200" alt="图谱 · 终端">&nbsp;<img src="docs/graph-blocks.jpg" width="200" alt="图谱 · 方块">
+
+<sub>各风格下的关系图谱</sub>
+
+<img src="docs/phone-list.jpg" width="200" alt="手机上的目录树">&nbsp;&nbsp;<img src="docs/phone-doc.jpg" width="200" alt="手机上的文档">&nbsp;&nbsp;<img src="docs/phone-terminal.jpg" width="200" alt="手机上的终端风格">
 
 </div>
 
@@ -106,4 +114,5 @@ npx vercel deploy --prod
 - 菜单栏图标显示同步程序是否在运行，还有「立即同步」、「打开同步的文件夹」和「查看同步日志」。指向其他网站的链接会用默认浏览器打开，下载的文件存到「下载」文件夹。
 - 同步程序会跳过隐藏文件、`node_modules` 和 `.git`，超过 50 MB 的文件不上传。配置、状态和日志都在 `~/.suiji/`，日志是 `~/.suiji/sync.log`。
 - 上传后，用之前签发的链接去读，存储可能还会返回旧内容一段时间。所以读取时用新签发的链接，并核对文件大小是否和记录一致。
-- 风格按设备分别保存。选「方块」时才会从 Google Fonts 加载两款像素字体。
+- 界面有中文和英文（设置 → 语言，默认跟随系统），Mac App 的菜单也会跟着变。
+- 风格、明暗和排序方式按设备分别保存。选「方块」时才会从 Google Fonts 加载两款像素字体。

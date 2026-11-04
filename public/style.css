@@ -153,8 +153,8 @@ input[type="search"]:focus, input[type="email"]:focus, input[type="password"]:fo
 }
 .search { flex: 1; }
 /* Sort: an icon button with the native picker laid over it, so phones get their own menu. */
-.sort-btn { position: relative; display: grid; place-items: center; flex: 0 0 auto; align-self: center; width: 30px; height: 26px; padding: 0; }
-.sort-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.sort-btn { position: relative; display: grid; place-items: center; flex: 0 0 auto; width: 26px; height: 24px; padding: 0; }
+.sort-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .sort-btn select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 16px; }
 .btn-primary {
   border: 0; border-radius: 999px; padding: 9px 18px; background: var(--accent); color: var(--on-accent); font-weight: 600;
@@ -171,11 +171,16 @@ input[type="search"]:focus, input[type="email"]:focus, input[type="password"]:fo
 .foot button { flex-shrink: 0; white-space: nowrap; }
 
 .editor { overflow: hidden; }
-.ebar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--rim-low); background: var(--glass-strong); }
+.ebar { display: flex; align-items: center; gap: 4px; padding: 10px 14px; border-bottom: 1px solid var(--rim-low); background: var(--glass-strong); }
 .ebar .meta { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
 .ghost { border: 1px solid transparent; background: transparent; border-radius: 999px; padding: 6px 12px; color: var(--muted); }
 .ghost:hover { background: var(--accent-soft); color: var(--ink); }
 .ghost.small { padding: 3px 8px; font-size: 12px; }
+/* Text buttons in a pane's bar sit at the size of its icons, evenly spaced, so the row reads as one toolbar. */
+.ebar .ghost:not(.icon) { padding: 5px 10px; font-size: 13px; line-height: 18px; }
+.ebar .ghost { color: color-mix(in srgb, var(--ink) 72%, transparent); }
+.ebar .ghost:hover { color: var(--ink); }
+.ebar .meta { margin-right: 4px; }
 .ghost.danger:hover, .ghost.danger.armed { color: var(--danger); border-color: var(--danger); }
 .back { display: none; }
 textarea {
@@ -409,7 +414,10 @@ textarea {
 .graph-btn { margin-left: auto; }
 .head .sync { margin-left: auto; }
 .head .sync + .graph-btn, .head .sync + .sort-btn + .graph-btn { margin-left: 0; }
-.head .sort-btn + .graph-btn { margin-left: -8px; }
+/* Sync state, sort and graph share one centre line; sort and graph sit together as a pair. */
+.head .sync, .head .sort-btn, .head .graph-btn { align-self: center; }
+.head .graph-btn { height: 24px; display: inline-flex; align-items: center; }
+.head .sort-btn + .graph-btn { margin-left: -10px; }
 .preview > .graph { position: relative; align-self: stretch; justify-self: stretch; width: 100%; height: 100%; min-height: 0; overflow: hidden; }
 .graph-canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
 .graph-tools { position: absolute; top: 10px; right: 10px; z-index: 1; display: flex; gap: 6px; }
