@@ -14,12 +14,17 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="stylesheet" href="style.css">
-<!-- The chosen style and text size go on before first paint, so the page never flashes the default one. -->
-<script>try {
-  const s = localStorage.getItem("suiji:style"), f = localStorage.getItem("suiji:font");
-  if (s) document.documentElement.dataset.style = s;
-  if (f) document.documentElement.style.setProperty("--doc-size", f + "px");
-} catch {}</script>
+<!-- The chosen style, light / dark and text size go on before first paint, so the page never flashes the default. -->
+<script>{
+  const r = document.documentElement;
+  r.dataset.mode = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  try {
+    const s = localStorage.getItem("suiji:style"), f = localStorage.getItem("suiji:font"), m = localStorage.getItem("suiji:mode");
+    if (s) r.dataset.style = s;
+    if (m === "light" || m === "dark") r.dataset.mode = m;
+    if (f) r.style.setProperty("--doc-size", f + "px");
+  } catch {}
+}</script>
 </head>
 <body>
 <div class="app" id="app" data-view="list" hidden>
@@ -27,6 +32,11 @@
     <header class="head">
       <h1 class="brand">随记</h1>
       <span class="sync" id="sync" data-s="wait"><span class="dot"></span><span id="syncText">连接中…</span></span>
+      <label class="ghost small sort-btn" title="排序"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2v11M2 10l3 3 3-3M11 14V3M8 6l3-3 3 3"/></svg>
+        <select id="sortSel" aria-label="排序">
+          <option value="name">名称 A→Z</option><option value="name-desc">名称 Z→A</option>
+          <option value="new">从新到旧</option><option value="old">从旧到新</option>
+        </select></label>
       <button class="ghost small graph-btn" id="graphBtn" type="button">图谱</button>
     </header>
     <div class="note" id="note" hidden></div>
@@ -102,10 +112,18 @@
     <section>
       <h3>外观</h3>
       <div class="set-styles" id="styleChoices" role="radiogroup" aria-label="风格">
-        <button type="button" role="radio" data-style=""><span class="swatch glass-sw"></span><b>玻璃</b><small>跟随系统的浅色 / 深色</small></button>
+        <button type="button" role="radio" data-style=""><span class="swatch glass-sw"></span><b>玻璃</b><small>通透的毛玻璃</small></button>
         <button type="button" role="radio" data-style="paper"><span class="swatch paper-sw"></span><b>纸张</b><small>暖色纸面，衬线字</small></button>
         <button type="button" role="radio" data-style="terminal"><span class="swatch terminal-sw"></span><b>终端</b><small>黑底绿字，等宽</small></button>
         <button type="button" role="radio" data-style="blocks"><span class="swatch blocks-sw"></span><b>方块</b><small>像素方块世界</small></button>
+      </div>
+      <div class="set-row">
+        <span>明暗<small>每种风格都有浅色和深色</small></span>
+        <div class="seg" id="modeChoices" role="radiogroup" aria-label="明暗">
+          <button type="button" role="radio" data-mode="">跟随系统</button>
+          <button type="button" role="radio" data-mode="light">浅色</button>
+          <button type="button" role="radio" data-mode="dark">深色</button>
+        </div>
       </div>
       <div class="set-row">
         <span>正文字号<small>文档预览和编辑时的文字大小</small></span>
@@ -113,6 +131,14 @@
           <button type="button" role="radio" data-size="15">小</button>
           <button type="button" role="radio" data-size="16">标准</button>
           <button type="button" role="radio" data-size="18">大</button>
+        </div>
+      </div>
+      <div class="set-row">
+        <span>语言<small>界面文字的语言，切换后会刷新页面</small></span>
+        <div class="seg" id="langChoices" role="radiogroup" aria-label="语言">
+          <button type="button" role="radio" data-lang="">跟随系统</button>
+          <button type="button" role="radio" data-lang="zh">中文</button>
+          <button type="button" role="radio" data-lang="en">English</button>
         </div>
       </div>
     </section>

@@ -24,18 +24,18 @@
 
 ## Features
 
-- **One tree.** Quick notes written in the app sit in a 「随手记」 folder at the top, and the synced folders sit below it.
+- **One tree.** Quick notes written in the app sit in a 「随手记」 folder at the top, and the synced folders sit below it. The ⇅ button sorts it by name or by last change.
 - **Edit anywhere.** Edit a file on the phone, and the Mac agent writes it back to disk within a few seconds.
 - **Outline.** Every document has its own outline beside it: click a heading to jump, and the current section stays marked as you scroll. Drag its edge to resize it.
 - **Split panes.** Split up, down, left or right, by dragging a file onto a pane's edge or with ⌘-click. The layout is remembered.
-- **Styles.** Four looks, picked in 设置 (Settings):
-  - 玻璃 *Glass*: follows the system's light / dark
-  - 纸张 *Paper*: warm paper and serif text
-  - 终端 *Terminal*: green on black, monospace
-  - 方块 *Blocks*: a pixel-art world of sky, grass and stone panels
+- **Styles.** Four looks, picked in 设置 (Settings), each in light and dark (follow the system, or pick one):
+  - 玻璃 *Glass*: frosted, see-through panels
+  - 纸张 *Paper*: warm paper and serif text; dark is paper by lamplight
+  - 终端 *Terminal*: green on black, monospace; light is dark green on pale paper
+  - 方块 *Blocks*: a pixel-art world of sky, grass and stone panels; dark is night, with a moon
 
-  The tab icon, and the Mac app's Dock icon, change with the style.
-- **Settings.** 设置 at the bottom of the sidebar holds the style, text size, whether new documents show their outline, widths, sync, the local cache, the account and update checks.
+  The tab icon, the Mac app's Dock icon and the graph change with the style.
+- **Settings.** 设置 at the bottom of the sidebar holds the style, light / dark, text size, the interface language (中文 / English), whether new documents show their outline, widths, sync, the local cache, the account and update checks.
 - **Relationship graph.** Like Obsidian's graph, built from `[[wikilinks]]`, relative `.md` links and front-matter tags.
 - **Markdown.** Math (KaTeX), Mermaid diagrams, and Obsidian's `[[wikilinks]]` (shown by their alias, opening the linked note) and `==highlights==`.
 - **Blog links.** Every published post links to its page on the blog (`https://qiao1.top/posts/<abbrlink>.html`).

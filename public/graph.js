@@ -69,18 +69,24 @@ export function mountGraph(host, data, { onOpen, isActive }) {
   }
 
   // ---------- drawing ----------
+  // Each style can restyle the graph through CSS variables (style.css): --g-node and --g-edge colours,
+  // --g-edge-w (line width), --g-glow (blur in px), --g-shape: square, --g-outline (node border).
   function draw() {
-    const cs = getComputedStyle(host);
-    const ink = cs.getPropertyValue("--ink").trim() || "#111", muted = cs.getPropertyValue("--muted").trim() || "#888";
-    const bg = cs.getPropertyValue("--bg").trim() || "#fff";
+    const cs = getComputedStyle(host), v = (n) => cs.getPropertyValue(n).trim();
+    const ink = v("--ink") || "#111", muted = v("--muted") || "#888";
+    const bg = v("--bg") || "#fff";
+    const node = v("--g-node") || muted, edge = v("--g-edge") || muted, ew = +v("--g-edge-w") || 1;
+    const glow = +v("--g-glow") || 0, square = v("--g-shape") === "square", outline = v("--g-outline");
+    const dot = (x, y, r) => { ctx.beginPath(); if (square) ctx.rect(x - r, y - r, r * 2, r * 2); else ctx.arc(x, y, r, 0, Math.PI * 2); };
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
     ctx.translate(W / 2 + view.x, H / 2 + view.y);
     ctx.scale(view.k, view.k);
     const focus = hover, lit = focus ? focus.nb : null;
 
-    ctx.lineWidth = 1 / view.k;
-    ctx.strokeStyle = muted;
+    ctx.lineWidth = ew / view.k;
+    ctx.lineCap = square ? "square" : "butt";
+    ctx.strokeStyle = edge;
     ctx.globalAlpha = focus ? edgeAlpha * 0.35 : edgeAlpha;
     ctx.beginPath();
     for (const [a, b] of E) { if (focus && (a === focus.i || b === focus.i)) continue; ctx.moveTo(N[a].x, N[a].y); ctx.lineTo(N[b].x, N[b].y); }
@@ -88,21 +94,26 @@ export function mountGraph(host, data, { onOpen, isActive }) {
     if (focus) {
       // A hub has hundreds of links; drawing them all solid turns into a white burst.
       ctx.globalAlpha = focus.nb.size > 40 ? 0.3 : focus.nb.size > 12 ? 0.55 : 0.9;
-      ctx.strokeStyle = ink; ctx.lineWidth = 1.2 / view.k;
+      ctx.strokeStyle = ink; ctx.lineWidth = 1.2 * ew / view.k;
       ctx.beginPath();
       for (const j of focus.nb) { ctx.moveTo(focus.x, focus.y); ctx.lineTo(N[j].x, N[j].y); }
       ctx.stroke();
     }
 
+    if (glow) { ctx.shadowColor = node; ctx.shadowBlur = glow; }
     for (const p of N) {
       const on = p === focus || (lit && lit.has(p.i)), active = isActive(p);
       ctx.globalAlpha = focus && !on ? 0.25 : 1;
       const r = radius(p);
-      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-      if (p.kind === "tag") { ctx.lineWidth = 1.2 / view.k; ctx.strokeStyle = on ? ink : muted; ctx.fillStyle = bg; ctx.fill(); ctx.stroke(); }
-      else { ctx.fillStyle = on || active ? ink : muted; ctx.fill(); }
-      if (active) { ctx.lineWidth = 2 / view.k; ctx.strokeStyle = ink; ctx.beginPath(); ctx.arc(p.x, p.y, r + 3 / view.k, 0, Math.PI * 2); ctx.stroke(); }
+      dot(p.x, p.y, r);
+      if (p.kind === "tag") { ctx.lineWidth = 1.2 / view.k; ctx.strokeStyle = on ? ink : node; ctx.fillStyle = bg; ctx.fill(); ctx.stroke(); }
+      else {
+        ctx.fillStyle = on || active ? ink : node; ctx.fill();
+        if (outline) { ctx.lineWidth = 2 / view.k; ctx.strokeStyle = outline; ctx.stroke(); }
+      }
+      if (active) { ctx.lineWidth = 2 / view.k; ctx.strokeStyle = ink; dot(p.x, p.y, r + 3 / view.k); ctx.stroke(); }
     }
+    ctx.shadowBlur = 0;
 
     // Labels never overlap. They are placed in priority order — hovered node, open files, then the
     // best-connected neighbours (or, when zoomed in, the best-connected nodes on screen) — and any label
@@ -133,7 +144,7 @@ export function mountGraph(host, data, { onOpen, isActive }) {
       placed.push([x, y, w, h]);
       if (main) {
         ctx.globalAlpha = 0.92; ctx.fillStyle = bg;
-        ctx.beginPath(); ctx.roundRect(x, y, w, h, h / 2); ctx.fill();
+        ctx.beginPath(); ctx.roundRect(x, y, w, h, square ? 0 : h / 2); ctx.fill();
         ctx.globalAlpha = 1; ctx.fillStyle = ink;
       } else {
         ctx.globalAlpha = focus || isActive(p) ? 0.9 : zoomLabels;

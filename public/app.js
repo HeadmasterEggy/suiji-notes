@@ -4,6 +4,9 @@ import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 import { mdMeta } from "./mdmeta.js";
 import { mountGraph } from "./graph.js";
+import { t, lang, langChoice, translatePage } from "./i18n.js";
+
+translatePage();
 
 const $ = (id) => document.getElementById(id);
 const app = $("app"), list = $("list"), search = $("search");
@@ -23,11 +26,29 @@ function applyStyle(name, save) {
   for (const b of $("styleChoices").querySelectorAll("[data-style]")) b.setAttribute("aria-checked", String(b.dataset.style === (name || "")));
   // The tab icon follows the style; in the Mac app the Dock icon does too.
   document.querySelector('link[rel="icon"]').href = name ? `icon-${name}.svg` : "icon.svg";
-  window.webkit?.messageHandlers?.suiji?.postMessage({ style: name || "" });
+  window.webkit?.messageHandlers?.suiji?.postMessage({ style: name || "", lang });
+  paintBar();
+}
+// The browser and status bar take the page's background.
+function paintBar() {
   const bar = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
-  for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.content = name ? bar : (m.media.includes("dark") ? "#000000" : "#f4f4f4");
+  for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.content = bar;
 }
 applyStyle(document.documentElement.dataset.style || "");
+// Light / dark: data-mode on the root is always "light" or "dark", which every style reads. The choice is
+// saved as "suiji:mode"; without one it follows the system, live. The head script sets it before first paint.
+let modeChoice = "";
+try { const m = localStorage.getItem("suiji:mode"); if (m === "light" || m === "dark") modeChoice = m; } catch {}
+const systemDark = matchMedia("(prefers-color-scheme: dark)");
+function applyMode(choice, save) {
+  modeChoice = choice;
+  document.documentElement.dataset.mode = choice || (systemDark.matches ? "dark" : "light");
+  if (save) try { choice ? localStorage.setItem("suiji:mode", choice) : localStorage.removeItem("suiji:mode"); } catch {}
+  for (const b of $("modeChoices").querySelectorAll("[data-mode]")) b.setAttribute("aria-checked", String(b.dataset.mode === choice));
+  paintBar();
+}
+applyMode(modeChoice);
+systemDark.addEventListener("change", () => { if (!modeChoice) { applyMode(""); restyled(); } });
 // Text size of documents and the note editor: --doc-size on the root, saved as "suiji:font".
 const FONT_DEFAULT = 16;
 const fontSize = () => parseFloat(document.documentElement.style.getPropertyValue("--doc-size")) || FONT_DEFAULT;
@@ -81,7 +102,7 @@ function load() {
 }
 function persist() {
   try { localStorage.setItem(storeKey(), JSON.stringify(store)); }
-  catch { showNote("本机存储已满，最新改动可能只在内存里，请保持联网让它同步。", "err"); }
+  catch { showNote(t("本机存储已满，最新改动可能只在内存里，请保持联网让它同步。"), "err"); }
 }
 const visible = () => Object.values(store.notes).filter((n) => !n.deleted)
   .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
@@ -101,9 +122,9 @@ function showNote(text, kind) { const n = $("note"); n.hidden = !text; n.textCon
 
 async function sync() {
   if (!uid) return;
-  if (!navigator.onLine) { setSync("err", "离线 · 已存在本机"); return; }
+  if (!navigator.onLine) { setSync("err", t("离线 · 已存在本机")); return; }
   if (syncing) { again = true; return; }
-  syncing = true; setSync("saving", "同步中…");
+  syncing = true; setSync("saving", t("同步中…"));
   try {
     const dirty = Object.values(store.notes).filter((n) => n.dirty);
     if (dirty.length) {
@@ -122,12 +143,12 @@ async function sync() {
     persist();
     if (changed) render();
     else renderList();
-    setSync("ok", "已同步");
+    setSync("ok", t("已同步"));
     showNote("");
   } catch (e) {
     console.error(e);
-    setSync("err", "同步失败");
-    showNote("没能同步到云端，改动已保存在本机，联网后会自动重试。", "err");
+    setSync("err", t("同步失败"));
+    showNote(t("没能同步到云端，改动已保存在本机，联网后会自动重试。"), "err");
   } finally {
     syncing = false;
     if (again) { again = false; sync(); }
@@ -173,7 +194,7 @@ async function loadFiles() {
 function placeOf(file) {
   const rel = file.webkitRelativePath || "";
   const i = rel.indexOf("/");
-  return i > 0 ? { folder: rel.slice(0, i), name: rel.slice(i + 1) } : { folder: "", name: file.name || "未命名" };
+  return i > 0 ? { folder: rel.slice(0, i), name: rel.slice(i + 1) } : { folder: "", name: file.name || t("未命名") };
 }
 const baseName = (n) => n.split("/").pop();
 
@@ -182,11 +203,11 @@ async function uploadFiles(input) {
   if (!uid) return;
   const all = [...input].filter((f) => !baseName(f.webkitRelativePath || f.name).startsWith("."));
   const tooBig = all.filter((f) => f.size > MAX_FILE);
-  if (tooBig.length) showNote(`${tooBig.map((f) => f.name).join("、")} 超过 50 MB，没有上传。`, "err");
+  if (tooBig.length) showNote(t("{names} 超过 50 MB，没有上传。", { names: tooBig.map((f) => f.name).join(lang === "en" ? ", " : "、") }), "err");
   const ok = all.filter((f) => f.size <= MAX_FILE);
   uploading += ok.length;
   for (const file of ok) {
-    setSync("saving", `上传中 · 剩 ${uploading} 个`);
+    setSync("saving", t("上传中 · 剩 {n} 个", { n: uploading }));
     const id = crypto.randomUUID(), ext = extOf(file.name);
     const path = `${uid}/${id}${ext ? "." + ext : ""}`;
     const mime = file.type || "application/octet-stream";
@@ -198,12 +219,12 @@ async function uploadFiles(input) {
       if (ins.error) { await sb.storage.from("files").remove([path]); throw ins.error; }
     } catch (e) {
       console.error(e);
-      showNote(`「${file.name}」上传失败：${e.message || "网络问题"}。`, "err");
+      showNote(t("「{name}」上传失败：{msg}。", { name: file.name, msg: e.message || t("网络问题") }), "err");
     } finally {
       uploading--;
     }
   }
-  setSync("ok", "已同步");
+  setSync("ok", t("已同步"));
   await loadFiles();
 }
 
@@ -319,7 +340,7 @@ function keepRender(f, node) {
 function skeleton() {
   const d = document.createElement("div");
   d.className = "skeleton";
-  d.setAttribute("aria-label", "加载中");
+  d.setAttribute("aria-label", t("加载中"));
   for (let i = 0; i < 9; i++) d.append(document.createElement("i"));
   return d;
 }
@@ -396,7 +417,7 @@ async function renderMermaid(frag) {
       code.parentElement.replaceWith(box);
     } catch (e) {
       document.getElementById("d" + id)?.remove();
-      code.parentElement.before(Object.assign(document.createElement("p"), { className: "md-missing", textContent: "这段 Mermaid 图表有语法错误，下面显示原文：" }));
+      code.parentElement.before(Object.assign(document.createElement("p"), { className: "md-missing", textContent: t("这段 Mermaid 图表有语法错误，下面显示原文：") }));
     }
   }
 }
@@ -540,7 +561,7 @@ async function renderMarkdown(src, f) {
   imgs.forEach((img, i) => {
     const url = targets[i] && urls.get(targets[i].path);
     if (url) img.src = url;
-    else img.replaceWith(Object.assign(document.createElement("span"), { className: "md-missing", textContent: `[图片：${img.alt || img.getAttribute("src")}]` }));
+    else img.replaceWith(Object.assign(document.createElement("span"), { className: "md-missing", textContent: t("[图片：{name}]", { name: img.alt || img.getAttribute("src") }) }));
   });
   for (const img of frag.querySelectorAll("img")) img.loading = "lazy";
   const content = document.createElement("div");
@@ -550,7 +571,7 @@ async function renderMarkdown(src, f) {
   for (const a of content.querySelectorAll('a[href^="#suiji-wiki-"]')) {
     const target = find(wdir, wiki[+a.getAttribute("href").slice(12)] || "");
     if (target) { a.dataset.open = target.id; a.href = "#"; a.title = target.name; a.classList.add("wikilink"); }
-    else a.replaceWith(Object.assign(document.createElement("span"), { className: "wikilink missing", textContent: a.textContent, title: "没有找到这篇笔记" }));
+    else a.replaceWith(Object.assign(document.createElement("span"), { className: "wikilink missing", textContent: a.textContent, title: t("没有找到这篇笔记") }));
   }
   for (const a of content.querySelectorAll("a[href]")) {
     if (a.dataset.open) continue;
@@ -612,15 +633,15 @@ async function showFile(f, p) {
     }
     if (f.mime.startsWith("video/") || f.mime.startsWith("audio/")) return show(Object.assign(document.createElement(f.mime.startsWith("video/") ? "video" : "audio"), { src: url, controls: true, playsInline: true }));
     if (f.mime === "application/pdf") return show(Object.assign(document.createElement("iframe"), { src: url, title: f.name }));
-    show(Object.assign(document.createElement("div"), { className: "big-ext", textContent: extOf(f.name) || "文件" }));
+    show(Object.assign(document.createElement("div"), { className: "big-ext", textContent: extOf(f.name) || t("文件") }));
   } catch (e) {
     console.error(e);
-    show(Object.assign(document.createElement("div"), { className: "big-ext", textContent: navigator.onLine ? "读取失败" : "离线，这个文件还没缓存过" }));
+    show(Object.assign(document.createElement("div"), { className: "big-ext", textContent: navigator.onLine ? t("读取失败") : t("离线，这个文件还没缓存过") }));
   }
 }
 
 window.addEventListener("online", () => sync());
-window.addEventListener("offline", () => setSync("err", "离线 · 已存在本机"));
+window.addEventListener("offline", () => setSync("err", t("离线 · 已存在本机")));
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) { commitAll(); sync(); } else sync();
 });
@@ -631,11 +652,13 @@ document.addEventListener("visibilitychange", () => {
 const NOTES_KEY = "\u0000notes";
 const DND = "application/x-suiji-item";
 
-function titleOf(t) { const l = (t || "").split("\n").find((s) => s.trim()); return l ? l.trim() : "无标题"; }
+function titleOf(t) { const l = (t || "").split("\n").find((s) => s.trim()); return l ? l.trim() : t("无标题"); }
 function fmt(iso) {
   const d = new Date(iso), now = new Date(), p = (n) => String(n).padStart(2, "0");
-  if (d.toDateString() === now.toDateString()) return `今天 ${p(d.getHours())}:${p(d.getMinutes())}`;
-  if (d.getFullYear() === now.getFullYear()) return `${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
+  if (d.toDateString() === now.toDateString()) return t("今天 {time}", { time: `${p(d.getHours())}:${p(d.getMinutes())}` });
+  if (d.getFullYear() === now.getFullYear()) return lang === "en"
+    ? `${d.toLocaleDateString("en", { month: "short", day: "numeric" })} ${p(d.getHours())}:${p(d.getMinutes())}`
+    : `${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
   return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
 }
 
@@ -647,17 +670,34 @@ const byName = (a, b) => a.localeCompare(b, "zh", { numeric: true });
 let expanded = new Set();
 try { expanded = new Set(JSON.parse(localStorage.getItem("suiji:open")) || []); } catch {}
 const saveExpanded = () => { try { localStorage.setItem("suiji:open", JSON.stringify([...expanded])); } catch {} };
+// Sort order of the sidebar, saved as "suiji:sort": name / name-desc by name, new / old by last change.
+// Under the time orders a folder ranks by its newest file. Quick notes stay newest first under the name
+// orders, since they read as a journal.
+const SORTS = ["name", "name-desc", "new", "old"];
+let sortBy = "name";
+try { const s = localStorage.getItem("suiji:sort"); if (SORTS.includes(s)) sortBy = s; } catch {}
+const stamp = (x) => x.updated_at || x.created_at || "";
+function order(items, nameOf, timeOf) {
+  const cmp = sortBy === "name" ? (a, b) => byName(nameOf(a), nameOf(b))
+    : sortBy === "name-desc" ? (a, b) => byName(nameOf(b), nameOf(a))
+    : sortBy === "new" ? (a, b) => timeOf(b).localeCompare(timeOf(a)) || byName(nameOf(a), nameOf(b))
+    : (a, b) => timeOf(a).localeCompare(timeOf(b)) || byName(nameOf(a), nameOf(b));
+  return [...items].sort(cmp);
+}
+const orderFiles = (fs) => order(fs, (f) => baseName(f.name), stamp);
+const orderNotes = (ns) => sortBy === "old" ? [...ns].reverse() : ns;
 
 function buildTree() {
-  const root = { dirs: new Map(), files: [], count: 0 };
+  const root = { dirs: new Map(), files: [], count: 0, latest: "" };
   for (const f of files) {
-    const p = fullPath(f);
+    const p = fullPath(f), at = stamp(f);
     let node = root;
     node.count++;
     for (const seg of p.slice(0, -1)) {
-      if (!node.dirs.has(seg)) node.dirs.set(seg, { dirs: new Map(), files: [], count: 0 });
+      if (!node.dirs.has(seg)) node.dirs.set(seg, { dirs: new Map(), files: [], count: 0, latest: "" });
       node = node.dirs.get(seg);
       node.count++;
+      if (at > node.latest) node.latest = at;
     }
     node.files.push(f);
   }
@@ -700,7 +740,7 @@ function fileRow(f, depth, metaText) {
     `${name}\n${fmtSize(f.size)} · ${fmt(f.updated_at || f.created_at)}`);
 }
 function noteRow(n, depth, metaText) {
-  return itemRow("note", n.id, titleOf(n.body), depth, n.dirty ? "未同步" : metaText, "修改于 " + fmt(n.updated_at));
+  return itemRow("note", n.id, titleOf(n.body), depth, n.dirty ? t("未同步") : metaText, t("修改于 {time}", { time: fmt(n.updated_at) }));
 }
 
 // A folder row plus its drawer; children are built the first time it opens.
@@ -740,34 +780,34 @@ function folderRow(box, key, name, count, depth, fillChildren) {
 }
 
 function renderNode(node, path, depth, box) {
-  for (const [name, child] of [...node.dirs].sort((a, b) => byName(a[0], b[0]))) {
+  for (const [name, child] of order(node.dirs, (d) => d[0], (d) => d[1].latest)) {
     folderRow(box, [...path, name].join("/"), name, child.count, depth, (inner) => renderNode(child, [...path, name], depth + 1, inner));
   }
-  for (const f of node.files.sort((a, b) => byName(baseName(a.name), baseName(b.name)))) box.append(fileRow(f, depth));
+  for (const f of orderFiles(node.files)) box.append(fileRow(f, depth));
 }
 
 function renderList() {
   const q = search.value.trim().toLowerCase();
   const keepScroll = list.scrollTop;
   list.replaceChildren();
-  const notes = visible();
+  const notes = orderNotes(visible());
   const hitNotes = q ? notes.filter((n) => n.body.toLowerCase().includes(q)) : notes;
   const hitFiles = q ? files.filter((f) => fullPath(f).join("/").toLowerCase().includes(q)) : files;
   if (!hitNotes.length && !hitFiles.length) {
     const li = document.createElement("li");
     li.className = "empty";
-    li.innerHTML = q ? "<strong>没有找到</strong>换个关键词试试。"
-                     : "<strong>这里还是空的</strong>点「新建」写一条笔记，或者点「上传」放文件进来。Mac 上运行同步程序后，选中的文件夹会自动出现在这里。";
+    li.innerHTML = q ? t("<strong>没有找到</strong>换个关键词试试。")
+                     : t("<strong>这里还是空的</strong>点「新建」写一条笔记，或者点「上传」放文件进来。Mac 上运行同步程序后，选中的文件夹会自动出现在这里。");
     list.append(li);
     return;
   }
   const li = document.createElement("li");
   li.className = "tree";
   if (q) {
-    for (const n of hitNotes) li.append(noteRow(n, 0, "随手记"));
-    for (const f of hitFiles.sort((a, b) => byName(baseName(a.name), baseName(b.name)))) li.append(fileRow(f, 0, fullPath(f).slice(0, -1).join("/")));
+    for (const n of hitNotes) li.append(noteRow(n, 0, t("随手记")));
+    for (const f of orderFiles(hitFiles)) li.append(fileRow(f, 0, fullPath(f).slice(0, -1).join("/")));
   } else {
-    if (notes.length) folderRow(li, NOTES_KEY, "随手记", notes.length, 0, (inner) => { for (const n of notes) inner.append(noteRow(n, 1)); });
+    if (notes.length) folderRow(li, NOTES_KEY, t("随手记"), notes.length, 0, (inner) => { for (const n of notes) inner.append(noteRow(n, 1)); });
     renderNode(buildTree(), [], 0, li);
   }
   list.append(li);
@@ -822,11 +862,11 @@ function setToc(p, art) {
   if (p.heads.length < 2) p.heads = [];
   if (!p.heads.length) { p.toc.replaceChildren(); p.tocList = null; applyToc(p); return; }
   const top = Math.min(...p.heads.map((h) => +h.tagName[1]));
-  const grip = el$("div", "toc-grip"); grip.title = "拖动调整宽度，双击恢复";
-  const close = el$("button", "toc-close"); close.type = "button"; close.dataset.close = ""; close.setAttribute("aria-label", "关闭大纲");
+  const grip = el$("div", "toc-grip"); grip.title = t("拖动调整宽度，双击恢复");
+  const close = el$("button", "toc-close"); close.type = "button"; close.dataset.close = ""; close.setAttribute("aria-label", t("关闭大纲"));
   close.innerHTML = '<svg viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>';
   const head = el$("div", "toc-head");
-  head.append(el$("span", "toc-title", "大纲"), el$("span", "toc-count", String(p.heads.length)), close);
+  head.append(el$("span", "toc-title", t("大纲")), el$("span", "toc-count", String(p.heads.length)), close);
   const bar = el$("div", "toc-bar"); p.tocBar = el$("i"); bar.append(p.tocBar);
   p.tocList = el$("div", "toc-list"); p.tocInk = el$("span", "toc-ink");
   p.tocList.append(p.tocInk, ...p.heads.map((h, i) => {
@@ -889,7 +929,7 @@ function makePane(item) {
   el.addEventListener("focusin", () => focusPane(p));
 
   p.ta.addEventListener("input", () => {
-    p.editing = true; setSync("saving", "待保存…");
+    p.editing = true; setSync("saving", t("待保存…"));
     clearTimeout(p.editTimer); p.editTimer = setTimeout(() => commit(p), p.kind === "file" ? 1200 : 600);
   });
   p.ta.addEventListener("blur", () => commit(p));
@@ -954,7 +994,7 @@ function makePane(item) {
     const s = await sb.storage.from("files").createSignedUrl(f.path, 60);
     if (!s.error) try { const r = await fetch(s.data.signedUrl + "&t=" + Date.now(), { cache: "no-store" }); if (r.ok) text = await r.text(); } catch {}
     p.edit.disabled = false;
-    if (text === null) { showNote("读取文件失败，请检查网络。", "err"); return; }
+    if (text === null) { showNote(t("读取文件失败，请检查网络。"), "err"); return; }
     p.fileBase = text;
     p.ta.value = p.fileBase; p.fileEdit = true; p.editing = false;
     renderPane(p); p.ta.focus();
@@ -1006,8 +1046,8 @@ const isEditable = (f) => f.size < 2 * 1024 * 1024 && (f.mime.startsWith("text/"
 async function saveFile(p) {
   p.editing = false;
   const f = files.find((x) => x.id === p.itemId), text = p.ta.value;
-  if (!f || text === p.fileBase) { setSync("ok", "已同步"); return; }
-  setSync("saving", "保存中…");
+  if (!f || text === p.fileBase) { setSync("ok", t("已同步")); return; }
+  setSync("saving", t("保存中…"));
   const blob = new Blob([text], { type: f.mime || "text/plain" });
   const now = new Date().toISOString();
   const up = await sb.storage.from("files").upload(f.path, blob, { upsert: true, contentType: f.mime || "text/plain", cacheControl: "0" });
@@ -1016,15 +1056,15 @@ async function saveFile(p) {
   if (up.error || row.error) {
     console.error(up.error || row.error);
     p.editing = true;   // keep it unsaved so the next edit or blur retries
-    setSync("err", "保存失败");
-    showNote(`「${baseName(f.name)}」没保存上，请联网后再改一下或点「完成」重试。`, "err");
+    setSync("err", t("保存失败"));
+    showNote(t("「{name}」没保存上，请联网后再改一下或点「完成」重试。", { name: baseName(f.name) }), "err");
     return;
   }
   p.fileBase = text; Object.assign(f, { size: blob.size, updated_at: now }, meta);
   forgetUrls(f.path);
   await cacheText(f, text);   // the preview shows exactly what was saved, without downloading it again
   p.shown = versionOf(f);   // the preview refreshes when editing ends, not now
-  setSync("ok", "已同步"); showNote("");
+  setSync("ok", t("已同步")); showNote("");
   if (!p.fileEdit) renderPane(p);
 }
 
@@ -1062,18 +1102,18 @@ function graphKey(p) {
 function showGraph(p) {
   p.graph?.destroy();
   const data = graphData(p.graphTags);
-  p.meta.textContent = `关系图谱 · ${data.nodes.length} 个节点 · ${data.edges.length} 条链接`;
+  p.meta.textContent = t("关系图谱 · {nodes} 个节点 · {edges} 条链接", { nodes: data.nodes.length, edges: data.edges.length });
   const wrap = document.createElement("div");
   wrap.className = "graph";
   const tools = document.createElement("div");
   tools.className = "graph-tools";
-  const tagBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: p.graphTags ? "隐藏标签" : "显示标签" });
+  const tagBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: p.graphTags ? t("隐藏标签") : t("显示标签") });
   tagBtn.onclick = () => { p.graphTags = !p.graphTags; p.shown = null; saveLayout(); renderPane(p); };
-  const fitBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: "居中" });
+  const fitBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: t("居中") });
   fitBtn.onclick = () => p.graph?.fit();
   tools.append(tagBtn, fitBtn);
   wrap.append(tools);
-  if (!data.nodes.length) wrap.append(Object.assign(document.createElement("p"), { className: "graph-empty", textContent: "还没有 Markdown 文件或笔记。" }));
+  if (!data.nodes.length) wrap.append(Object.assign(document.createElement("p"), { className: "graph-empty", textContent: t("还没有 Markdown 文件或笔记。") }));
   p.preview.classList.remove("doc");
   p.preview.replaceChildren(wrap);
   p.graph = mountGraph(wrap, data, {
@@ -1108,22 +1148,22 @@ function renderPane(p) {
   p.ta.hidden = !(note || editingFile); p.fv.hidden = !file || editingFile; p.ph.hidden = !!(note || file || waiting);
   p.dl.hidden = !file;
   if (!file || editingFile) p.web.hidden = true;
-  p.edit.hidden = !(file && isEditable(file)); p.edit.textContent = editingFile ? "完成" : "编辑";
+  p.edit.hidden = !(file && isEditable(file)); p.edit.textContent = editingFile ? t("完成") : t("编辑");
   applyToc(p);
-  p.ta.placeholder = file ? "" : "第一行是标题…";
+  p.ta.placeholder = file ? "" : t("第一行是标题…");
   if (!note && !file) {
-    p.meta.textContent = waiting ? "载入中…" : ""; p.shown = null;
+    p.meta.textContent = waiting ? t("载入中…") : ""; p.shown = null;
     if (p === focused && !p.kind) app.dataset.view = "list";
     return;
   }
   if (note) {
     p.shown = null;
-    p.meta.textContent = "修改于 " + fmt(note.updated_at);
+    p.meta.textContent = t("修改于 {time}", { time: fmt(note.updated_at) });
     // Never overwrite what the user is in the middle of typing.
     if (!p.editing && p.ta.value !== note.body) p.ta.value = note.body;
     return;
   }
-  if (editingFile) { p.meta.textContent = `${baseName(file.name)} · 编辑中，自动保存`; return; }
+  if (editingFile) { p.meta.textContent = t("{name} · 编辑中，自动保存", { name: baseName(file.name) }); return; }
   const key = versionOf(file);
   if (p.shown !== key) { p.shown = key; showFile(file, p); }
 }
@@ -1317,10 +1357,22 @@ window.addEventListener("paste", (e) => {
   if (fl && fl.length) { e.preventDefault(); uploadFiles(fl); }
 });
 search.addEventListener("input", renderList);
+const sortSel = $("sortSel");
+sortSel.value = sortBy;
+sortSel.onchange = () => {
+  sortBy = sortSel.value;
+  try { localStorage.setItem("suiji:sort", sortBy); } catch {}
+  renderList();
+};
 // ---------- settings ----------
 // One dialog for the per-device preferences, sync, the local cache, the account and updates.
 let tocAuto = true;
 try { tocAuto = localStorage.getItem("suiji:toc-auto") !== "0"; } catch {}
+// After a style or light / dark change: diagrams and cached renders were drawn with the old colours.
+function restyled() {
+  mermaidLib = null; rendered.clear();
+  for (const p of panes.values()) { if (p.kind === "file") { p.shown = null; renderPane(p); } p.graph?.redraw(); }
+}
 {
   const dlg = $("settings");
   const px = (v) => Math.round(v) + "px";
@@ -1328,15 +1380,15 @@ try { tocAuto = localStorage.getItem("suiji:toc-auto") !== "0"; } catch {}
     let n = 0;
     try { n = (await (await caches.open(FILE_CACHE)).keys()).length; } catch {}
     const est = await navigator.storage?.estimate?.().catch(() => null);
-    $("cacheInfo").textContent = `${n} 个文档已存在本机` + (est?.usage ? ` · 共用 ${fmtSize(est.usage)}` : "") + "，离线也能打开";
+    $("cacheInfo").textContent = t("{n} 个文档已存在本机", { n }) + (est?.usage ? t(" · 共用 {size}", { size: fmtSize(est.usage) }) : "") + t("，离线也能打开");
   }
   function fill() {
     $("tocAuto").checked = tocAuto;
-    $("widthInfo").textContent = `侧边栏 ${px(parseFloat(app.style.getPropertyValue("--side")) || SIDE_DEFAULT)} · 大纲 ${px(tocWidth())}，拖动边缘调整，双击恢复`;
+    $("widthInfo").textContent = t("侧边栏 {side} · 大纲 {toc}，拖动边缘调整，双击恢复", { side: px(parseFloat(app.style.getPropertyValue("--side")) || SIDE_DEFAULT), toc: px(tocWidth()) });
     $("setSync").textContent = $("syncText").textContent;
-    $("setCounts").textContent = `${visible().length} 条随手记 · ${files.length} 个文件`;
+    $("setCounts").textContent = t("{notes} 条随手记 · {files} 个文件", { notes: visible().length, files: files.length });
     $("setWho").textContent = $("who").textContent;
-    loadedVersion.then((v) => { $("verInfo").textContent = "版本 " + (v ? v.replace(/^suiji-/, "") : "未知"); });
+    loadedVersion.then((v) => { $("verInfo").textContent = t("版本 {v}", { v: v ? v.replace(/^suiji-/, "") : t("未知") }); });
     cacheSummary();
   }
   $("setBtn").onclick = () => { fill(); dlg.showModal(); };
@@ -1346,11 +1398,23 @@ try { tocAuto = localStorage.getItem("suiji:toc-auto") !== "0"; } catch {}
     const b = e.target.closest("[data-style]");
     if (!b || b.getAttribute("aria-checked") === "true") return;
     applyStyle(b.dataset.style, true);
-    // Diagrams and cached renders were drawn with the old colours.
-    mermaidLib = null; rendered.clear();
-    for (const p of panes.values()) { if (p.kind === "file") { p.shown = null; renderPane(p); } p.graph?.redraw(); }
+    restyled();
+  };
+  $("modeChoices").onclick = (e) => {
+    const b = e.target.closest("[data-mode]");
+    if (b && b.dataset.mode !== modeChoice) { applyMode(b.dataset.mode, true); restyled(); }
   };
   $("fontChoices").onclick = (e) => { const b = e.target.closest("[data-size]"); if (b) applyFont(+b.dataset.size, true); };
+  for (const b of $("langChoices").querySelectorAll("[data-lang]")) b.setAttribute("aria-checked", String(b.dataset.lang === langChoice));
+  $("langChoices").onclick = async (e) => {
+    const b = e.target.closest("[data-lang]");
+    if (!b || b.dataset.lang === langChoice) return;
+    try { b.dataset.lang ? localStorage.setItem("suiji:lang", b.dataset.lang) : localStorage.removeItem("suiji:lang"); } catch {}
+    // Text drawn by the app follows the language from the start, so a reload is simplest; edits are saved first.
+    commitAll();
+    await Promise.all([...panes.values()].map((p) => p.saving));
+    location.reload();
+  };
   $("tocAuto").onchange = (e) => {
     tocAuto = e.target.checked;
     try { localStorage.setItem("suiji:toc-auto", tocAuto ? "1" : "0"); } catch {}
@@ -1367,15 +1431,15 @@ try { tocAuto = localStorage.getItem("suiji:toc-auto") !== "0"; } catch {}
   $("clearCache").onclick = async () => {
     await caches.delete(FILE_CACHE).catch(() => {});
     cacheIndex = null; rendered.clear();
-    $("cacheInfo").textContent = "已清除，文档会在打开时重新下载";
+    $("cacheInfo").textContent = t("已清除，文档会在打开时重新下载");
   };
   $("checkUpd").onclick = async (e) => {
-    const b = e.target; b.disabled = true; b.textContent = "检查中…";
+    const b = e.target; b.disabled = true; b.textContent = t("检查中…");
     const [was, now] = await Promise.all([loadedVersion, swVersion()]);
-    b.disabled = false; b.textContent = "检查更新";
-    if (!now) { $("verInfo").textContent = "没能连上网站，稍后再试"; return; }
+    b.disabled = false; b.textContent = t("检查更新");
+    if (!now) { $("verInfo").textContent = t("没能连上网站，稍后再试"); return; }
     if (was && now !== was) { dlg.close(); $("updateToast").hidden = false; return; }
-    $("verInfo").textContent = "版本 " + now.replace(/^suiji-/, "") + " · 已是最新";
+    $("verInfo").textContent = t("版本 {v} · 已是最新", { v: now.replace(/^suiji-/, "") });
   };
 }
 $("outBtn").onclick = async () => {
@@ -1391,28 +1455,28 @@ let signUp = false;
 const authMsg = (t, kind) => { const m = $("authMsg"); m.hidden = !t; m.textContent = t || ""; m.dataset.kind = kind || ""; };
 $("modeBtn").onclick = () => {
   signUp = !signUp;
-  $("authBtn").textContent = signUp ? "注册" : "登录";
-  $("modeBtn").textContent = signUp ? "已有账号？登录" : "还没有账号？注册";
+  $("authBtn").textContent = signUp ? t("注册") : t("登录");
+  $("modeBtn").textContent = signUp ? t("已有账号？登录") : t("还没有账号？注册");
   $("password").autocomplete = signUp ? "new-password" : "current-password";
   authMsg("");
 };
 $("authForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const email = $("email").value.trim(), password = $("password").value;
-  if (!email || password.length < 6) { authMsg("请填写邮箱，密码至少 6 位。", "err"); return; }
-  $("authBtn").disabled = true; authMsg(signUp ? "正在注册…" : "正在登录…");
+  if (!email || password.length < 6) { authMsg(t("请填写邮箱，密码至少 6 位。"), "err"); return; }
+  $("authBtn").disabled = true; authMsg(signUp ? t("正在注册…") : t("正在登录…"));
   const { data, error } = signUp
     ? await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin } })
     : await sb.auth.signInWithPassword({ email, password });
   $("authBtn").disabled = false;
   if (error) {
-    const msg = /invalid login/i.test(error.message) ? "邮箱或密码不对。"
-      : /not confirmed/i.test(error.message) ? "这个邮箱还没确认，请先点邮件里的确认链接。"
-      : /already registered/i.test(error.message) ? "这个邮箱已经注册过了，直接登录吧。"
-      : "出错了：" + error.message;
+    const msg = /invalid login/i.test(error.message) ? t("邮箱或密码不对。")
+      : /not confirmed/i.test(error.message) ? t("这个邮箱还没确认，请先点邮件里的确认链接。")
+      : /already registered/i.test(error.message) ? t("这个邮箱已经注册过了，直接登录吧。")
+      : t("出错了：{msg}", { msg: error.message });
     authMsg(msg, "err"); return;
   }
-  if (signUp && !data.session) authMsg("确认邮件已发到 " + email + "，点里面的链接后回来登录。");
+  if (signUp && !data.session) authMsg(t("确认邮件已发到 {email}，点里面的链接后回来登录。", { email }));
 });
 
 function enter(session) {

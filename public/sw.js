@@ -1,6 +1,6 @@
 // App shell cache so 随记 opens offline. Supabase API calls always go to the network.
-const CACHE = "suiji-v23";
-const SHELL = ["./", "index.html", "style.css", "app.js", "graph.js", "mdmeta.js", "config.js", "manifest.webmanifest", "icon.svg", "icon-180.png", "icon-512.png",
+const CACHE = "suiji-v24";
+const SHELL = ["./", "index.html", "style.css", "app.js", "graph.js", "mdmeta.js", "i18n.js", "config.js", "manifest.webmanifest", "icon.svg", "icon-paper.svg", "icon-terminal.svg", "icon-blocks.svg", "icon-180.png", "icon-512.png",
   "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm"];
 
 self.addEventListener("install", (e) => {

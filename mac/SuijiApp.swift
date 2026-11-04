@@ -9,6 +9,9 @@ let suijiHome = FileManager.default.homeDirectoryForCurrentUser.appendingPathCom
 // Published by `mac/build.sh --publish`; `defaults write app.suiji.mac updateFeed <url>` points it elsewhere for testing.
 let updateFeed = URL(string: UserDefaults.standard.string(forKey: "updateFeed") ?? "https://suiji-notes.vercel.app/mac/version.json")!
 let currentBuild = Int(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0") ?? 0
+// Interface language: the one the page reports (its 设置 → 语言), before that the system's.
+var appLang = UserDefaults.standard.string(forKey: "lang") ?? (Locale.preferredLanguages.first?.hasPrefix("zh") == true ? "zh" : "en")
+func L(_ zh: String, _ en: String) -> String { appLang == "zh" ? zh : en }
 
 struct Release: Decodable { let version: String; let build: Int; let url: String; let notes: String? }
 
@@ -39,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
   var window: NSWindow!
   var web: WKWebView!
   var status: NSStatusItem!
-  let agentLine = NSMenuItem(title: "同步：检查中…", action: nil, keyEquivalent: "")
+  let agentLine = NSMenuItem(title: L("同步：检查中…", "Sync: checking…"), action: nil, keyEquivalent: "")
 
   func applicationDidFinishLaunching(_ n: Notification) {
     buildMainMenu()
@@ -74,12 +77,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
       DispatchQueue.main.async {
         guard let r = release, let zip = URL(string: r.url, relativeTo: updateFeed)?.absoluteURL else {
           self.checking = false
-          if manual { self.tell("检查更新失败", err?.localizedDescription ?? "没有读到版本信息。") }
+          if manual { self.tell(L("检查更新失败", "Couldn’t check for updates"), err?.localizedDescription ?? L("没有读到版本信息。", "No version information was found.")) }
           return
         }
         guard r.build > currentBuild else {
           self.checking = false
-          if manual { self.tell("已是最新版本", "随记 \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] ?? "") 是最新的。") }
+          if manual { self.tell(L("已是最新版本", "You’re up to date"), L("随记 \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] ?? "") 是最新的。", "Suiji \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] ?? "") is the latest version.")) }
           return
         }
         self.download(zip, release: r, manual: manual)
@@ -89,7 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
   func download(_ zip: URL, release r: Release, manual: Bool) {
     URLSession.shared.downloadTask(with: zip) { file, _, err in
-      var staged: URL? = nil, problem = err?.localizedDescription ?? "下载失败。"
+      var staged: URL? = nil, problem = err?.localizedDescription ?? L("下载失败。", "The download failed.")
       if let file {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("suiji-update-\(r.build)")
         try? FileManager.default.removeItem(at: dir)
@@ -101,21 +104,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
            Int(info["CFBundleVersion"] as? String ?? "") == r.build,
            run("/usr/bin/codesign", ["--verify", "--deep", app.path]).status == 0 {
           staged = app
-        } else { problem = "下载的安装包不完整或签名不对，已丢弃。" }
+        } else { problem = L("下载的安装包不完整或签名不对，已丢弃。", "The download was incomplete or wrongly signed, so it was discarded.") }
       }
       DispatchQueue.main.async {
         self.checking = false
         if let staged { self.stagedUpdate = staged; self.offerRestart(staged, release: r) }
-        else if manual { self.tell("更新失败", problem) }
+        else if manual { self.tell(L("更新失败", "Update failed"), problem) }
       }
     }.resume()
   }
 
   func offerRestart(_ next: URL, release r: Release? = nil) {
     let a = NSAlert()
-    a.messageText = r.map { "随记 \($0.version) 已下载" } ?? "新版本已下载"
-    a.informativeText = (r?.notes.map { $0 + "\n\n" } ?? "") + "重启随记就能用上新版本；也可以等下次退出时再更新。"
-    a.addButton(withTitle: "立即重启"); a.addButton(withTitle: "退出时更新")
+    a.messageText = r.map { L("随记 \($0.version) 已下载", "Suiji \($0.version) is ready") } ?? L("新版本已下载", "A new version is ready")
+    a.informativeText = (r?.notes.map { $0 + "\n\n" } ?? "") + L("重启随记就能用上新版本；也可以等下次退出时再更新。", "Restart Suiji to use it, or let it update the next time you quit.")
+    a.addButton(withTitle: L("立即重启", "Restart Now")); a.addButton(withTitle: L("退出时更新", "Update on Quit"))
     if a.runModal() == .alertFirstButtonReturn { install(next, relaunch: true); NSApp.terminate(nil) }
   }
 
@@ -154,12 +157,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     NSApp.applicationIconImage = url.flatMap { NSImage(contentsOf: $0) }   // nil restores the bundle icon
   }
 
+  // The page reports its style and language: {style, lang}.
   func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) {
     guard m.frameInfo.isMainFrame, m.frameInfo.securityOrigin.host == appURL.host,
-          let body = m.body as? [String: Any], let style = body["style"] as? String,
-          ["", "paper", "terminal", "blocks"].contains(style) else { return }
-    if style != UserDefaults.standard.string(forKey: "iconStyle") ?? "" { setDockIcon(style) }
+          let body = m.body as? [String: Any] else { return }
+    if let style = body["style"] as? String, ["", "paper", "terminal", "blocks"].contains(style),
+       style != UserDefaults.standard.string(forKey: "iconStyle") ?? "" { setDockIcon(style) }
+    if let lang = body["lang"] as? String, ["zh", "en"].contains(lang), lang != appLang {
+      appLang = lang; UserDefaults.standard.set(lang, forKey: "lang")
+      buildMainMenu(); buildStatusItem(); window.title = L("随记", "Suiji")
+    }
   }
+
 
   // MARK: window
 
@@ -180,7 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 820),
                       styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                       backing: .buffered, defer: false)
-    window.title = "随记"
+    window.title = L("随记", "Suiji")
     window.titlebarAppearsTransparent = true
     window.titleVisibility = .hidden
     window.minSize = NSSize(width: 380, height: 480)
@@ -252,7 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
   }
 
   func webView(_ w: WKWebView, runJavaScriptConfirmPanelWithMessage m: String, initiatedByFrame f: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
-    let a = NSAlert(); a.messageText = m; a.addButton(withTitle: "好"); a.addButton(withTitle: "取消")
+    let a = NSAlert(); a.messageText = m; a.addButton(withTitle: L("好", "OK")); a.addButton(withTitle: L("取消", "Cancel"))
     a.beginSheetModal(for: window) { completionHandler($0 == .alertFirstButtonReturn) }
   }
 
@@ -275,19 +284,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
   // MARK: menu bar item for the sync agent
 
   func buildStatusItem() {
+    if status != nil { NSStatusBar.system.removeStatusItem(status) }   // rebuilt when the language changes
     status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    status.button?.image = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: "随记同步")
+    status.button?.image = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: L("随记同步", "Suiji sync"))
     let m = NSMenu(); m.delegate = self
     agentLine.isEnabled = false
     m.addItem(agentLine)
     m.addItem(.separator())
-    m.addItem(withTitle: "立即同步", action: #selector(syncNow), keyEquivalent: "")
-    m.addItem(withTitle: "打开同步的文件夹", action: #selector(openFolder), keyEquivalent: "")
-    m.addItem(withTitle: "查看同步日志", action: #selector(openLog), keyEquivalent: "")
-    m.addItem(withTitle: "检查更新…", action: #selector(checkNow), keyEquivalent: "")
+    m.addItem(withTitle: L("立即同步", "Sync Now"), action: #selector(syncNow), keyEquivalent: "")
+    m.addItem(withTitle: L("打开同步的文件夹", "Open Synced Folder"), action: #selector(openFolder), keyEquivalent: "")
+    m.addItem(withTitle: L("查看同步日志", "Show Sync Log"), action: #selector(openLog), keyEquivalent: "")
+    m.addItem(withTitle: L("检查更新…", "Check for Updates…"), action: #selector(checkNow), keyEquivalent: "")
     m.addItem(.separator())
-    m.addItem(withTitle: "打开随记", action: #selector(showWindow), keyEquivalent: "")
-    m.addItem(withTitle: "退出随记", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+    m.addItem(withTitle: L("打开随记", "Open Suiji"), action: #selector(showWindow), keyEquivalent: "")
+    m.addItem(withTitle: L("退出随记", "Quit Suiji"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
     status.menu = m
   }
 
@@ -295,11 +305,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
   func agentState() -> String {
     let r = run("/bin/launchctl", ["print", "gui/\(getuid())/\(agentLabel)"])
-    if r.status != 0 { return "同步：未安装（运行 npm run sync install）" }
+    if r.status != 0 { return L("同步：未安装（运行 npm run sync install）", "Sync: not installed (run npm run sync install)") }
     let running = r.out.contains("state = running")
     let last = (try? String(contentsOf: suijiHome.appendingPathComponent("sync.log"), encoding: .utf8))?
       .split(separator: "\n").last.map { String($0.prefix(48)) } ?? ""
-    return (running ? "同步：运行中" : "同步：已停止") + (last.isEmpty ? "" : " · " + last)
+    return (running ? L("同步：运行中", "Sync: running") : L("同步：已停止", "Sync: stopped")) + (last.isEmpty ? "" : " · " + last)
   }
 
   @objc func syncNow() { run("/bin/launchctl", ["kickstart", "-k", "gui/\(getuid())/\(agentLabel)"]) }
@@ -323,18 +333,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func mi(_ t: String, _ a: Selector?, _ k: String, _ mods: NSEvent.ModifierFlags = .command) -> NSMenuItem {
       let i = NSMenuItem(title: t, action: a, keyEquivalent: k); i.keyEquivalentModifierMask = mods; return i
     }
-    sub("随记", [mi("关于随记", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), ""), mi("检查更新…", #selector(checkNow), ""), .separator(),
-               mi("隐藏随记", #selector(NSApplication.hide(_:)), "h"),
-               mi("隐藏其他", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option]), .separator(),
-               mi("退出随记", #selector(NSApplication.terminate(_:)), "q")])
-    sub("编辑", [mi("撤销", Selector(("undo:")), "z"), mi("重做", Selector(("redo:")), "z", [.command, .shift]), .separator(),
-               mi("剪切", #selector(NSText.cut(_:)), "x"), mi("拷贝", #selector(NSText.copy(_:)), "c"),
-               mi("粘贴", #selector(NSText.paste(_:)), "v"), mi("全选", #selector(NSText.selectAll(_:)), "a")])
-    sub("显示", [mi("重新载入", #selector(reload), "r"), .separator(),
-               mi("放大", #selector(zoomIn), "="), mi("缩小", #selector(zoomOut), "-"), mi("实际大小", #selector(zoomReset), "0"), .separator(),
-               mi("进入全屏幕", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control])])
-    sub("窗口", [mi("最小化", #selector(NSWindow.performMiniaturize(_:)), "m"), mi("关闭窗口", #selector(NSWindow.performClose(_:)), "w"),
-               .separator(), mi("随记", #selector(showWindow), "1")])
+    sub(L("随记", "Suiji"), [mi(L("关于随记", "About Suiji"), #selector(NSApplication.orderFrontStandardAboutPanel(_:)), ""), mi(L("检查更新…", "Check for Updates…"), #selector(checkNow), ""), .separator(),
+               mi(L("隐藏随记", "Hide Suiji"), #selector(NSApplication.hide(_:)), "h"),
+               mi(L("隐藏其他", "Hide Others"), #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option]), .separator(),
+               mi(L("退出随记", "Quit Suiji"), #selector(NSApplication.terminate(_:)), "q")])
+    sub(L("编辑", "Edit"), [mi(L("撤销", "Undo"), Selector(("undo:")), "z"), mi(L("重做", "Redo"), Selector(("redo:")), "z", [.command, .shift]), .separator(),
+               mi(L("剪切", "Cut"), #selector(NSText.cut(_:)), "x"), mi(L("拷贝", "Copy"), #selector(NSText.copy(_:)), "c"),
+               mi(L("粘贴", "Paste"), #selector(NSText.paste(_:)), "v"), mi(L("全选", "Select All"), #selector(NSText.selectAll(_:)), "a")])
+    sub(L("显示", "View"), [mi(L("重新载入", "Reload"), #selector(reload), "r"), .separator(),
+               mi(L("放大", "Zoom In"), #selector(zoomIn), "="), mi(L("缩小", "Zoom Out"), #selector(zoomOut), "-"), mi(L("实际大小", "Actual Size"), #selector(zoomReset), "0"), .separator(),
+               mi(L("进入全屏幕", "Enter Full Screen"), #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control])])
+    sub(L("窗口", "Window"), [mi(L("最小化", "Minimize"), #selector(NSWindow.performMiniaturize(_:)), "m"), mi(L("关闭窗口", "Close Window"), #selector(NSWindow.performClose(_:)), "w"),
+               .separator(), mi(L("随记", "Suiji"), #selector(showWindow), "1")])
     NSApp.mainMenu = main
   }
 }
