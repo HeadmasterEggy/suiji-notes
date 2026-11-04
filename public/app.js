@@ -258,6 +258,16 @@ function skeleton() {
 // ---------- markdown ----------
 // Renders blog-style Markdown: Hexo front matter, $…$ / $$…$$ math (KaTeX), and images
 // referenced by relative path, which are looked up among the synced files.
+// Posts synced from the Hexo blog's _posts folder are published at BLOG/posts/<abbrlink>.html
+// (permalink: posts/:abbrlink.html in the blog's _config.yml). Folders the blog's skip_render keeps
+// unpublished get no link, nor do posts without an abbrlink yet.
+const BLOG = "https://qiao1.top";
+const UNPUBLISHED = ["标签集合/", "思维导图/"];
+function blogUrl(f, fm) {
+  const slug = String(fm.abbrlink || "").trim();
+  if (f.folder !== "_posts" || !/^[\w-]+$/.test(slug) || UNPUBLISHED.some((d) => f.name.startsWith(d))) return null;
+  return `${BLOG}/posts/${encodeURIComponent(slug)}.html`;
+}
 const isMarkdown = (f) => ["md", "markdown"].includes(extOf(f.name)) || f.mime === "text/markdown";
 const CDN = "https://cdn.jsdelivr.net/npm/";
 let mdLibs = null, mermaidLib = null, mermaidSeq = 0;
@@ -390,10 +400,16 @@ async function renderMarkdown(src, f) {
 
   const art = document.createElement("article");
   art.className = "md-body";
-  if (fm.title || (fm.tags && fm.tags.length)) {
+  const web = blogUrl(f, fm);
+  if (web) art.dataset.web = web;
+  if (fm.title || (fm.tags && fm.tags.length) || web) {
     const head = document.createElement("header");
     head.className = "md-head";
     if (fm.title) head.append(Object.assign(document.createElement("h1"), { textContent: fm.title }));
+    if (web) {
+      const a = Object.assign(document.createElement("a"), { className: "md-web", href: web, target: "_blank", rel: "noopener", textContent: web.replace(/^https?:\/\//, "") });
+      head.append(a);
+    }
     const tags = [].concat(fm.tags || []);
     if (tags.length) {
       const t = document.createElement("div"); t.className = "md-tags";
@@ -444,17 +460,20 @@ async function showFile(f, p) {
   const wait = setTimeout(() => { if (token === p.token) preview.replaceChildren(skeleton()); }, 120);
   // The download link is not needed to show the file; fetch it alongside.
   p.dl.removeAttribute("href");
+  p.web.hidden = true; p.web.removeAttribute("href");
   signedUrls([f.path], f.name).then((m) => { if (token === p.token && m.get(f.path)) p.dl.href = m.get(f.path); }).catch(() => {});
 
   const textish = isTextish(f);
   try {
     if (md) {
-      const hit = cachedRender(f);
-      if (hit) return show(hit);
-      const [text] = await Promise.all([fileText(f), loadMarkdownLibs()]);
-      if (token !== p.token) return;
-      const el = await renderMarkdown(text, f);
-      keepRender(f, el);
+      let el = cachedRender(f);
+      if (!el) {
+        const [text] = await Promise.all([fileText(f), loadMarkdownLibs()]);
+        if (token !== p.token) return;
+        el = await renderMarkdown(text, f);
+        keepRender(f, el);
+      }
+      if (el.dataset.web) { p.web.href = el.dataset.web; p.web.hidden = false; }
       return show(el);
     }
     if (textish) {
@@ -647,7 +666,7 @@ function makePane(item) {
   const q = (c) => el.querySelector("." + c);
   const p = {
     id: ++paneSeq, el, ta: q("p-ta"), ph: q("p-ph"), fv: q("p-fv"), preview: q("p-preview"), meta: q("p-meta"),
-    dl: q("p-dl"), hint: q("p-hint"), edit: q("p-edit"), fileEdit: false, fileBase: null,
+    dl: q("p-dl"), hint: q("p-hint"), edit: q("p-edit"), web: q("p-web"), fileEdit: false, fileBase: null,
     kind: item?.kind || null, itemId: item?.id || null, shown: null, token: 0,
     editing: false, editTimer: null,
   };
@@ -836,7 +855,7 @@ function renderPane(p) {
   const waiting = p.kind === "file" && !file;   // files list not loaded yet
   if (p.kind !== "graph" && p.graph) { p.graph.destroy(); p.graph = null; }
   if (p.kind === "graph") {
-    p.ta.hidden = true; p.ph.hidden = true; p.fv.hidden = false; p.dl.hidden = true; p.edit.hidden = true;
+    p.ta.hidden = true; p.ph.hidden = true; p.fv.hidden = false; p.dl.hidden = true; p.edit.hidden = true; p.web.hidden = true;
     const key = graphKey(p);
     if (p.shown !== key) { p.shown = key; showGraph(p); }
     return;
@@ -845,6 +864,7 @@ function renderPane(p) {
   if (!file) p.fileEdit = false;
   p.ta.hidden = !(note || editingFile); p.fv.hidden = !file || editingFile; p.ph.hidden = !!(note || file || waiting);
   p.dl.hidden = !file;
+  if (!file || editingFile) p.web.hidden = true;
   p.edit.hidden = !(file && isEditable(file)); p.edit.textContent = editingFile ? "完成" : "编辑";
   p.ta.placeholder = file ? "" : "第一行是标题…";
   if (!note && !file) {

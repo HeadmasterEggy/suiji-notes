@@ -314,7 +314,7 @@ textarea {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
-.p-dl { text-decoration: none; }
+.p-dl, .p-web { text-decoration: none; }
 
 /* Relationship graph */
 .graph-btn { margin-left: auto; }
@@ -343,3 +343,12 @@ textarea {
 .skeleton i:nth-child(odd) { animation-delay: .08s; }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
 @media (max-width: 720px) { .skeleton { padding: 18px 16px; } }
+
+/* Link to the published blog page, under the post title. */
+.md-web {
+  display: inline-flex; align-items: center; gap: 4px; margin: -4px 0 12px; max-width: 100%;
+  font: 12px var(--font-mono); color: var(--muted); text-decoration: none; overflow-wrap: anywhere;
+  border-bottom: 1px solid transparent; transition: color .2s, border-color .2s;
+}
+.md-web::after { content: "↗"; font-family: var(--font-body); }
+.md-web:hover { color: var(--ink); border-bottom-color: var(--line); }
