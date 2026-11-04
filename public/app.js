@@ -1382,7 +1382,8 @@ $("outBtn").onclick = async () => {
   $("settings").close();
   commitAll();
   if (Object.values(store.notes).some((n) => n.dirty)) await sync();
-  await sb.auth.signOut();
+  // Only this device: the default (global) would also sign out the Mac agent and every other device.
+  await sb.auth.signOut({ scope: "local" });
 };
 
 // ---------- auth ----------
