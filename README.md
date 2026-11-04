@@ -1,39 +1,76 @@
-# 随记
+# Suiji 随记
 
-可以安装到手机主屏幕的笔记 App（PWA）。iPhone 和 Mac 登录同一个账号后会自动同步。
+**English** · [简体中文](README.zh-CN.md)
 
-- 前端：纯 HTML/JS，不需要框架（`public/`）
-- 同步：Supabase（Postgres 加 Realtime），行级安全保证每个人只能看到自己的笔记
-- 离线：改动先存在本机，联网后自动上传；冲突时以最后修改的为准
-- 部署：Vercel
+A notes app that syncs between iPhone and Mac. It runs as a web app you can add to the home screen (PWA), and as a native Mac app. A small agent on the Mac keeps a local folder, such as a Hexo blog's `source/_posts`, in sync with the app, so you can read and edit your Markdown files on the phone.
 
-## 部署
+Live: <https://suiji-notes.vercel.app>
+
+## Features
+
+- **One tree.** Quick notes written in the app sit in a 「随手记」 folder at the top, and the synced folders sit below it.
+- **Edit anywhere.** Edit a file on the phone, and the Mac agent writes it back to disk within a few seconds.
+- **Split panes.** Split up, down, left or right, by dragging a file onto a pane's edge or with ⌘-click. The layout is remembered.
+- **Relationship graph.** Like Obsidian's graph, built from `[[wikilinks]]`, relative `.md` links and front-matter tags.
+- **Markdown.** Math (KaTeX) and Mermaid diagrams.
+- **Blog links.** Every published post links to its page on the blog (`https://qiao1.top/posts/<abbrlink>.html`).
+- **Fast.** Documents are cached on the device and prefetched, so they open instantly.
+- **Offline-first.** Notes save on the device first and upload once online.
+
+## How it works
+
+| Part | Where | What it does |
+|---|---|---|
+| Web app | `public/` | Plain HTML/JS, no framework, hosted on Vercel |
+| Data | Supabase | Postgres tables `notes` and `files`, a private storage bucket, and Realtime. Row-level security means each user sees only their own data. |
+| Folder agent | `agent/suiji-sync.mjs` | Node script run by launchd on the Mac. It watches the synced folders. |
+| Mac app | `mac/` | Native AppKit window around the web app, plus a menu bar item for the agent |
+
+**Notes** are saved on the device, then upserted to `notes`. Other devices receive changes through Realtime. If two devices edit the same note, the last save wins.
+
+**Folder files** sync in both directions:
+
+- **Mac → cloud:** the agent watches the folder. New and changed files are uploaded, and deleted files are removed from the cloud. A full rescan every 5 minutes catches anything a watch event missed.
+- **Phone → Mac:** an edit saved in the app updates the file's row. The agent hears about it through Realtime and writes the new version to disk.
+- **Conflicts:** if both sides changed a file since the last sync, the local file is kept and uploaded. The cloud version is saved beside it as 「（随记副本）」.
+- **Stale reads:** storage can serve the previous copy for a while after an upload, through a URL signed earlier. Reads use freshly signed URLs and must match the size in the row.
+
+## Mac app
+
+```bash
+./mac/build.sh             # builds mac/build/随记.app (universal, ad-hoc signed)
+./mac/build.sh --install   # also copies it to /Applications
+```
+
+It needs Xcode's command line tools. The app keeps you signed in between launches. Links to other sites open in your default browser, and downloads go to `~/Downloads`. The menu bar item shows whether the folder agent is running, and has 立即同步 (sync now), the synced folder and the sync log.
+
+## Folder agent
+
+```bash
+npm run sync login       # sign in to your Suiji account
+npm run sync add         # choose a folder; it uploads right away
+npm run sync install     # run in the background whenever you log in
+npm run sync status      # show account, folders and file counts
+npm run sync remove ~/some/folder   # stop syncing a folder (cloud copies stay)
+npm run sync uninstall   # stop running in the background
+```
+
+Hidden files, `node_modules` and `.git` are skipped, and files over 50 MB are not uploaded. Settings, state and the log live in `~/.suiji/`; the log is `~/.suiji/sync.log`.
+
+## Deploy
 
 ```bash
 npx vercel link --yes --project suiji-notes
 npx vercel integration add supabase --yes --no-claim
 npx vercel env pull .env.local --yes
 npm install
-npm run db:setup
+npm run db:setup        # creates the tables, policies and storage bucket from schema.sql
 npx vercel deploy --prod
 ```
 
-## Mac 文件夹自动同步
+`npm run dev` serves the app locally on port 5173.
 
-选中的文件夹（包括子文件夹）会自动上传到随记的「文件」里。新增和修改的文件会上传，本地删除的文件云端也会删除。隐藏文件和 node_modules、.git 会跳过，单个文件最大 50 MB。
+## Install on a phone or Mac without the app
 
-```bash
-npm run sync login       # 登录随记账号
-npm run sync add         # 弹出窗口选文件夹，立即上传
-npm run sync install     # 设为登录 Mac 后自动在后台运行
-npm run sync status      # 查看状态
-npm run sync remove ~/某个文件夹   # 停止同步（云端文件保留）
-npm run sync uninstall   # 取消后台运行
-```
-
-配置和日志在 `~/.suiji/`（日志：`~/.suiji/sync.log`）。
-
-## 安装到手机
-
-- iPhone：用 Safari 打开部署地址，点分享按钮，再点「添加到主屏幕」。
-- Mac：用 Safari 打开，菜单「文件 → 添加到程序坞」；用 Chrome 的话点地址栏里的安装图标。
+- **iPhone:** open the site in Safari, tap Share, then 添加到主屏幕 (Add to Home Screen).
+- **Mac:** in Safari choose File → Add to Dock, or in Chrome click the install icon in the address bar.
