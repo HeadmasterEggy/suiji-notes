@@ -696,17 +696,38 @@ const isNarrow = (p) => p.el.clientWidth < 760;
 const paneSizes = new ResizeObserver((es) => {
   for (const e of es) for (const p of panes.values()) if (p.el === e.target) applyToc(p);
 });
+// Its width is shared by all panes: drag the grip on its left edge, double-click to reset.
+const TOC_MIN = 180, TOC_DEFAULT = 240;
+const tocMax = (p) => Math.max(TOC_MIN, Math.min(440, p.el.clientWidth - 380));
+function setTocWidth(px, p, save) {
+  const w = Math.round(Math.min(p ? tocMax(p) : 440, Math.max(TOC_MIN, px)));
+  document.documentElement.style.setProperty("--toc-w", w + "px");
+  if (save) try { localStorage.setItem("suiji:toc-w", String(w)); } catch {}
+  return w;
+}
+try { const w = +localStorage.getItem("suiji:toc-w"); if (w) setTocWidth(w); } catch {}
+const tocWidth = () => parseFloat(document.documentElement.style.getPropertyValue("--toc-w")) || TOC_DEFAULT;
+
+const el$ = (tag, cls, text) => Object.assign(document.createElement(tag), cls ? { className: cls } : {}, text != null ? { textContent: text } : {});
 function setToc(p, art) {
   p.heads = art ? [...art.querySelectorAll("h1, h2, h3, h4")].filter((h) => h.textContent.trim()) : [];
   if (p.heads.length < 2) p.heads = [];
+  if (!p.heads.length) { p.toc.replaceChildren(); p.tocList = null; applyToc(p); return; }
   const top = Math.min(...p.heads.map((h) => +h.tagName[1]));
-  p.toc.replaceChildren(...p.heads.map((h, i) => {
-    const b = Object.assign(document.createElement("button"), { type: "button", textContent: h.textContent.trim(), title: h.textContent.trim() });
-    b.dataset.i = i; b.style.setProperty("--lvl", +h.tagName[1] - top);
+  const grip = el$("div", "toc-grip"); grip.title = "拖动调整宽度，双击恢复";
+  const close = el$("button", "toc-close"); close.type = "button"; close.dataset.close = ""; close.setAttribute("aria-label", "关闭大纲");
+  close.innerHTML = '<svg viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>';
+  const head = el$("div", "toc-head");
+  head.append(el$("span", "toc-title", "大纲"), el$("span", "toc-count", String(p.heads.length)), close);
+  const bar = el$("div", "toc-bar"); p.tocBar = el$("i"); bar.append(p.tocBar);
+  p.tocList = el$("div", "toc-list"); p.tocInk = el$("span", "toc-ink");
+  p.tocList.append(p.tocInk, ...p.heads.map((h, i) => {
+    const t = h.textContent.trim(), b = el$("button", null, t);
+    b.type = "button"; b.title = t; b.dataset.i = i; b.dataset.lvl = Math.min(+h.tagName[1] - top, 3);
     return b;
   }));
-  if (p.heads.length) p.toc.prepend(Object.assign(document.createElement("div"), { className: "toc-title", textContent: "大纲" }));
-  applyToc(p); markHeading(p);
+  p.toc.replaceChildren(grip, head, bar, p.tocList);
+  applyToc(p);
 }
 function applyToc(p) {
   const has = p.heads.length > 0 && !p.fv.hidden;
@@ -715,21 +736,28 @@ function applyToc(p) {
   p.outline.setAttribute("aria-pressed", String(on));
   p.toc.hidden = !on;
   p.toc.classList.toggle("overlay", narrow);
+  if (on) { p.tocCur = null; markHeading(p); }
 }
 // The current section: the last heading that has scrolled past the top of the pane.
 function markHeading(p) {
-  if (p.toc.hidden || !p.heads.length) return;
-  const top = p.preview.getBoundingClientRect().top + 80;
+  if (p.toc.hidden || !p.tocList) return;
+  const pv = p.preview, room = pv.scrollHeight - pv.clientHeight;
+  p.tocBar.style.transform = `scaleX(${room > 0 ? Math.min(1, pv.scrollTop / room) : 1})`;   // reading progress
+  const top = pv.getBoundingClientRect().top + 80;
   let cur = 0;
   if (p.tocLock != null) cur = p.tocLock;
+  else if (room > 0 && pv.scrollTop >= room - 2) cur = p.heads.length - 1;   // at the end, the last section counts as current
   else p.heads.forEach((h, i) => { if (h.getBoundingClientRect().top <= top) cur = i; });
-  const prev = p.toc.querySelector("[aria-current]");
-  const next = p.toc.querySelector(`[data-i="${cur}"]`);
-  if (prev === next) return;
-  prev?.removeAttribute("aria-current");
-  next?.setAttribute("aria-current", "true");
-  const r = next.getBoundingClientRect(), box = p.toc.getBoundingClientRect();
-  if (r.top < box.top + 30 || r.bottom > box.bottom - 10) p.toc.scrollTo({ top: p.toc.scrollTop + r.top - box.top - box.height / 3 });
+  if (cur === p.tocCur) return;
+  p.tocCur = cur;
+  p.tocList.querySelector("[aria-current]")?.removeAttribute("aria-current");
+  const next = p.tocList.querySelector(`[data-i="${cur}"]`);
+  next.setAttribute("aria-current", "true");
+  // One marker slides to the current row instead of each row drawing its own.
+  p.tocInk.style.transform = `translateY(${next.offsetTop + 6}px)`;
+  p.tocInk.style.height = Math.max(10, next.offsetHeight - 12) + "px";
+  const list = p.tocList, y = next.offsetTop - list.scrollTop;
+  if (y < 24 || y + next.offsetHeight > list.clientHeight - 24) list.scrollTo({ top: next.offsetTop - list.clientHeight / 3, behavior: "smooth" });
 }
 
 function makePane(item) {
@@ -738,7 +766,8 @@ function makePane(item) {
   const p = {
     id: ++paneSeq, el, ta: q("p-ta"), ph: q("p-ph"), fv: q("p-fv"), preview: q("p-preview"), meta: q("p-meta"),
     dl: q("p-dl"), hint: q("p-hint"), edit: q("p-edit"), web: q("p-web"), fileEdit: false, fileBase: null,
-    outline: q("p-outline"), toc: q("p-toc"), heads: [], tocNarrow: false, tocLock: null,
+    outline: q("p-outline"), toc: q("p-toc"), heads: [], tocNarrow: false, tocLock: null, tocCur: null,
+    tocList: null, tocInk: null, tocBar: null,
     kind: item?.kind || null, itemId: item?.id || null, shown: null, token: 0,
     editing: false, editTimer: null,
   };
@@ -763,7 +792,22 @@ function makePane(item) {
     else { outlineWide = !outlineWide; try { localStorage.setItem("suiji:outline", outlineWide ? "1" : "0"); } catch {} }
     panes.forEach(applyToc);
   };
+  p.toc.addEventListener("pointerdown", (e) => {
+    if (!e.target.closest(".toc-grip")) return;
+    e.preventDefault();
+    const x0 = e.clientX, w0 = tocWidth();
+    document.body.classList.add("resizing", "resizing-row");
+    const move = (ev) => setTocWidth(w0 + x0 - ev.clientX, p);
+    const up = () => {
+      document.body.classList.remove("resizing", "resizing-row");
+      removeEventListener("pointermove", move); removeEventListener("pointerup", up);
+      setTocWidth(tocWidth(), p, true); panes.forEach((x) => { x.tocCur = null; markHeading(x); });
+    };
+    addEventListener("pointermove", move); addEventListener("pointerup", up);
+  });
+  p.toc.addEventListener("dblclick", (e) => { if (e.target.closest(".toc-grip")) { setTocWidth(TOC_DEFAULT, p, true); panes.forEach((x) => { x.tocCur = null; markHeading(x); }); } });
   p.toc.addEventListener("click", (e) => {
+    if (e.target.closest("[data-close]")) { if (isNarrow(p)) p.tocNarrow = false; else { outlineWide = false; try { localStorage.setItem("suiji:outline", "0"); } catch {} } panes.forEach(applyToc); return; }
     const b = e.target.closest("button[data-i]");
     if (!b) return;
     const h = p.heads[+b.dataset.i], top = p.preview.getBoundingClientRect().top;
