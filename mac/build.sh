@@ -6,7 +6,7 @@
 set -e
 VERSION=${VERSION:-1.2}
 BUILD=${BUILD:-3}
-NOTES="新图标；网页端新增设置页面。"
+NOTES="新图标，并且 Dock 图标会随风格切换；网页端新增设置页面。"
 cd "$(dirname "$0")"
 APP="build/随记.app"
 rm -rf build && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -24,6 +24,7 @@ for s in 16 32 128 256 512; do
   d=$((s * 2)); sips -z $d $d AppIcon.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+cp AppIcon-paper.png AppIcon-terminal.png AppIcon-blocks.png "$APP/Contents/Resources/"   # Dock icons for the other styles
 rm -rf "$ICONSET"
 
 cat > "$APP/Contents/Info.plist" <<PLIST

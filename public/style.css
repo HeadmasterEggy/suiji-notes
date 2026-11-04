@@ -329,6 +329,8 @@ textarea {
 .md-body .math-block { overflow-x: auto; overflow-y: hidden; margin: 0 0 1em; }
 .md-body .katex { font-size: 1.05em; }
 .md-missing { color: var(--muted); font-size: 13px; }
+.md-body mark { background: color-mix(in srgb, #ffd54a 45%, transparent); color: inherit; padding: 0 .15em; border-radius: 3px; }
+.md-body .wikilink.missing { color: var(--muted); text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
 @media (max-width: 720px) {
   /* Reading on a phone: the editor runs edge to edge so text only keeps one small gutter. */
   .app[data-view="edit"] .editor {

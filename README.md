@@ -33,9 +33,11 @@
   - 纸张 *Paper*: warm paper and serif text
   - 终端 *Terminal*: green on black, monospace
   - 方块 *Blocks*: a pixel-art world of sky, grass and stone panels
+
+  The tab icon, and the Mac app's Dock icon, change with the style.
 - **Settings.** 设置 at the bottom of the sidebar holds the style, text size, whether new documents show their outline, widths, sync, the local cache, the account and update checks.
 - **Relationship graph.** Like Obsidian's graph, built from `[[wikilinks]]`, relative `.md` links and front-matter tags.
-- **Markdown.** Math (KaTeX) and Mermaid diagrams.
+- **Markdown.** Math (KaTeX), Mermaid diagrams, and Obsidian's `[[wikilinks]]` (shown by their alias, opening the linked note) and `==highlights==`.
 - **Blog links.** Every published post links to its page on the blog (`https://qiao1.top/posts/<abbrlink>.html`).
 - **Fast and offline-first.** Documents are cached on the device and prefetched. Notes save on the device first and upload once online.
 - **Always current.** Open windows pick up a new deploy by themselves, and the Mac app updates itself.

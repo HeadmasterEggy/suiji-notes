@@ -35,7 +35,7 @@ let macCSS = """
 html.mac-app:not(.fullscreen) body { padding-top: \(Int(titleBarHeight) + 4)px !important; }
 """
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, WKScriptMessageHandler, NSMenuDelegate {
   var window: NSWindow!
   var web: WKWebView!
   var status: NSStatusItem!
@@ -45,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     buildMainMenu()
     buildWindow()
     buildStatusItem()
+    setDockIcon(UserDefaults.standard.string(forKey: "iconStyle") ?? "")
     NSApp.activate(ignoringOtherApps: true)
     DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.checkForUpdates(manual: false) }
     Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { _ in self.checkForUpdates(manual: false) }
@@ -143,6 +144,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     showWindow(); return true
   }
 
+  // MARK: style icon
+  // The page reports its style (玻璃 / 纸张 / 终端 / 方块) and the Dock icon follows it while the app runs.
+  // The bundle's own icon, which Finder and Launchpad show, stays the glass one.
+
+  func setDockIcon(_ style: String) {
+    UserDefaults.standard.set(style, forKey: "iconStyle")
+    let url = style.isEmpty ? nil : Bundle.main.url(forResource: "AppIcon-" + style, withExtension: "png")
+    NSApp.applicationIconImage = url.flatMap { NSImage(contentsOf: $0) }   // nil restores the bundle icon
+  }
+
+  func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) {
+    guard m.frameInfo.isMainFrame, m.frameInfo.securityOrigin.host == appURL.host,
+          let body = m.body as? [String: Any], let style = body["style"] as? String,
+          ["", "paper", "terminal", "blocks"].contains(style) else { return }
+    if style != UserDefaults.standard.string(forKey: "iconStyle") ?? "" { setDockIcon(style) }
+  }
+
   // MARK: window
 
   func buildWindow() {
@@ -152,6 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     let js = "document.documentElement.classList.add('mac-app');" +
       "const s=document.createElement('style');s.textContent=\(String(reflecting: macCSS));document.head.append(s);"
     config.userContentController.addUserScript(WKUserScript(source: js, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+    config.userContentController.add(self, name: "suiji")
     web = WKWebView(frame: .zero, configuration: config)
     web.navigationDelegate = self; web.uiDelegate = self
     web.allowsBackForwardNavigationGestures = false

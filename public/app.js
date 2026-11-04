@@ -21,6 +21,9 @@ function applyStyle(name, save) {
   }
   if (save) try { name ? localStorage.setItem("suiji:style", name) : localStorage.removeItem("suiji:style"); } catch {}
   for (const b of $("styleChoices").querySelectorAll("[data-style]")) b.setAttribute("aria-checked", String(b.dataset.style === (name || "")));
+  // The tab icon follows the style; in the Mac app the Dock icon does too.
+  document.querySelector('link[rel="icon"]').href = name ? `icon-${name}.svg` : "icon.svg";
+  window.webkit?.messageHandlers?.suiji?.postMessage({ style: name || "" });
   const bar = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
   for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.content = name ? bar : (m.media.includes("dark") ? "#000000" : "#f4f4f4");
 }
@@ -326,12 +329,13 @@ function skeleton() {
 // referenced by relative path, which are looked up among the synced files.
 // Posts synced from the Hexo blog's _posts folder are published at BLOG/posts/<abbrlink>.html
 // (permalink: posts/:abbrlink.html in the blog's _config.yml). Folders the blog's skip_render keeps
-// unpublished get no link, nor do posts without an abbrlink yet.
+// unpublished get no link, nor do posts without an abbrlink yet. The Mac agent reads that list from the blog
+// and keeps it in the account's metadata, so folder names never appear in this code.
 const BLOG = "https://qiao1.top";
-const UNPUBLISHED = ["标签集合/", "思维导图/"];
+let unpublished = [];
 function blogUrl(f, fm) {
   const slug = String(fm.abbrlink || "").trim();
-  if (f.folder !== "_posts" || !/^[\w-]+$/.test(slug) || UNPUBLISHED.some((d) => f.name.startsWith(d))) return null;
+  if (f.folder !== "_posts" || !/^[\w-]+$/.test(slug) || unpublished.some((d) => f.name.startsWith(d))) return null;
   return `${BLOG}/posts/${encodeURIComponent(slug)}.html`;
 }
 const isMarkdown = (f) => ["md", "markdown"].includes(extOf(f.name)) || f.mime === "text/markdown";
@@ -439,6 +443,40 @@ function resolveRel(dir, href) {
   return out.join("/");
 }
 
+// [[links]] and relative .md links resolve the way Obsidian does: relative to the file, then from the
+// vault root, then by file name when only one file has it. Shared by the preview and the graph.
+const stripMd = (n) => n.replace(/\.(md|markdown)$/i, "");
+function linkResolver(md) {
+  const byPath = new Map(), byBase = new Map();
+  for (const f of md) {
+    byPath.set(stripMd(f.name).toLowerCase(), f);
+    byPath.set(stripMd(fullPath(f).join("/")).toLowerCase(), f);
+    const b = stripMd(baseName(f.name)).toLowerCase();
+    byBase.set(b, byBase.has(b) ? null : f);
+  }
+  return (dir, target) => {
+    const t = stripMd(target.trim()).replace(/^\/+/, "");
+    let rel = t;
+    try { rel = resolveRel(dir, t); } catch {}
+    return byPath.get(rel.toLowerCase()) ?? byPath.get(t.toLowerCase()) ?? byBase.get(baseName(t).toLowerCase()) ?? null;
+  };
+}
+// Obsidian syntax marked doesn't know: [[target#heading|alias]] becomes a placeholder link, resolved after
+// rendering; ==text== becomes highlighted text.
+const WIKI = /(?<!!)\[\[([^\]\n]+?)\]\]/g;
+const mdEscape = (t) => t.replace(/[\\`*_[\]<>]/g, "\\$&");
+function obsidianSyntax(part, wiki) {
+  return part
+    .replace(WIKI, (_, inner) => {
+      const [target, alias] = inner.split(/\\?\|/);
+      const [file, heading] = target.split("#");
+      const label = (alias || (file ? baseName(stripMd(file.trim())) + (heading ? " › " + heading : "") : heading || "")).trim();
+      wiki.push(file.trim());
+      return `[${mdEscape(label || inner)}](#suiji-wiki-${wiki.length - 1})`;
+    })
+    .replace(/==(?=\S)([^=\n]+?)(?<=\S)==/g, "<mark>$1</mark>");
+}
+
 async function renderMarkdown(src, f) {
   await loadMarkdownLibs();
   const { body, meta: fm } = parseFrontMatter(src);
@@ -452,11 +490,12 @@ async function renderMarkdown(src, f) {
     math.push(window.katex.renderToString(tex.trim(), { displayMode: display, throwOnError: false, output: "html" }));
     return display ? `\n\nKATEXBLOCK${math.length - 1}END\n\n` : `KATEXINLINE${math.length - 1}END`;
   };
-  text = text.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]+`)/g).map((part, i) => i % 2 ? part : part
+  const wiki = [];
+  text = text.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]+`)/g).map((part, i) => i % 2 ? part : obsidianSyntax(part
     .replace(/\$\$([\s\S]+?)\$\$/g, (_, t) => keep(t, true))
     .replace(/\\\[([\s\S]+?)\\\]/g, (_, t) => keep(t, true))
     .replace(/\\\(([\s\S]+?)\\\)/g, (_, t) => keep(t, false))
-    .replace(/(?<![\\$\w])\$(?!\s)([^\n$]+?)(?<![\s\\])\$(?!\d)/g, (_, t) => keep(t, false))
+    .replace(/(?<![\\$\w])\$(?!\s)([^\n$]+?)(?<![\s\\])\$(?!\d)/g, (_, t) => keep(t, false)), wiki)
   ).join("");
 
   let html = window.DOMPurify.sanitize(window.marked.parse(text, { gfm: true, breaks: false }));
@@ -507,7 +546,14 @@ async function renderMarkdown(src, f) {
   const content = document.createElement("div");
   content.append(frag);
   art.append(content);
+  const find = wiki.length ? linkResolver(files.filter(isMarkdown)) : null, wdir = f.name.split("/").slice(0, -1);
+  for (const a of content.querySelectorAll('a[href^="#suiji-wiki-"]')) {
+    const target = find(wdir, wiki[+a.getAttribute("href").slice(12)] || "");
+    if (target) { a.dataset.open = target.id; a.href = "#"; a.title = target.name; a.classList.add("wikilink"); }
+    else a.replaceWith(Object.assign(document.createElement("span"), { className: "wikilink missing", textContent: a.textContent, title: "没有找到这篇笔记" }));
+  }
   for (const a of content.querySelectorAll("a[href]")) {
+    if (a.dataset.open) continue;
     const href = a.getAttribute("href");
     const target = isRel(href) && byPath.get(resolveRel(dir, href));
     if (target) a.dataset.open = target.id;   // handled by the pane's click listener, so cached copies keep working
@@ -985,26 +1031,13 @@ async function saveFile(p) {
 // ---------- graph ----------
 // Nodes: Markdown files and notes (plus tags when switched on). Edges: [[links]] and relative .md links,
 // resolved the way Obsidian does: relative to the file, then from the vault root, then by unique file name.
-const stripMd = (n) => n.replace(/\.(md|markdown)$/i, "");
 function graphData(withTags) {
   const nodes = [], edges = new Set(), idx = new Map();
   const add = (key, node) => { if (!idx.has(key)) { idx.set(key, nodes.length); nodes.push(node); } return idx.get(key); };
-  const byPath = new Map(), byBase = new Map();
   const md = files.filter(isMarkdown);
-  for (const f of md) {
-    const i = add("file:" + f.id, { label: stripMd(baseName(f.name)), kind: "file", ref: f.id });
-    byPath.set(stripMd(f.name).toLowerCase(), i);
-    byPath.set(stripMd(fullPath(f).join("/")).toLowerCase(), i);
-    const b = stripMd(baseName(f.name)).toLowerCase();
-    byBase.set(b, byBase.has(b) ? -1 : i);
-  }
-  const resolve = (dir, target) => {
-    const t = stripMd(target.trim()).replace(/^\/+/, "");
-    let rel = t;
-    try { rel = resolveRel(dir, t); } catch {}
-    const hit = byPath.get(rel.toLowerCase()) ?? byPath.get(t.toLowerCase()) ?? byBase.get(baseName(t).toLowerCase());
-    return hit >= 0 ? hit : undefined;
-  };
+  for (const f of md) add("file:" + f.id, { label: stripMd(baseName(f.name)), kind: "file", ref: f.id });
+  const find = linkResolver(md);
+  const resolve = (dir, target) => { const f = find(dir, target); return f ? idx.get("file:" + f.id) : undefined; };
   const link = (a, b) => { if (b !== undefined && a !== b) edges.add(a < b ? a + "," + b : b + "," + a); };
   for (const f of md) {
     const i = idx.get("file:" + f.id), dir = f.name.split("/").slice(0, -1);
@@ -1393,6 +1426,14 @@ function enter(session) {
     return;
   }
   $("who").textContent = session.user.email;
+  unpublished = session.user.user_metadata?.blog_skip || [];
+  // The session can hold old metadata; once the current list arrives, documents already shown get redrawn.
+  sb.auth.getUser().then(({ data }) => {
+    const now = data?.user?.user_metadata?.blog_skip || [];
+    if (!data?.user || JSON.stringify(now) === JSON.stringify(unpublished)) return;
+    unpublished = now; rendered.clear();
+    for (const p of panes.values()) if (p.kind === "file") { p.shown = null; renderPane(p); }
+  }).catch(() => {});
   load(); filesLoaded = false; restoreLayout(); render();
   // Warm up the Markdown renderer in the background so the first document opens without waiting for it.
   (window.requestIdleCallback || ((fn) => setTimeout(fn, 1500)))(() => loadMarkdownLibs().catch(() => {})); sync(); loadFiles(); subscribe();

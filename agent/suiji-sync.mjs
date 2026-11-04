@@ -226,9 +226,34 @@ async function pullFolder(sb, root, state, rows) {
   return retry;
 }
 
+// A synced Hexo `_posts` folder: the blog's skip_render keeps some of its subfolders unpublished. The app
+// gives those no blog link; the list is kept in the account (user metadata), never in the app's code.
+function hexoUnpublished(root) {
+  if (path.basename(root) !== "_posts") return null;
+  const cfg = path.join(root, "..", "..", "_config.yml");
+  if (!fs.existsSync(cfg)) return null;
+  const out = [];
+  let inSkip = false;
+  for (const line of fs.readFileSync(cfg, "utf8").split("\n")) {
+    if (/^skip_render:/.test(line)) { inSkip = true; continue; }
+    if (inSkip && /^\S/.test(line)) break;
+    const m = inSkip && /^\s*-\s*["']?_posts\/([^/*"']+)\//.exec(line);
+    if (m && !out.includes(m[1] + "/")) out.push(m[1] + "/");
+  }
+  return out;
+}
+async function shareUnpublished(sb, user, folders) {
+  const skip = [...new Set(folders.flatMap((f) => hexoUnpublished(f) || []))].sort();
+  const had = user.user_metadata?.blog_skip || [];
+  if (JSON.stringify(had) === JSON.stringify(skip)) return;
+  const { error } = await sb.auth.updateUser({ data: { blog_skip: skip } });
+  if (error) log("没能保存博客未发布的文件夹：", error.message); else log("已更新博客未发布的文件夹：", skip.length, "个");
+}
+
 async function syncAll(sb) {
-  const uid = (await signedIn(sb)).id;
+  const user = await signedIn(sb), uid = user.id;
   const { folders = [] } = readJson(CONFIG, {});
+  await shareUnpublished(sb, user, folders);
   const state = readJson(STATE, {});
   const rows = await cloudRows(sb);
   let retry = false;
