@@ -172,6 +172,13 @@
         </div>
       </div>
       <div class="set-row">
+        <span>界面大小<small>整个界面的缩放比例</small></span>
+        <div class="zoom-ctl">
+          <input type="range" id="zoomRange" min="75" max="150" step="5" value="100" aria-label="界面大小">
+          <button type="button" id="zoomVal" title="恢复 100%">100%</button>
+        </div>
+      </div>
+      <div class="set-row">
         <span>语言<small>界面文字的语言，切换后会刷新页面</small></span>
         <div class="seg" id="langChoices" role="radiogroup" aria-label="语言">
           <button type="button" role="radio" data-lang="">跟随系统</button>

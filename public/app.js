@@ -67,6 +67,37 @@ function applyFont(px, save) {
 }
 applyFont(fontSize());
 
+// Interface size, 75–150 %. The Mac app zooms natively (the factor ⌘+ / ⌘− change, so media queries and pointer
+// maths stay exact). A browser gets CSS zoom on the root, saved as "suiji:zoom"; uiZoom() turns pointer and
+// layout-box distances, which CSS zoom reports in screen pixels, back into the page's own pixels.
+const uiZoom = () => parseFloat(document.documentElement.style.zoom) || 1;
+let nativeZoom = false;
+function cssZoom(f) {
+  const r = document.documentElement.style;
+  if (f === 1) { r.removeProperty("zoom"); r.removeProperty("--z"); } else { r.zoom = String(f); r.setProperty("--z", String(f)); }
+}
+function showZoom(f) {
+  const pct = Math.round(f * 100);
+  $("zoomRange").value = String(pct); $("zoomVal").textContent = pct + "%"; $("zoomVal").disabled = pct === 100;
+}
+function applyZoom(f, save) {
+  f = Math.round(Math.min(1.5, Math.max(0.75, f)) * 100) / 100;
+  if (nativeZoom) local.macOp("zoom", { f }).then(showZoom, () => {});
+  else { cssZoom(f); if (save) try { f === 1 ? localStorage.removeItem("suiji:zoom") : localStorage.setItem("suiji:zoom", String(f)); } catch {} }
+  showZoom(f);
+}
+{
+  let saved = 1;
+  try { saved = +localStorage.getItem("suiji:zoom") || 1; } catch {}
+  cssZoom(saved); showZoom(saved);
+  // A Mac app that zooms natively takes over, bringing along a size set before it could.
+  if (local.available) local.macOp("zoom").then((f) => {
+    if (typeof f !== "number") return;
+    nativeZoom = true; cssZoom(1);
+    if (saved !== 1) { try { localStorage.removeItem("suiji:zoom"); } catch {} applyZoom(saved); } else showZoom(f);
+  }, () => {});
+}
+
 // ---------- updates ----------
 // Every deploy changes the cache name in sw.js. Open windows (the Mac app, a PWA left open) check it every
 // 10 minutes and whenever they come back to the front. A window in the background with nothing being edited
@@ -661,7 +692,7 @@ function readingPlace(p) {
 }
 function toPlace(p, at) {
   const pv = p.preview, b = at.i >= 0 && pv.querySelectorAll(ANCHORS)[at.i];
-  if (b) pv.scrollTop += b.getBoundingClientRect().top - pv.getBoundingClientRect().top + at.off;
+  if (b) pv.scrollTop += (b.getBoundingClientRect().top - pv.getBoundingClientRect().top + at.off) / uiZoom();
   else pv.scrollTop = at.share * pv.scrollHeight;
 }
 
@@ -1102,7 +1133,7 @@ function makePane(item) {
     e.preventDefault();
     const x0 = e.clientX, w0 = tocWidth();
     document.body.classList.add("resizing", "resizing-row");
-    const move = (ev) => { setTocWidth(w0 + x0 - ev.clientX, p); panes.forEach(fitToc); };
+    const move = (ev) => { setTocWidth(w0 + (x0 - ev.clientX) / uiZoom(), p); panes.forEach(fitToc); };
     const up = () => {
       document.body.classList.remove("resizing", "resizing-row");
       removeEventListener("pointermove", move); removeEventListener("pointerup", up);
@@ -1118,7 +1149,7 @@ function makePane(item) {
     const b = e.target.closest("button[data-i]");
     if (!b) return;
     const h = p.heads[+b.dataset.i], top = p.preview.getBoundingClientRect().top;
-    p.preview.scrollTo({ top: p.preview.scrollTop + h.getBoundingClientRect().top - top - 12, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    p.preview.scrollTo({ top: p.preview.scrollTop + (h.getBoundingClientRect().top - top) / uiZoom() - 12, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
     if (isNarrow(p)) { p.tocNarrow = false; applyToc(p); }
     p.tocLock = +b.dataset.i; markHeading(p);   // keep the clicked heading marked while the scroll settles
   });
@@ -1407,7 +1438,7 @@ async function uiOpen({ kind, id, heading, beside }) {
   const i = p.heads.findIndex((h) => norm(h.textContent).includes(want));
   if (i < 0) return { opened: true, heading: "not found", headings: p.heads.slice(0, 60).map((h) => h.textContent.trim()) };
   const h = p.heads[i], top = p.preview.getBoundingClientRect().top;
-  p.preview.scrollTo({ top: p.preview.scrollTop + h.getBoundingClientRect().top - top - 12, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  p.preview.scrollTo({ top: p.preview.scrollTop + (h.getBoundingClientRect().top - top) / uiZoom() - 12, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   h.classList.remove("ag-flash"); void h.offsetWidth; h.classList.add("ag-flash");
   return { opened: true, heading: h.textContent.trim() };
 }
@@ -1650,7 +1681,7 @@ addEventListener("resize", () => { const w = parseFloat(app.style.getPropertyVal
     e.preventDefault();
     const left = app.getBoundingClientRect().left;
     document.body.classList.add("resizing", "resizing-row");
-    const move = (ev) => setSide(ev.clientX - left - 6);
+    const move = (ev) => setSide((ev.clientX - left) / uiZoom() - 6);
     const up = () => {
       document.body.classList.remove("resizing", "resizing-row");
       removeEventListener("pointermove", move); removeEventListener("pointerup", up);
@@ -2034,6 +2065,7 @@ function restyled() {
   };
   openSettings = (sec) => {
     fill(); if (local.available) fillLocal(); fillAi(); dlg.showModal();
+    if (nativeZoom) local.macOp("zoom").then(showZoom, () => {});   // ⌘+ / ⌘− may have changed it
     if (sec) requestAnimationFrame(() => $(sec)?.scrollIntoView({ block: "start" }));
   };
   $("setBtn").onclick = () => openSettings();
@@ -2066,6 +2098,10 @@ function restyled() {
     if (b && b.dataset.mode !== modeChoice) { applyMode(b.dataset.mode, true); restyled(); }
   };
   $("fontChoices").onclick = (e) => { const b = e.target.closest("[data-size]"); if (b) applyFont(+b.dataset.size, true); };
+  // Zoom on release: resizing the page under a dragged thumb would move the thumb away from the pointer.
+  $("zoomRange").oninput = (e) => { $("zoomVal").textContent = e.target.value + "%"; };
+  $("zoomRange").onchange = (e) => applyZoom(+e.target.value / 100, true);
+  $("zoomVal").onclick = () => applyZoom(1, true);
   for (const b of $("langChoices").querySelectorAll("[data-lang]")) b.setAttribute("aria-checked", String(b.dataset.lang === langChoice));
   $("langChoices").onclick = async (e) => {
     const b = e.target.closest("[data-lang]");
@@ -2181,7 +2217,7 @@ if (matchMedia("(hover: hover)").matches) {
     const g = e.target.closest?.(".glass");
     if (!g) return;
     const r = g.getBoundingClientRect();
-    g.style.setProperty("--mx", e.clientX - r.left + "px");
-    g.style.setProperty("--my", e.clientY - r.top + "px");
+    g.style.setProperty("--mx", (e.clientX - r.left) / uiZoom() + "px");
+    g.style.setProperty("--my", (e.clientY - r.top) / uiZoom() + "px");
   }, { passive: true });
 }

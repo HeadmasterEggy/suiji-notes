@@ -189,6 +189,7 @@ async function bridge(body) {
       return shell.openPath(body.path).then((err) => { if (err) throw new Error(err); });
     case "syncLog": return shell.openPath(path.join(local.suijiHome, "sync.log")).then(() => undefined);
     case "checkUpdates": checkForUpdates(true); return undefined;
+    case "zoom": return typeof body.f === "number" && body.f > 0 ? setZoom(body.f) : win.webContents.getZoomFactor();
     case "appVersion": return currentBuild ? `${version} (${currentBuild})` : version;
     case "loginItem":
       if (typeof body.on === "boolean" && body.on !== app.getLoginItemSettings().openAtLogin) toggleLogin();
@@ -280,7 +281,7 @@ function buildWindow() {
   for (const [ev, on] of [["enter-full-screen", true], ["leave-full-screen", false]]) win.on(ev, () => win.webContents.send("fullscreen", on));
   // A reload (⌘R, or the page updating itself after a deploy) starts without the class, so each load is told
   // again; otherwise the 32 px title-bar gap and the drag strip come back in full screen.
-  win.webContents.on("dom-ready", () => win.webContents.send("fullscreen", win.isFullScreen()));
+  win.webContents.on("dom-ready", () => { win.webContents.send("fullscreen", win.isFullScreen()); win.webContents.setZoomFactor(savedZoom()); });
 
   // Closing the window keeps the app (and the sync) running; the Dock icon or the menu bar item brings it back.
   win.on("close", (e) => {
@@ -346,9 +347,19 @@ function showWindow() {
   win.show(); win.focus();
 }
 
+// Page zoom: ⌘+ / ⌘− and the 界面大小 slider in Settings set the same factor, kept in userData/zoom.
+const zoomFile = () => path.join(app.getPath("userData"), "zoom");
+function savedZoom() {
+  try { const f = +fs.readFileSync(zoomFile(), "utf8"); return f >= 0.5 && f <= 2 ? f : 1; } catch { return 1; }
+}
+function setZoom(f) {
+  f = Math.min(Math.max(Math.round(f * 100) / 100, 0.6), 2);
+  win.webContents.setZoomFactor(f);
+  try { f === 1 ? fs.rmSync(zoomFile(), { force: true }) : fs.writeFileSync(zoomFile(), String(f)); } catch {}
+  return f;
+}
 function zoomBy(d) {
-  const wc = win.webContents;
-  wc.setZoomFactor(d ? Math.min(Math.max(Math.round((wc.getZoomFactor() + d) * 10) / 10, 0.6), 2) : 1);
+  setZoom(d ? Math.round((win.webContents.getZoomFactor() + d) * 10) / 10 : 1);
 }
 
 function toggleLogin() {

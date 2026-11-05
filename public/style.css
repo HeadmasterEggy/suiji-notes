@@ -457,7 +457,7 @@ textarea {
 .skeleton i:nth-child(6) { width: 64%; margin-bottom: 14px; }
 .skeleton i:nth-child(9) { width: 40%; }
 .skeleton i:nth-child(odd) { animation-delay: .08s; }
-.skeleton.media i { width: 100%; height: min(60vh, 480px); border-radius: 12px; }
+.skeleton.media i { width: 100%; height: min(calc(60vh / var(--z, 1)), 480px); border-radius: 12px; }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
 @media (max-width: 720px) { .skeleton { padding: 18px 16px; } }
 
@@ -663,7 +663,7 @@ textarea {
 
 /* ===================== Settings ===================== */
 .settings {
-  width: min(560px, calc(100vw - 32px)); max-height: min(720px, calc(100dvh - 48px)); padding: 0; margin: auto;
+  width: min(560px, calc(100vw / var(--z, 1) - 32px)); max-height: min(720px, calc(100dvh / var(--z, 1) - 48px)); padding: 0; margin: auto;
   border: 0; border-radius: 22px; color: var(--ink); background: var(--glass-strong); overflow: hidden;
   flex-direction: column;
 }
@@ -708,6 +708,14 @@ label.set-row { cursor: pointer; }
 .set-styles small { font-size: 11px; color: var(--muted); line-height: 1.35; }
 @media (max-width: 520px) { .set-styles { grid-template-columns: repeat(2, 1fr); } }
 
+/* 界面大小: a slider and its value, which resets to 100 % when clicked. */
+.zoom-ctl { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.zoom-ctl input { width: 140px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.zoom-ctl input:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 999px; }
+@media (max-width: 720px) { .zoom-ctl input { width: 110px; } }
+.zoom-ctl button { all: unset; min-width: 42px; text-align: right; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--ink); cursor: pointer; }
+.zoom-ctl button:disabled { color: var(--muted); cursor: default; }
+.zoom-ctl button:focus-visible { outline: 2px solid var(--accent); border-radius: 4px; }
 .seg { display: inline-flex; flex-shrink: 0; padding: 3px; border-radius: 999px; background: var(--accent-soft); }
 .seg button { all: unset; cursor: pointer; padding: 4px 12px; border-radius: 999px; font-size: 13px; color: var(--muted); }
 .seg button[aria-checked="true"] { background: var(--panel); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
@@ -732,7 +740,7 @@ label.set-row { cursor: pointer; }
 .swatch.blocks-sw { border-radius: 0; background: linear-gradient(#79c05a 0 35%, #8a5a35 35%); image-rendering: pixelated; }
 
 @media (max-width: 560px) {
-  .settings { width: 100vw; max-width: none; max-height: none; height: 100dvh; margin: 0; border-radius: 0; }
+  .settings { width: calc(100vw / var(--z, 1)); max-width: none; max-height: none; height: calc(100dvh / var(--z, 1)); margin: 0; border-radius: 0; }
   .set-head { padding-top: max(16px, env(safe-area-inset-top)); }
   .set-body { padding-bottom: max(22px, env(safe-area-inset-bottom)); }
 }
@@ -804,7 +812,7 @@ a.ag-card-name:hover { text-decoration: underline; }
 .ag-form button { height: 38px; }
 .ag-form .btn-primary { padding: 0 16px; font-size: 14px; }
 @media (max-width: 720px) {
-  .agent { top: auto; left: 0; right: 0; bottom: 0; width: auto; height: 78dvh; border-radius: 20px 20px 0 0;
+  .agent { top: auto; left: 0; right: 0; bottom: 0; width: auto; height: calc(78dvh / var(--z, 1)); border-radius: 20px 20px 0 0;
     padding-bottom: env(safe-area-inset-bottom, 0px); animation: sheet .3s var(--ease) both; }
   :root.agent-open .app { margin-right: 0; }
   .ag-form textarea { font-size: 16px; }   /* iOS zooms into smaller inputs */
@@ -826,7 +834,7 @@ a.ag-card-name:hover { text-decoration: underline; }
   .side-handle { display: none; }
   .p-split-r, .p-split-d, .p-close { display: none !important; }
   .listpane {
-    position: fixed; z-index: 30; top: 0; bottom: 0; left: 0; width: min(86vw, 360px);
+    position: fixed; z-index: 30; top: 0; bottom: 0; left: 0; width: min(calc(86vw / var(--z, 1)), 360px);
     padding: max(14px, calc(env(safe-area-inset-top, 0px) + 8px)) 10px max(10px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
     border-left: 0; border-radius: 0 24px 24px 0; background: var(--glass-strong);
     transform: translateX(-104%); visibility: hidden; transition: transform .32s var(--ease), visibility 0s .32s;
@@ -834,7 +842,7 @@ a.ag-card-name:hover { text-decoration: underline; }
   .app:not([hidden]) .listpane { animation: none; }
   .app[data-view="list"] .listpane { transform: none; visibility: visible; transition: transform .32s var(--ease); }
   .workspace { transition: transform .32s var(--ease); }
-  .app[data-view="list"] .workspace { transform: translateX(min(86vw, 360px)); }
+  .app[data-view="list"] .workspace { transform: translateX(min(calc(86vw / var(--z, 1)), 360px)); }
   .scrim { display: block; position: fixed; inset: 0; z-index: 29; background: rgba(0, 0, 0, .2); opacity: 0; pointer-events: none; transition: opacity .32s; }
   .app[data-view="list"] .scrim { opacity: 1; pointer-events: auto; }
   .tree-row { font-size: 16px; padding-top: 9px; padding-bottom: 9px; }
@@ -867,7 +875,7 @@ a.ag-card-name:hover { text-decoration: underline; }
   .ebar :is(.p-back, .p-acts) svg, :root .ebar .p-acts .ico { width: 20px; height: 20px; }
   .p-acts .p-more { display: inline-grid; }
   .p-acts .p-extra {
-    display: none; position: absolute; top: calc(100% + 8px); right: 0; min-width: 210px; max-width: calc(100vw - 32px);
+    display: none; position: absolute; top: calc(100% + 8px); right: 0; min-width: 210px; max-width: calc(100vw / var(--z, 1) - 32px);
     flex-direction: column; padding: 6px; border-radius: 16px; border: 1px solid var(--rim-low);
     background: var(--panel); box-shadow: 0 12px 36px rgba(0, 0, 0, .18);
   }

@@ -133,9 +133,12 @@ function build(items, x, y, parent) {
   return box;
 }
 // Keep it on screen: flip left of the parent item (or the pointer) when there is no room on the right.
+// x, y and the window size are screen pixels; under the browser's CSS zoom (app.js) the page's own are bigger.
 function place(box, x, y, flipX = x) {
+  const z = parseFloat(document.documentElement.style.zoom) || 1;
+  x /= z; y /= z; flipX /= z;
   box.style.left = "0"; box.style.top = "0";
-  const w = box.offsetWidth, h = box.offsetHeight, W = innerWidth, H = innerHeight;
+  const w = box.offsetWidth, h = box.offsetHeight, W = innerWidth / z, H = innerHeight / z;
   const left = x + w > W - 8 ? Math.max(8, flipX - w) : x, top = Math.min(y, H - h - 8);
   box.style.position = "fixed"; box.style.left = left + "px"; box.style.top = Math.max(8, top) + "px";
 }
