@@ -282,6 +282,7 @@ const EN = {
   "居中": "Center",
   "还没有 Markdown 文件或笔记。": "No Markdown files or notes yet.",
   "载入中…": "Loading…",
+  "没能载入文件列表，几秒后会自动重试。": "Couldn't load the file list. Trying again in a few seconds.",
   "{name} · 编辑中，自动保存": "{name} · editing, saves automatically",
   // settings, dynamic
   "{n} 个文档已存在本机": "{n} documents stored on this device",

@@ -151,7 +151,7 @@ async function sync() {
     if (changed) render();
     else renderList();
     setSync("ok", t("已同步"));
-    showNote("");
+    showNote(filesErr ? t("没能载入文件列表，几秒后会自动重试。") : "", "err");
   } catch (e) {
     console.error(e);
     setSync("err", t("同步失败"));
@@ -177,7 +177,7 @@ function subscribe() {
 // ---------- files ----------
 // File bytes live in the private "files" bucket at <uid>/<id>.<ext>; the files table keeps the real name.
 const MAX_FILE = 50 * 1024 * 1024;
-let files = [], filesLoaded = false;
+let files = [], filesLoaded = false, filesErr = false, filesRetry = null;
 const isImage = (f) => f.mime.startsWith("image/");
 const extOf = (name) => { const m = /\.([a-z0-9]{1,6})$/i.exec(name); return m ? m[1].toLowerCase() : ""; };
 function fmtSize(n) {
@@ -188,8 +188,21 @@ function fmtSize(n) {
 
 async function loadFiles() {
   if (!uid || !navigator.onLine) return;
-  const { data, error } = await sb.from("files").select("id,name,folder,path,size,mime,created_at,updated_at,links,tags,local_key").order("updated_at", { ascending: false }).limit(5000);
-  if (error) { console.error(error); return; }
+  clearTimeout(filesRetry);
+  let data, error;
+  try { ({ data, error } = await sb.from("files").select("id,name,folder,path,size,mime,created_at,updated_at,links,tags,local_key").order("updated_at", { ascending: false }).limit(5000)); }
+  catch (e) { error = e; }
+  if (error) {
+    console.error(error);
+    // With no list yet, say so instead of loading forever, and try again shortly.
+    if (!filesLoaded) {
+      filesErr = true; renderList();
+      showNote(t("没能载入文件列表，几秒后会自动重试。"), "err");
+      filesRetry = setTimeout(loadFiles, 5000);
+    }
+    return;
+  }
+  if (filesErr) { filesErr = false; showNote(""); }
   const before = new Map(files.map((f) => [f.id, versionOf(f)]));
   for (const f of data) if (before.has(f.id) && before.get(f.id) !== versionOf(f)) forgetUrls(f.path);
   files = data; filesLoaded = true;
@@ -679,7 +692,7 @@ async function showFile(f, p) {
   }
 }
 
-window.addEventListener("online", () => sync());
+window.addEventListener("online", () => { sync(); if (!filesLoaded) loadFiles(); });
 window.addEventListener("offline", () => setSync("err", t("离线 · 已存在本机")));
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) { commitAll(); sync(); } else sync();
@@ -2025,7 +2038,7 @@ function enter(session) {
   $("auth").hidden = !!session; app.hidden = !session;
   if (!session) {
     local.start(sb, null, { onChange: localChanged, onStatus: localStatus }).catch(console.error);
-    store = { notes: {} }; files = []; filesLoaded = false; rendered.clear(); signed.clear();
+    store = { notes: {} }; files = []; filesLoaded = filesErr = false; clearTimeout(filesRetry); rendered.clear(); signed.clear();
     resetAgent(); toggleAgent(false);
     // Another account may sign in on this device; its documents must not mix with these.
     caches.delete(FILE_CACHE).catch(() => {}); cacheIndex = null;
