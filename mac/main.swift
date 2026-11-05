@@ -203,6 +203,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     case "status":
       syncState = body["text"] as? String ?? ""
       replyHandler(nil, nil)
+    case "localHttp":
+      // The assistant's model on this computer (Magpie, Ollama…): WebKit won't let the https page call
+      // http://127.0.0.1, so the app makes the request. Only loopback addresses; the answer comes back whole.
+      guard let s = body["url"] as? String, let u = URL(string: s), ["http", "https"].contains(u.scheme ?? ""),
+            ["127.0.0.1", "localhost", "::1"].contains(u.host?.lowercased() ?? "") else { return replyHandler(nil, "only addresses on this computer") }
+      var req = URLRequest(url: u, timeoutInterval: 600)
+      req.httpMethod = body["method"] as? String ?? "GET"
+      for (k, v) in body["headers"] as? [String: String] ?? [:] { req.setValue(v, forHTTPHeaderField: k) }
+      if let b = body["body"] as? String { req.httpBody = Data(b.utf8) }
+      URLSession.shared.dataTask(with: req) { data, res, err in
+        let reply: [String: Any] = ["status": (res as? HTTPURLResponse)?.statusCode ?? 0, "body": data.flatMap { String(data: $0, encoding: .utf8) } ?? ""]
+        DispatchQueue.main.async { err != nil && res == nil ? replyHandler(nil, err!.localizedDescription) : replyHandler(reply, nil) }
+      }.resume()
     default:
       io.async {
         let result: Result<Any?, Error> = Result { try self.local.handle(body) }

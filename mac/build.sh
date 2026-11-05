@@ -4,9 +4,9 @@
 #   --publish  also writes public/mac/Suiji.zip and version.json; installed apps update to it after the next deploy
 # Raise BUILD for every release you publish; installed apps only update to a higher BUILD.
 set -e
-VERSION=${VERSION:-1.7}
-BUILD=${BUILD:-7}
-NOTES="A notes assistant (✦ or ⌘J) that finds, summarises and edits your notes, showing every change before it is made. Eight new styles, each with its own Dock icon. 新增笔记助手（✦ 或 ⌘J），可以查找、总结和修改笔记，每处改动都先给你看；还有八种新风格，各有自己的 Dock 图标。"
+VERSION=${VERSION:-1.8}
+BUILD=${BUILD:-8}
+NOTES="The assistant can use a model on this Mac: pick Magpie (or Ollama, LM Studio…) in Settings → Assistant. 助手可以用这台 Mac 上的模型：在「设置 → 助手」里选 Magpie（或 Ollama、LM Studio 等）。"
 cd "$(dirname "$0")"
 APP="build/随记.app"
 rm -rf build && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

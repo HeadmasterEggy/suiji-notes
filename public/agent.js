@@ -2,6 +2,7 @@
 // here, on the notes and files this page already has. Edits are only proposed: each one shows as a diff,
 // and nothing changes until the user presses 应用 (Apply).
 import { t, lang } from "./i18n.js";
+import { TOOLS, instructions } from "./agentspec.js";
 
 const MAX_STEPS = 10, READ_CHUNK = 30000, SEARCH_TEXT_FILES = 400;
 let app = null;            // what app.js hands over in mountAgent()
@@ -161,37 +162,127 @@ function diffView(a, b) {
 }
 
 // ---------- the conversation ----------
-async function step(bubble, signal) {
-  const ctx = app.context();
+// A model on this computer (Settings → Assistant → Magpie / 本机接口): the page calls it directly, since the
+// server can't reach 127.0.0.1. Kept on this device only ("suiji:local-ai": {base, key, model}).
+export function localModel() { try { const c = JSON.parse(localStorage.getItem("suiji:local-ai")); return c?.base && c?.model ? c : null; } catch { return null; } }
+export function setLocalModel(c) { try { c ? localStorage.setItem("suiji:local-ai", JSON.stringify(c)) : localStorage.removeItem("suiji:local-ai"); } catch {} }
+
+// In the Mac app, WebKit won't let the https page call http://127.0.0.1, so the app makes those requests
+// (mac/main.swift, op localHttp); the answer then comes back whole instead of streamed.
+const appBridge = window.webkit?.messageHandlers?.suijiFs;
+const viaApp = (url) => !!appBridge && /^http:\/\//i.test(url);
+export async function localHttp(url, { method = "GET", headers = {}, body } = {}) {
+  if (viaApp(url)) { const r = await appBridge.postMessage({ op: "localHttp", url, method, headers, body }); return { status: r.status, text: r.body }; }
+  const res = await fetch(url, { method, headers, body });
+  return { status: res.status, text: await res.text() };
+}
+
+// The steps of one model turn, as {t:"text"|"reasoning", d} / {t:"tool", id, name, input} / {t:"error", message, code}.
+async function* serverStream(signal) {
   const res = await fetch("/api/agent", {
     method: "POST", signal,
     headers: { "content-type": "application/json", authorization: "Bearer " + await app.token() },
-    body: JSON.stringify({ messages, context: { lang, open: ctx } }),
+    body: JSON.stringify({ messages: messages.map(({ reasoning, ...m }) => m), context: { lang, open: app.context() } }),
   });
   if (!res.body) throw new Error("HTTP " + res.status);
-  const reader = res.body.getReader(), dec = new TextDecoder();
-  let buf = "", text = "", calls = [], err = null, code = null;
-  const textEl = el("div", "ag-text"); bubble.append(textEl);
-  let paint = 0;
-  const draw = () => { paint = 0; app.markdown(text).then((html) => { textEl.innerHTML = html; scroll(); }); };
+  for await (const ln of lines(res.body)) yield JSON.parse(ln);
+}
+async function* localStream(cfg, signal) {
+  const url = cfg.base.replace(/\/+$/, "") + "/chat/completions", whole = viaApp(url);
+  const headers = { "content-type": "application/json", ...(cfg.key ? { authorization: "Bearer " + cfg.key } : {}) };
+  const body = JSON.stringify({
+    model: cfg.model, stream: !whole,
+    messages: [{ role: "system", content: instructions({ lang, open: app.context() }) }, ...toOpenAI(messages)],
+    tools: Object.entries(TOOLS).map(([name, x]) => ({ type: "function", function: { name, description: x.description, parameters: x.parameters } })),
+  });
+  const unreachable = (e) => new Error(t("连不上本机的模型服务（{base}）：{msg}", { base: cfg.base, msg: e.message || e }));
+  const failed = (status, text) => {
+    let msg = text; try { msg = JSON.parse(text).error?.message || text; } catch {}
+    return { t: "error", message: `HTTP ${status}: ${String(msg).slice(0, 300)}` };
+  };
+  if (whole) {
+    const r = await localHttp(url, { method: "POST", headers, body }).catch((e) => { throw unreachable(e); });
+    if (signal.aborted) throw new DOMException("aborted", "AbortError");
+    if (r.status < 200 || r.status >= 300) { yield failed(r.status, r.text); return; }
+    const m = JSON.parse(r.text).choices?.[0]?.message || {};
+    if (m.reasoning_content || m.reasoning) yield { t: "reasoning", d: m.reasoning_content || m.reasoning };
+    if (m.content) yield { t: "text", d: m.content };
+    for (const c of m.tool_calls || []) {
+      let input = {}; try { input = c.function?.arguments ? JSON.parse(c.function.arguments) : {}; } catch {}
+      yield { t: "tool", id: c.id || crypto.randomUUID(), name: c.function?.name, input };
+    }
+    return;
+  }
+  const res = await fetch(url, { method: "POST", signal, headers, body }).catch((e) => { throw unreachable(e); });
+  if (!res.ok) { yield failed(res.status, await res.text()); return; }
+  const calls = [];
+  for await (const ln of lines(res.body)) {
+    if (!ln.startsWith("data:")) continue;
+    const data = ln.slice(5).trim();
+    if (data === "[DONE]") break;
+    const m = JSON.parse(data);
+    if (m.error) { yield { t: "error", message: m.error.message || String(m.error) }; continue; }
+    const d = m.choices?.[0]?.delta || {};
+    if (d.reasoning_content || d.reasoning) yield { t: "reasoning", d: d.reasoning_content || d.reasoning };
+    if (d.content) yield { t: "text", d: d.content };
+    for (const c of d.tool_calls || []) {
+      const x = calls[c.index ?? calls.length] ||= { id: "", name: "", args: "" };
+      if (c.id) x.id = c.id;
+      if (c.function?.name) x.name += c.function.name;
+      if (c.function?.arguments) x.args += c.function.arguments;
+    }
+  }
+  for (const c of calls.filter(Boolean)) {
+    let input = {}; try { input = c.args ? JSON.parse(c.args) : {}; } catch { input = {}; }
+    yield { t: "tool", id: c.id || crypto.randomUUID(), name: c.name, input };
+  }
+}
+async function* lines(body) {
+  const reader = body.getReader(), dec = new TextDecoder();
+  let buf = "";
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
     buf += dec.decode(value, { stream: true });
     let nl;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const ln = buf.slice(0, nl); buf = buf.slice(nl + 1);
-      if (!ln.trim()) continue;
-      const m = JSON.parse(ln);
-      if (m.t === "text") { text += m.d; if (!paint) paint = setTimeout(draw, 120); }
-      else if (m.t === "tool") calls.push(m);
-      else if (m.t === "error") { err = m.message; code = m.code || null; }
-    }
+    while ((nl = buf.indexOf("\n")) >= 0) { const ln = buf.slice(0, nl).replace(/\r$/, ""); buf = buf.slice(nl + 1); if (ln.trim()) yield ln; }
+  }
+  if (buf.trim()) yield buf;
+}
+// AI SDK model messages → OpenAI chat messages. Reasoning goes back as reasoning_content, which DeepSeek's
+// thinking models need within a turn of tool calls.
+function toOpenAI(msgs) {
+  const out = [];
+  for (const m of msgs) {
+    if (m.role === "user") out.push({ role: "user", content: m.content.map((c) => c.text).join("") });
+    else if (m.role === "assistant") {
+      const calls = m.content.filter((c) => c.type === "tool-call");
+      out.push({
+        role: "assistant", content: m.content.filter((c) => c.type === "text").map((c) => c.text).join("") || null,
+        ...(m.reasoning ? { reasoning_content: m.reasoning } : {}),
+        ...(calls.length ? { tool_calls: calls.map((c) => ({ id: c.toolCallId, type: "function", function: { name: c.toolName, arguments: JSON.stringify(c.input ?? {}) } })) } : {}),
+      });
+    } else for (const r of m.content) out.push({ role: "tool", tool_call_id: r.toolCallId, content: JSON.stringify(r.output.value) });
+  }
+  return out;
+}
+
+async function step(bubble, signal) {
+  const cfg = localModel();
+  let text = "", reasoning = "", calls = [], err = null, code = null;
+  const textEl = el("div", "ag-text"); bubble.append(textEl);
+  let paint = 0;
+  const draw = () => { paint = 0; app.markdown(text).then((html) => { textEl.innerHTML = html; scroll(); }); };
+  for await (const m of cfg ? localStream(cfg, signal) : serverStream(signal)) {
+    if (m.t === "text") { text += m.d; if (!paint) paint = setTimeout(draw, 120); }
+    else if (m.t === "reasoning") reasoning += m.d;
+    else if (m.t === "tool") calls.push(m);
+    else if (m.t === "error") { err = m.message; code = m.code || null; }
   }
   clearTimeout(paint);
   if (text) draw(); else textEl.remove();
   if (err && !text && !calls.length) throw Object.assign(new Error(err === "not signed in" ? t("请先登录。") : err), { code });
-  messages.push({ role: "assistant", content: [...(text ? [{ type: "text", text }] : []), ...calls.map((c) => ({ type: "tool-call", toolCallId: c.id, toolName: c.name, input: c.input }))] });
+  messages.push({ role: "assistant", content: [...(text ? [{ type: "text", text }] : []), ...calls.map((c) => ({ type: "tool-call", toolCallId: c.id, toolName: c.name, input: c.input }))], ...(reasoning ? { reasoning } : {}) });
   return calls;
 }
 // Tools that act in the interface right away: they only show things, never change a document.

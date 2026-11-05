@@ -223,11 +223,15 @@
           <option value="dashscope">通义千问（阿里云百炼）</option>
           <option value="openai">OpenAI</option>
           <option value="custom">自定义</option>
+          <optgroup label="这台电脑上">
+            <option value="magpie">Magpie（本机）</option>
+            <option value="localapi">本机接口（Ollama、LM Studio 等）</option>
+          </optgroup>
         </select></label>
         <label><span>接口地址</span><input id="aiBase" type="url" inputmode="url" spellcheck="false" placeholder="https://…/v1" required></label>
-        <label><span>模型</span><input id="aiModel" spellcheck="false" required></label>
+        <label><span>模型</span><input id="aiModel" spellcheck="false" list="aiModels" required><datalist id="aiModels"></datalist></label>
         <label><span>API key</span><input id="aiKey" type="password" spellcheck="false" placeholder="sk-…"></label>
-        <div class="ai-bar"><small id="aiMsg"></small><button class="btn-primary small" id="aiSave" type="submit">保存</button></div>
+        <div class="ai-bar"><small id="aiMsg"></small><button class="ghost bordered small" id="aiFetch" type="button" hidden>读取模型列表</button><button class="btn-primary small" id="aiSave" type="submit">保存</button></div>
       </form>
     </section>
     <section>

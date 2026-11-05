@@ -92,6 +92,21 @@ const EN = {
   "在其他设备上登录同一个账号即可同步": "Sign in with this account on other devices to sync",
   "退出登录": "Sign out",
   "助手": "Assistant",
+  "连不上 Magpie：{msg}。确认 Magpie 正在运行，再用 magpie gateway-key add suiji 生成一个 key 填进来。": "Can't reach Magpie: {msg}. Check that Magpie is running, then make a key with magpie gateway-key add suiji and enter it here.",
+  "这台电脑上": "On this computer",
+  "Magpie（本机）": "Magpie (this computer)",
+  "本机接口（Ollama、LM Studio 等）": "Local server (Ollama, LM Studio…)",
+  "读取模型列表": "Load models",
+  "使用本机模型（{m}）": "Using a model on this computer ({m})",
+  "只在这台设备上：直接连接 {host}，不经过服务器。": "This device only: connects straight to {host}, not through the server.",
+  "网关 key（没有可留空）": "Gateway key (leave empty if none)",
+  "找到 {n} 个模型，在「模型」里选一个。": "Found {n} models; pick one under Model.",
+  "连不上 Magpie：{msg}。先在 Magpie 的 Settings → Network and sharing → Web pages 里加上 {origin}，再用 magpie gateway-key add suiji 生成一个 key 填进来。": "Can't reach Magpie: {msg}. In Magpie, add {origin} under Settings → Network and sharing → Web pages, then make a key with magpie gateway-key add suiji and enter it here.",
+  "连不上 {base}：{msg}": "Can't reach {base}: {msg}",
+  "接口地址要以 http:// 或 https:// 开头": "The address must start with http:// or https://",
+  "已保存（只在这台设备上）": "Saved (this device only)",
+  "已改回不用本机模型": "No longer using the local model",
+  "连不上本机的模型服务（{base}）：{msg}": "Can't reach the model server on this computer ({base}): {msg}",
   "打开「{n}」": "Opening “{n}”",
   "在图谱中聚焦": "Focusing the graph",
   "打开关系图谱": "Opening the graph",
@@ -250,7 +265,7 @@ export function t(zh, vars) {
 export function translatePage() {
   document.documentElement.lang = lang === "en" ? "en" : "zh-CN";
   if (lang !== "en") return;
-  const ATTRS = ["placeholder", "aria-label", "title"];
+  const ATTRS = ["placeholder", "aria-label", "title", "label"];
   const walk = (root) => {
     const tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let n; (n = tw.nextNode());) {

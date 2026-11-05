@@ -6,7 +6,7 @@ import { mdMeta } from "./mdmeta.js";
 import { mountGraph } from "./graph.js";
 import { t, lang, langChoice, translatePage } from "./i18n.js";
 import * as local from "./localsync.js";
-import { mountAgent, toggleAgent, resetAgent } from "./agent.js";
+import { mountAgent, toggleAgent, resetAgent, localModel, setLocalModel, localHttp } from "./agent.js";
 
 translatePage();
 
@@ -1689,8 +1689,12 @@ function restyled() {
     dashscope: { base: "https://dashscope.aliyuncs.com/compatible-mode/v1", hint: "qwen-…" },
     openai: { base: "https://api.openai.com/v1", hint: "gpt-…" },
     custom: { base: "", hint: "" },
+    // On this computer: the page calls these itself and keeps their settings on this device only.
+    magpie: { base: "http://127.0.0.1:3425/v1", hint: "deepseek/deepseek-flash", local: true },
+    localapi: { base: "http://127.0.0.1:11434/v1", hint: t("模型名称"), local: true },
   };
-  let aiOwn = null;
+  const isLocalPreset = (name) => !!AI_PRESETS[name]?.local;
+  let aiOwn = null, aiLast = { own: null, fallback: null };
   const aiApi = async (method, body) => {
     const res = await fetch("/api/ai-key", { method, headers: { "content-type": "application/json", authorization: "Bearer " + ((await sb.auth.getSession()).data.session?.access_token || "") }, body: body && JSON.stringify(body) });
     const out = await res.json().catch(() => ({ error: "HTTP " + res.status }));
@@ -1701,13 +1705,24 @@ function restyled() {
   function aiPreset(name, keepModel) {
     const p = AI_PRESETS[name];
     $("aiPreset").value = name;
-    $("aiBase").readOnly = name !== "custom";
+    $("aiBase").readOnly = !(name === "custom" || p.local);
     if (name !== "custom") $("aiBase").value = p.base;
+    $("aiFetch").hidden = !p.local;
     if (!keepModel) $("aiModel").value = p.model || "";
     $("aiModel").placeholder = p.model || p.hint || t("模型名称");
   }
   function aiShow(st) {
-    aiOwn = st.own;
+    aiLast = st; aiOwn = st.own;
+    const lc = localModel();
+    if (lc) {
+      $("aiState").textContent = t("使用本机模型（{m}）", { m: lc.model });
+      $("aiInfo").textContent = t("只在这台设备上：直接连接 {host}，不经过服务器。", { host: lc.base.replace(/^https?:\/\//, "").replace(/\/v1\/?$/, "") });
+      $("aiRemove").hidden = false;
+      $("aiKey").value = ""; $("aiKey").placeholder = lc.key ? t("留空则保留已保存的 key") : t("网关 key（没有可留空）");
+      $("aiKey").required = false;
+      aiPreset(isLocalPreset(lc.preset) ? lc.preset : "localapi", true); $("aiBase").value = lc.base; $("aiModel").value = lc.model;
+      return;
+    }
     $("aiState").textContent = st.own ? t("使用你的 key（…{h}）", { h: st.own.hint }) : st.fallback ? t("使用默认 key") : t("还没有设置");
     $("aiInfo").textContent = st.own ? st.own.model + " · " + new URL(st.own.base_url).host
       : st.fallback ? t("你的账号可以用服务器上的 DeepSeek key（{m}）；也可以填你自己的。", { m: st.fallback.model })
@@ -1724,10 +1739,43 @@ function restyled() {
     aiMsg("");
     try { aiShow(await aiApi("GET")); } catch (e) { $("aiState").textContent = t("读取失败：{msg}", { msg: e.message }); }
   }
-  $("aiPreset").onchange = () => aiPreset($("aiPreset").value);
+  $("aiPreset").onchange = () => {
+    aiPreset($("aiPreset").value);
+    const local = isLocalPreset($("aiPreset").value);
+    $("aiKey").required = !local && !aiOwn;
+    if (local) $("aiKey").placeholder = localModel()?.key ? t("留空则保留已保存的 key") : t("网关 key（没有可留空）");
+  };
+  // The models a local server offers, as suggestions for the model field.
+  $("aiFetch").onclick = async () => {
+    const base = $("aiBase").value.trim().replace(/\/+$/, ""), key = $("aiKey").value.trim() || localModel()?.key || "";
+    aiMsg(t("读取中…"));
+    try {
+      const res = await localHttp(base + "/models", { headers: key ? { authorization: "Bearer " + key } : {} });
+      let body = {}; try { body = JSON.parse(res.text); } catch {}
+      if (res.status < 200 || res.status >= 300) throw new Error(body.error?.message || "HTTP " + res.status);
+      const ids = (body.data || []).map((m) => m.id).filter(Boolean).sort();
+      $("aiModels").replaceChildren(...ids.map((id) => Object.assign(document.createElement("option"), { value: id })));
+      aiMsg(t("找到 {n} 个模型，在「模型」里选一个。", { n: ids.length }));
+      $("aiModel").focus();
+    } catch (err) { aiMsg(localHelp(err), true); }
+  };
+  // A page can only reach Magpie once Magpie lists it; say so instead of a bare network error.
+  const localHelp = (err) => $("aiPreset").value === "magpie" && local.available
+    ? t("连不上 Magpie：{msg}。确认 Magpie 正在运行，再用 magpie gateway-key add suiji 生成一个 key 填进来。", { msg: err.message })
+    : $("aiPreset").value === "magpie"
+    ? t("连不上 Magpie：{msg}。先在 Magpie 的 Settings → Network and sharing → Web pages 里加上 {origin}，再用 magpie gateway-key add suiji 生成一个 key 填进来。", { msg: err.message, origin: location.origin })
+    : t("连不上 {base}：{msg}", { base: $("aiBase").value.trim(), msg: err.message });
   $("aiForm").onsubmit = async (e) => {
     e.preventDefault();
     const key = $("aiKey").value.trim();
+    if (isLocalPreset($("aiPreset").value)) {
+      const base = $("aiBase").value.trim().replace(/\/+$/, ""), model = $("aiModel").value.trim();
+      if (!/^https?:\/\/[^/]+/.test(base)) { aiMsg(t("接口地址要以 http:// 或 https:// 开头"), true); return; }
+      setLocalModel({ preset: $("aiPreset").value, base, model, key: key || localModel()?.key || "" });
+      aiShow(aiLast); aiMsg(t("已保存（只在这台设备上）"));
+      return;
+    }
+    setLocalModel(null);   // a key in the account replaces this device's local model
     $("aiSave").disabled = true; aiMsg(t("保存中…"));
     try {
       aiShow(await aiApi("PUT", { base_url: $("aiBase").value.trim(), model: $("aiModel").value.trim(), ...(key ? { api_key: key } : {}) }));
@@ -1736,6 +1784,7 @@ function restyled() {
     $("aiSave").disabled = false;
   };
   $("aiRemove").onclick = async () => {
+    if (localModel()) { setLocalModel(null); aiShow(aiLast); aiMsg(t("已改回不用本机模型")); return; }
     if (!confirm(t("删除保存的 API key？"))) return;
     try { aiShow(await aiApi("DELETE")); aiMsg(t("已删除")); } catch (err) { aiMsg(t("删除失败：{msg}", { msg: err.message }), true); }
   };
