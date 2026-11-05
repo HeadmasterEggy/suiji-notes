@@ -1915,7 +1915,10 @@ function restyled() {
   async function fillAi() {
     aiMsg("");
     await refreshMagpie();
-    try { aiShow(await aiApi("GET")); } catch (e) { $("aiState").textContent = t("读取失败：{msg}", { msg: e.message }); }
+    try { aiShow(await aiApi("GET")); } catch (e) {
+      $("aiState").textContent = t("读取失败：{msg}", { msg: e.message });
+      aiPreset($("aiPreset").value || "deepseek");   // the fields still match the service shown
+    }
   }
   $("aiPreset").onchange = () => {
     aiPreset($("aiPreset").value);
