@@ -6,7 +6,7 @@ import { mdMeta } from "./mdmeta.js";
 import { mountGraph } from "./graph.js";
 import { t, lang, langChoice, translatePage } from "./i18n.js";
 import * as local from "./localsync.js";
-import { mountAgent, toggleAgent, resetAgent, localModel, setLocalModel, localHttp } from "./agent.js";
+import { mountAgent, toggleAgent, resetAgent, localModel, setLocalModel, localHttp, refreshMagpie } from "./agent.js";
 
 translatePage();
 
@@ -1714,6 +1714,13 @@ function restyled() {
   function aiShow(st) {
     aiLast = st; aiOwn = st.own;
     const lc = localModel();
+    $("aiForm").hidden = !!lc?.magpie;
+    if (lc?.magpie) {
+      $("aiState").textContent = t("由 Magpie 接入（{m}）", { m: lc.model });
+      $("aiInfo").textContent = t("在 Magpie 的 Agent 页面里换模型或断开。");
+      $("aiRemove").hidden = true;
+      return;
+    }
     if (lc) {
       $("aiState").textContent = t("使用本机模型（{m}）", { m: lc.model });
       $("aiInfo").textContent = t("只在这台设备上：直接连接 {host}，不经过服务器。", { host: lc.base.replace(/^https?:\/\//, "").replace(/\/v1\/?$/, "") });
@@ -1737,6 +1744,7 @@ function restyled() {
   }
   async function fillAi() {
     aiMsg("");
+    await refreshMagpie();
     try { aiShow(await aiApi("GET")); } catch (e) { $("aiState").textContent = t("读取失败：{msg}", { msg: e.message }); }
   }
   $("aiPreset").onchange = () => {

@@ -98,6 +98,8 @@ const EN = {
   "本机接口（Ollama、LM Studio 等）": "Local server (Ollama, LM Studio…)",
   "读取模型列表": "Load models",
   "使用本机模型（{m}）": "Using a model on this computer ({m})",
+  "由 Magpie 接入（{m}）": "Connected through Magpie ({m})",
+  "在 Magpie 的 Agent 页面里换模型或断开。": "Change the model or disconnect on Magpie's Agents page.",
   "只在这台设备上：直接连接 {host}，不经过服务器。": "This device only: connects straight to {host}, not through the server.",
   "网关 key（没有可留空）": "Gateway key (leave empty if none)",
   "找到 {n} 个模型，在「模型」里选一个。": "Found {n} models; pick one under Model.",

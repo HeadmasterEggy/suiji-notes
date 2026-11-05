@@ -9,6 +9,9 @@ import WebKit
 let appURL = URL(string: ProcessInfo.processInfo.environment["SUIJI_URL"] ?? "https://suiji-notes.vercel.app/")!
 let testing = ProcessInfo.processInfo.environment["SUIJI_HOME"] != nil
 let agentPlist = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/app.suiji.sync.plist")
+// Where Magpie writes the gateway and model it picked for 随记 (magpie/suiji.agent.js); SUIJI_MAGPIE moves it for a test copy.
+let magpieLink = ProcessInfo.processInfo.environment["SUIJI_MAGPIE"].map { URL(fileURLWithPath: $0) }
+  ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/suiji/magpie.json")
 // Published by `mac/build.sh --publish`; `defaults write app.suiji.mac updateFeed <url>` points it elsewhere for testing.
 let updateFeed = URL(string: UserDefaults.standard.string(forKey: "updateFeed") ?? "https://suiji-notes.vercel.app/mac/version.json")!
 let currentBuild = Int(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0") ?? 0
@@ -54,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     buildMainMenu()
     buildWindow()
     watcher.watch(local.folders)
+    if !testing || ProcessInfo.processInfo.environment["SUIJI_MAGPIE"] != nil { makeMagpieLink() }
     if testing { return }   // a test copy runs unseen: no window, menu bar item or updates, and leaves the agent alone
     retireAgent()
     window.makeKeyAndOrderFront(nil)
@@ -203,6 +207,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     case "status":
       syncState = body["text"] as? String ?? ""
       replyHandler(nil, nil)
+    case "magpieLink":
+      // {enabled, model, url, key} once 随记 is connected on Magpie's Agents page, else enabled is false.
+      guard let d = try? Data(contentsOf: magpieLink), let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return replyHandler(nil, nil) }
+      let g = j["gateway"] as? [String: Any] ?? [:]
+      replyHandler(["enabled": j["enabled"] as? Bool ?? false, "model": j["model"] as? String ?? "", "url": g["url"] as? String ?? "", "key": g["key"] as? String ?? ""], nil)
     case "localHttp":
       // The assistant's model on this computer (Magpie, Ollama…): WebKit won't let the https page call
       // http://127.0.0.1, so the app makes the request. Only loopback addresses; the answer comes back whole.
@@ -210,6 +219,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             ["127.0.0.1", "localhost", "::1"].contains(u.host?.lowercased() ?? "") else { return replyHandler(nil, "only addresses on this computer") }
       var req = URLRequest(url: u, timeoutInterval: 600)
       req.httpMethod = body["method"] as? String ?? "GET"
+      req.setValue("Suiji/\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")", forHTTPHeaderField: "User-Agent")   // how Magpie tells 随记's requests apart
       for (k, v) in body["headers"] as? [String: String] ?? [:] { req.setValue(v, forHTTPHeaderField: k) }
       if let b = body["body"] as? String { req.httpBody = Data(b.utf8) }
       URLSession.shared.dataTask(with: req) { data, res, err in
@@ -228,6 +238,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
       }
     }
+  }
+
+  // Magpie lists 随记 on its Agents page once this file exists; it fills it in when 随记 is connected there.
+  func makeMagpieLink() {
+    let fm = FileManager.default
+    guard !fm.fileExists(atPath: magpieLink.path) else { return }
+    try? fm.createDirectory(at: magpieLink.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    let empty = #"{"schemaVersion":1,"enabled":false,"model":"","gateway":{"url":"","key":""}}"# + "\n"
+    fm.createFile(atPath: magpieLink.path, contents: Data(empty.utf8), attributes: [.posixPermissions: 0o600])
   }
 
   // The Node agent (npm run sync install) syncs the same folders from the same state; the app does that

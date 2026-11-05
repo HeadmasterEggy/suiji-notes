@@ -4,9 +4,9 @@
 #   --publish  also writes public/mac/Suiji.zip and version.json; installed apps update to it after the next deploy
 # Raise BUILD for every release you publish; installed apps only update to a higher BUILD.
 set -e
-VERSION=${VERSION:-1.8}
-BUILD=${BUILD:-8}
-NOTES="The assistant can use a model on this Mac: pick Magpie (or Ollama, LM Studio…) in Settings → Assistant. 助手可以用这台 Mac 上的模型：在「设置 → 助手」里选 Magpie（或 Ollama、LM Studio 等）。"
+VERSION=${VERSION:-1.9}
+BUILD=${BUILD:-9}
+NOTES="Magpie lists 随记 on its Agents page: connect it there and the assistant uses the model you pick, nothing to fill in. Magpie 的 Agent 页面里能看到随记了：在那里接入，助手就用你选的模型，不用再填。"
 cd "$(dirname "$0")"
 APP="build/随记.app"
 rm -rf build && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

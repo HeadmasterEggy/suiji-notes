@@ -164,12 +164,28 @@ function diffView(a, b) {
 // ---------- the conversation ----------
 // A model on this computer (Settings → Assistant → Magpie / 本机接口): the page calls it directly, since the
 // server can't reach 127.0.0.1. Kept on this device only ("suiji:local-ai": {base, key, model}).
-export function localModel() { try { const c = JSON.parse(localStorage.getItem("suiji:local-ai")); return c?.base && c?.model ? c : null; } catch { return null; } }
+// In the Mac app, connecting 随记 on Magpie's Agents page comes first (magpie/suiji.agent.js).
+export function localModel() {
+  if (magpie) return magpie;
+  try { const c = JSON.parse(localStorage.getItem("suiji:local-ai")); return c?.base && c?.model ? c : null; } catch { return null; }
+}
 export function setLocalModel(c) { try { c ? localStorage.setItem("suiji:local-ai", JSON.stringify(c)) : localStorage.removeItem("suiji:local-ai"); } catch {} }
 
 // In the Mac app, WebKit won't let the https page call http://127.0.0.1, so the app makes those requests
 // (mac/main.swift, op localHttp); the answer then comes back whole instead of streamed.
 const appBridge = window.webkit?.messageHandlers?.suijiFs;
+
+// What Magpie wrote for 随记 (~/.config/suiji/magpie.json, read by the app), re-read before each use so a
+// model picked or a disconnect in Magpie applies at once. Older apps don't know the op: no Magpie link.
+let magpie = null;
+export async function refreshMagpie() {
+  if (!appBridge) return magpie;
+  try {
+    const c = await appBridge.postMessage({ op: "magpieLink" });
+    magpie = c?.enabled && c.url && c.model ? { preset: "magpie", base: c.url, model: c.model, key: c.key || "", magpie: true } : null;
+  } catch { magpie = null; }
+  return magpie;
+}
 const viaApp = (url) => !!appBridge && /^http:\/\//i.test(url);
 export async function localHttp(url, { method = "GET", headers = {}, body } = {}) {
   if (viaApp(url)) { const r = await appBridge.postMessage({ op: "localHttp", url, method, headers, body }); return { status: r.status, text: r.body }; }
@@ -268,6 +284,7 @@ function toOpenAI(msgs) {
 }
 
 async function step(bubble, signal) {
+  await refreshMagpie();
   const cfg = localModel();
   let text = "", reasoning = "", calls = [], err = null, code = null;
   const textEl = el("div", "ag-text"); bubble.append(textEl);
