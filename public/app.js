@@ -840,7 +840,9 @@ function renderList() {
   if (!hitNotes.length && !hitFiles.length) {
     const li = document.createElement("li");
     li.className = "empty";
+    // Before the first file list arrives an empty account and one still loading look the same; don't call it empty yet.
     li.innerHTML = q ? t("<strong>没有找到</strong>换个关键词试试。")
+                 : !filesLoaded && navigator.onLine ? `<strong>${t("载入中…")}</strong>`
                      : t("<strong>这里还是空的</strong>点「新建」写一条笔记，或者点「上传」放文件进来。Mac 上运行同步程序后，选中的文件夹会自动出现在这里。");
     list.append(li);
     showCounts();
