@@ -1548,6 +1548,10 @@ addEventListener("resize", () => { const w = parseFloat(app.style.getPropertyVal
 }
 
 function buildLayout() {
+  // Moving a pane's element to a new place in the page resets its scrolling, so note it first and put it back.
+  // As a share of the way through: a pane that gets narrower or wider reflows its text.
+  const at = (el) => el.scrollTop / Math.max(1, el.scrollHeight);
+  const kept = [...panes.values()].map((p) => [p, at(p.ta), at(p.preview), p.tocList?.scrollTop || 0]);
   const mk = (node) => {
     if (node.pane) { node.pane.el.classList.toggle("focused", node.pane === focused); return node.pane.el; }
     const box = document.createElement("div");
@@ -1580,6 +1584,10 @@ function buildLayout() {
   root.style.flex = "1 1 0";
   ws.replaceChildren(root);
   ws.dataset.multi = String(panes.size > 1);
+  for (const [p, ta, pv, toc] of kept) {
+    p.ta.scrollTop = ta * p.ta.scrollHeight; p.preview.scrollTop = pv * p.preview.scrollHeight;
+    if (p.tocList) p.tocList.scrollTop = toc;
+  }
 }
 isPhone.addEventListener("change", () => layout && buildLayout());
 
