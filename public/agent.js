@@ -419,11 +419,16 @@ export function askAgent(text, question) {
   if (question) send(question);
 }
 
+// Closing gives the focus back to what had it before the panel opened (the note being written, say).
+let before = null;
 export function toggleAgent(force) {
   const p = $("agPanel"), open = force ?? p.hidden;
+  if (open && p.hidden && !p.contains(document.activeElement)) before = document.activeElement;
+  const inside = p.contains(document.activeElement);
   p.hidden = !open;
   document.documentElement.classList.toggle("agent-open", open);
   if (open) $("agInput").focus();
+  else if (inside && before?.isConnected) before.focus({ preventScroll: true });
 }
 
 export function mountAgent(api) {
@@ -433,6 +438,11 @@ export function mountAgent(api) {
   const go = () => { const v = input.value; input.value = ""; input.style.height = ""; send(v); };
   $("agForm").onsubmit = (e) => { e.preventDefault(); go(); };
   input.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); go(); } };
+  // Escape closes the panel, as it closes the menu, Settings and the outline.
+  $("agPanel").addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || e.isComposing) return;
+    e.preventDefault(); e.stopPropagation(); toggleAgent(false);
+  });
   input.oninput = () => { input.style.height = ""; input.style.height = Math.min(input.scrollHeight, 160) + "px"; };
   $("agStop").onclick = () => busy?.abort();
   $("agNew").onclick = () => { reset(); $("agInput").focus(); };   // a new chat is for typing
