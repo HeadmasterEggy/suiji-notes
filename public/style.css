@@ -362,7 +362,8 @@ textarea {
 /* Long text stops at three lines; a tap shows the rest. */
 .md-prop dd.clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; cursor: pointer; }
 .md-prop dd { margin: 0; min-width: 0; overflow-wrap: anywhere; display: flex; flex-wrap: wrap; gap: 6px; }
-.md-chip, .md-tag { padding: 0 10px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 7%, transparent); }
+/* A tag too long for the column ends in … (the full text is in its tooltip) instead of folding into a two-line pill. */
+.md-chip, .md-tag { padding: 0 10px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 7%, transparent); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .md-tag { border: 0; font: inherit; line-height: inherit; background: var(--accent-soft); color: var(--accent); }
 .md-tag:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
 .md-body h1, .md-body h2, .md-body h3, .md-body h4 { font-family: var(--font-display); line-height: 1.35; text-wrap: balance; margin: 1.6em 0 .6em; }

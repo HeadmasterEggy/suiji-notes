@@ -610,8 +610,8 @@ function docHead(f, fm, web, body) {
     const dt = el$("dt"), dd = el$("dd"), row = el$("div", "md-prop");
     dt.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true">${PROP_ICONS[kind]}</svg>`;
     dt.append(el$("span", null, k));
-    if (tags) for (const tag of v) { const b = el$("button", "md-tag", tag); b.type = "button"; b.dataset.tag = tag; dd.append(b); }
-    else if (many) for (const x of v) dd.append(el$("span", "md-chip", x));
+    if (tags) for (const tag of v) { const b = el$("button", "md-tag", tag); b.type = "button"; b.dataset.tag = b.title = tag; dd.append(b); }
+    else if (many) for (const x of v) dd.append(Object.assign(el$("span", "md-chip", x), { title: x }));
     else if (kind === "link") dd.append(Object.assign(el$("a", null, v), { href: v, target: "_blank", rel: "noopener" }));
     else { dd.textContent = v; if (v.length > 90) { dd.className = "clamp"; dd.onclick = () => dd.classList.remove("clamp"); } }
     row.append(dt, dd); rows.append(row);
