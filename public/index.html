@@ -212,6 +212,20 @@
         <button class="ghost bordered small" id="localAdd" type="button">添加文件夹…</button>
       </div>
       <ul class="local-list" id="localList"></ul>
+      <div id="macRows" hidden>
+        <div class="set-row">
+          <span>同步日志<small>每次同步读写了哪些文件</small></span>
+          <button class="ghost bordered small" id="syncLog" type="button">查看</button>
+        </div>
+        <label class="set-row">
+          <span>登录时打开<small>开机后在后台同步，不用打开窗口</small></span>
+          <input class="switch" id="loginItem" type="checkbox">
+        </label>
+        <div class="set-row">
+          <span>Mac 应用<small id="macVer"></small></span>
+          <button class="ghost bordered small" id="macUpdate" type="button">检查更新…</button>
+        </div>
+      </div>
     </section>
     <section id="aiSec">
       <h3>助手</h3>

@@ -6,6 +6,8 @@ import { syncEngine, keyOf } from "./syncengine.js";
 const bridge = window.webkit?.messageHandlers?.suijiFs;
 export const available = !!bridge;
 const call = (op, args = {}) => bridge.postMessage({ op, ...args });
+// The Mac app's own ops for 设置 → 本地文件夹: reveal, syncLog, checkUpdates, loginItem (Electron only).
+export const macOp = (op, args) => call(op, args);
 
 const fromB64 = (s) => Uint8Array.fromBase64 ? Uint8Array.fromBase64(s) : Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 function toB64(bytes) {

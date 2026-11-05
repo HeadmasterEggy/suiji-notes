@@ -1,7 +1,7 @@
 // 随记 for Mac, in Electron: the web app in a window, with the same file bridge as the Swift app in mac/, so the
 // page's own code (public/localsync.js, public/agent.js) runs unchanged through preload.js. Keeps running while
 // the window is closed, with a menu bar item for the folder sync. Build with desktop/build.sh.
-const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, net, shell, systemPreferences } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, net, shell, systemPreferences } = require("electron");
 const fs = require("node:fs"), path = require("node:path"), os = require("node:os");
 const { execFileSync, spawn } = require("node:child_process");
 const local = require("./localfiles");
@@ -32,7 +32,7 @@ const STYLES = ["", "paper", "terminal", "blocks", "ink", "eink", "notebook", "s
 const iconsDir = app.isPackaged ? path.join(process.resourcesPath, "icons") : path.join(__dirname, "../mac");
 const bundlePath = path.resolve(process.execPath, "../../..");   // …/随记.app when packaged
 
-let win, tray, quitting = false, syncState = "";
+let win, quitting = false;
 const watch = local.watcher(() => win?.webContents.executeJavaScript("window.suijiLocal?.changed()").catch(() => {}));
 
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -49,7 +49,6 @@ app.whenReady().then(() => {
   if (testing) { app.dock.hide(); return; }   // a test copy runs unseen: no window, menu bar item or updates, and leaves the agent alone
   retireAgent();
   win.show();
-  buildStatusItem();
   setDockIcon(pref("iconStyle"));
   setTimeout(() => checkForUpdates(false), 5000);
   setInterval(() => checkForUpdates(false), 6 * 3600 * 1000);
@@ -156,7 +155,7 @@ ipcMain.on("suiji", (e, body) => {
   if (STYLES.includes(body.style) && body.style !== pref("iconStyle")) setDockIcon(body.style);
   if (["zh", "en"].includes(body.lang) && body.lang !== appLang) {
     appLang = body.lang; setPref("lang", appLang);
-    buildMainMenu(); if (tray) buildStatusItem(); win.setTitle(L("随记", "Suiji"));
+    buildMainMenu(); win.setTitle(L("随记", "Suiji"));
   }
 });
 
@@ -183,9 +182,17 @@ async function bridge(body) {
       watch(folders);
       return folders;
     }
-    case "status":
-      syncState = typeof body.text === "string" ? body.text : "";
-      return undefined;
+    case "status": return undefined;   // the sync state; it was for the menu bar item, which is gone
+    // Settings → 本地文件夹 (Local folders): what the menu bar item used to offer.
+    case "reveal":
+      if (!local.folders().includes(body.path)) throw new Error("not a synced folder");
+      return shell.openPath(body.path).then((err) => { if (err) throw new Error(err); });
+    case "syncLog": return shell.openPath(path.join(local.suijiHome, "sync.log")).then(() => undefined);
+    case "checkUpdates": checkForUpdates(true); return undefined;
+    case "appVersion": return currentBuild ? `${version} (${currentBuild})` : version;
+    case "loginItem":
+      if (typeof body.on === "boolean" && body.on !== app.getLoginItemSettings().openAtLogin) toggleLogin();
+      return app.getLoginItemSettings().openAtLogin;
     case "magpieLink": {
       // {enabled, model, url, key} once 随记 is connected on Magpie's Agents page, else enabled is false.
       let j;
@@ -342,41 +349,6 @@ function showWindow() {
 function zoomBy(d) {
   const wc = win.webContents;
   wc.setZoomFactor(d ? Math.min(Math.max(Math.round((wc.getZoomFactor() + d) * 10) / 10, 0.6), 2) : 1);
-}
-
-// ---------- menu bar item for the folder sync ----------
-// Built each time it opens, so the first line shows the sync as it is now.
-
-function buildStatusItem() {
-  if (!tray) {
-    // The SF Symbol comes back at 74 × 70 px; the menu bar wants about 15 pt, drawn sharp at 1× and 2×.
-    const big = nativeImage.createFromNamedImage("arrow.triangle.2.circlepath"), icon = nativeImage.createEmpty();
-    for (const s of [1, 2]) icon.addRepresentation({ scaleFactor: s, buffer: big.resize({ height: 15 * s, quality: "best" }).toPNG() });
-    icon.setTemplateImage(true);
-    tray = new Tray(icon);
-    const open = () => tray.popUpContextMenu(trayMenu());
-    tray.on("click", open); tray.on("right-click", open);
-  }
-  tray.setToolTip(L("随记同步", "Suiji sync"));
-}
-
-function trayMenu() {
-  const n = local.folders().length;
-  const state = { syncing: L("同步中…", "syncing…"), ok: L("已同步", "up to date"), offline: L("离线", "offline"), error: L("出错，稍后重试", "error, retrying soon") }[syncState];
-  const line = n === 0 ? L("同步：还没有本地文件夹（设置 → 本地文件夹）", "Sync: no local folders yet (Settings → Local folders)")
-    : L(`同步：${n} 个文件夹 · `, `Sync: ${n} folder${n === 1 ? "" : "s"} · `) + (state ?? L("等待登录", "waiting for sign-in"));
-  return Menu.buildFromTemplate([
-    { label: line, enabled: false },
-    { type: "separator" },
-    { label: L("立即同步", "Sync Now"), click: () => win.webContents.executeJavaScript("window.suijiLocal?.kick(0)").catch(() => {}) },
-    { label: L("打开同步的文件夹", "Open Synced Folder"), click: () => local.folders().forEach((f) => shell.openPath(f)) },
-    { label: L("查看同步日志", "Show Sync Log"), click: () => shell.openPath(path.join(local.suijiHome, "sync.log")) },
-    { label: L("检查更新…", "Check for Updates…"), click: () => checkForUpdates(true) },
-    { label: L("登录时打开", "Open at Login"), type: "checkbox", checked: app.getLoginItemSettings().openAtLogin, click: toggleLogin },
-    { type: "separator" },
-    { label: L("打开随记", "Open Suiji"), click: showWindow },
-    { label: L("退出随记", "Quit Suiji"), click: () => app.quit() },
-  ]);
 }
 
 function toggleLogin() {

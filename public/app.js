@@ -1888,16 +1888,30 @@ function restyled() {
       const li = document.createElement("li"), name = document.createElement("span"), rm = document.createElement("button");
       name.textContent = root.replace(/^\/Users\/[^/]+/, "~"); name.title = root;
       rm.type = "button"; rm.className = "ghost bordered small"; rm.textContent = t("停止同步");
+      const show = document.createElement("button");
+      show.type = "button"; show.className = "ghost bordered small"; show.textContent = t("在 Finder 中显示");
+      show.onclick = () => local.macOp("reveal", { path: root }).catch((e) => showNote(e.message || String(e), "err"));
       rm.onclick = async () => {
         if (!confirm(t("停止同步「{name}」？云端已有的文件会保留。", { name: root.split("/").pop() }))) return;
         await local.removeFolder(root); fillLocal();
       };
-      li.append(name, rm); return li;
+      li.append(name, ...(macRows ? [show] : []), rm); return li;
     }));
     localStatus();
   }
   $("localSec").hidden = !local.available;
   $("localAdd").onclick = async () => { await local.addFolder(); fillLocal(); };
+  // The sync log, open at login and updates, which the Mac app used to keep in a menu bar item. An app that
+  // doesn't know these ops (the Swift one) refuses the first, and the rows stay hidden.
+  let macRows = false;
+  if (local.available) local.macOp("loginItem").then((on) => {
+    if (typeof on !== "boolean") return;
+    macRows = true; $("macRows").hidden = false; $("loginItem").checked = on; fillLocal();
+    local.macOp("appVersion").then((v) => { $("macVer").textContent = t("版本 {v}", { v }); }, () => {});
+  }, () => {});
+  $("syncLog").onclick = () => local.macOp("syncLog").catch(() => {});
+  $("macUpdate").onclick = () => local.macOp("checkUpdates").catch(() => {});
+  $("loginItem").onchange = (e) => local.macOp("loginItem", { on: e.target.checked }).then((on) => { e.target.checked = on; }, () => { e.target.checked = !e.target.checked; });
   // Settings → Assistant: the user's own key for any OpenAI-compatible API, kept encrypted by api/ai-key.js.
   // The key never comes back to the page; only its last four characters.
   const AI_PRESETS = {

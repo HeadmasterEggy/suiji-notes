@@ -14,7 +14,7 @@ Versions are pinned exactly: Electron 44.9.3 and electron-builder 26.18.0. `npm 
 
 | File | What it does |
 |---|---|
-| `main.js` | Window, menus, menu bar item, Dock icons, login item, downloads, links, self-update, and the bridge ops `addFolder`, `status`, `magpieLink` and `localHttp` |
+| `main.js` | Window, menus, Dock icons, login item, downloads, links, self-update, and the bridge ops `addFolder`, `status`, `magpieLink`, `localHttp`, plus `reveal`, `syncLog`, `checkUpdates`, `loginItem` and `appVersion` for 设置 → 本地文件夹 |
 | `localfiles.js` | Port of `mac/LocalFiles.swift`: the folder ops (`folders`, `removeFolder`, `walk`, `stat`, `read`, `readText`, `write`, `loadState`, `saveState`, `log`) with the same path checks, plus the folder watcher |
 | `preload.js` | The `window.webkit.messageHandlers` bridge, the `mac-app` class and the title-bar drag strip |
 
@@ -31,12 +31,11 @@ Versions are pinned exactly: Electron 44.9.3 and electron-builder 26.18.0. `npm 
 
 Memory was measured on the hidden test copies against a local server (macOS 27, M-series). The numbers are approximate.
 
-Both apps have the same features:
+Both apps have the same features, except that the Electron app has no menu bar item: its sync log, open at login and update check are in 设置 → 本地文件夹, and the Dock icon brings the window back:
 - the folder sync bridge;
 - `localHttp`, loopback only, sending `User-Agent: Suiji/<version>`;
 - `magpieLink`, and creating `~/.config/suiji/magpie.json` (0600) on launch;
 - per-style Dock icons from `mac/AppIcon-*.png`, and the interface language reported by the page;
-- the menu bar item, whose status line is rebuilt each time it opens;
 - the app menus;
 - keep running with the window closed;
 - open at login (SMAppService, through `app.setLoginItemSettings`);
@@ -61,7 +60,7 @@ Both apps have the same features:
 
 ## Testing
 
-As with the Swift app: `SUIJI_HOME` makes a hidden test copy with no window, Dock icon, menu bar item or updates. It keeps its folder state, sign-in and settings under that folder and leaves the Node agent alone. `SUIJI_URL` points it at a local server, and `SUIJI_MAGPIE` moves the Magpie file.
+As with the Swift app: `SUIJI_HOME` makes a hidden test copy with no window, Dock icon or updates. It keeps its folder state, sign-in and settings under that folder and leaves the Node agent alone. `SUIJI_URL` points it at a local server, and `SUIJI_MAGPIE` moves the Magpie file.
 
 ```sh
 SUIJI_HOME=/tmp/t/home SUIJI_URL=http://127.0.0.1:5199/ SUIJI_MAGPIE=/tmp/t/magpie.json \
@@ -79,7 +78,7 @@ This was checked against `python3 -m http.server` serving `public/`:
 - non-loopback hosts are refused;
 - the Magpie file is created and read.
 
-The normal startup was smoke-tested under a throwaway `HOME`: menus, menu bar item, Dock icon, window, with no errors.
+The normal startup was smoke-tested under a throwaway `HOME`: menus, Dock icon, window, with no errors.
 
 Not yet tested end to end:
 - self-update between two builds, which needs a local feed set with `defaults write app.suiji.mac updateFeed`;
