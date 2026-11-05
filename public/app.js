@@ -1978,6 +1978,17 @@ function restyled() {
   let downOutside = false;
   dlg.addEventListener("pointerdown", (e) => { downOutside = e.target === dlg && outside(e); });
   dlg.addEventListener("click", (e) => { if (downOutside && e.target === dlg && outside(e)) dlg.close(); downOutside = false; });
+  // Arrow keys move through each group of choices and pick as they go, like any radio group. The language is
+  // the exception: picking it reloads the page, so there the arrows only move and Enter or Space picks.
+  dlg.addEventListener("keydown", (e) => {
+    const d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    const b = e.target.closest?.('[role="radio"]'), g = b?.closest('[role="radiogroup"]');
+    if (!d || !g) return;
+    e.preventDefault();
+    const all = [...g.querySelectorAll('[role="radio"]')], next = all[(all.indexOf(b) + d + all.length) % all.length];
+    next.focus();
+    if (g.id !== "langChoices") next.click();
+  });
   $("styleChoices").onclick = (e) => {
     const b = e.target.closest("[data-style]");
     if (!b || b.getAttribute("aria-checked") === "true") return;

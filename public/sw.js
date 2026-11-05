@@ -1,5 +1,5 @@
 // App shell cache so 随记 opens offline. Supabase API calls always go to the network.
-const CACHE = "suiji-v58";
+const CACHE = "suiji-v59";
 const SHELL = ["./", "index.html", "style.css", "themes.css", "app.js", "graph.js", "mdmeta.js", "syncengine.js", "localsync.js", "agent.js", "agentspec.js", "ctxmenu.js", "i18n.js", "config.js", "manifest.webmanifest", "icon.svg", "icon-paper.svg", "icon-terminal.svg", "icon-blocks.svg", "icon-ink.svg", "icon-eink.svg", "icon-notebook.svg", "icon-swiss.svg", "icon-neon.svg", "icon-blueprint.svg", "icon-clay.svg", "icon-sunset.svg", "icon-eyecare.svg", "icon-180.png", "icon-512.png",
   "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm"];
 
