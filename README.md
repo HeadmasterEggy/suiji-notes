@@ -35,7 +35,7 @@
 
 - **One tree.** Quick notes written in the app sit in a 「随手记」 folder at the top, and the synced folders sit below it. The ⇅ button sorts it by name or by last change.
 - **Local folders on the Mac.** Like an Obsidian vault: the Mac app reads and writes your folders on disk, so documents open instantly, even offline. Changes made in the app or in any other editor sync to the cloud, and edits made on the phone are written back to disk within a few seconds.
-- **Back and forward.** Each pane remembers the documents opened in it. ‹ and › in its bar (or ⌘[ / ⌘], ⌘⌥← / ⌘⌥→, or a mouse's side buttons) go back and forward, to where each one was scrolled.
+- **Back and forward.** Each pane remembers the documents opened in it. ‹ and › in its bar (or ⌘[ / ⌘], ⌘⌥← / ⌘⌥→, or a mouse's side buttons) go back and forward, to where each one was scrolled. Closing and reopening the app brings back the same panes and documents, each where you left it, with their history.
 - **Right-click menu.** In the editor: formatting, headings, lists and quotes, and inserts (link, table, code or formula block, Mermaid diagram, date), plus cut, copy and paste; ⌘B, ⌘I and ⌘K work too. Shift + right-click gives the system menu; in the Mac app it has 检查元素 (Inspect Element), and 显示 → 网页检查器 (⌥⌘I) opens the inspector.
 - **Outline.** Every document has its own outline beside it: click a heading to jump, and the current section stays marked as you scroll. Drag its edge to resize it.
 - **Split panes.** Split up, down, left or right, by dragging a file onto a pane's edge or with ⌘-click. The layout is remembered.

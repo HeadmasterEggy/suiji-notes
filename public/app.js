@@ -627,7 +627,7 @@ async function showFile(f, p) {
   preview.classList.toggle("doc", md);
   const show = (el) => {
     if (token !== p.token) return;
-    clearTimeout(wait); preview.replaceChildren(el); preview.scrollTop = 0;
+    clearTimeout(wait); preview.replaceChildren(el); preview.scrollTop = 0; p.shownId = f.id;
     if (staleIds.has(f.id) && !retried.has(versionOf(f))) {
       retried.add(versionOf(f));
       setTimeout(() => { if (token === p.token) { p.shown = null; renderPane(p); } }, 5000);
@@ -1035,7 +1035,9 @@ function makePane(item) {
     p.tocLock = +b.dataset.i; markHeading(p);   // keep the clicked heading marked while the scroll settles
   });
   let spy = 0, settle = 0;
+  p.ta.addEventListener("scroll", () => saveLater(), { passive: true });
   p.preview.addEventListener("scroll", () => {
+    saveLater();
     clearTimeout(settle); settle = setTimeout(() => { p.tocLock = null; }, 200);
     if (!spy) spy = requestAnimationFrame(() => { spy = 0; markHeading(p); });
   }, { passive: true });
@@ -1349,6 +1351,7 @@ function renderPane(p) {
   if (p.kind === "note" && !(store.notes[p.itemId] && !store.notes[p.itemId].deleted)) p.kind = p.itemId = null;
   if (p.kind === "file" && filesLoaded && !files.some((f) => f.id === p.itemId)) p.kind = p.itemId = null;
   p.el.classList.toggle("empty", !p.kind);
+  navState(p);   // documents in its history may have arrived (the file list) or gone since
   const note = p.kind === "note" && store.notes[p.itemId];
   const file = p.kind === "file" && files.find((f) => f.id === p.itemId);
   const waiting = p.kind === "file" && !file;   // files list not loaded yet
@@ -1399,15 +1402,17 @@ function openIn(p, kind, id, fromHist) {
   focusPane(p);
   app.dataset.view = "edit";
   if (p.kind === kind && p.itemId === id) { if (kind === "note" && !isPhone.matches) p.ta.focus(); return; }
+  const pending = p.restoreTop;   // left before it scrolled back to where it was: keep that place
+  delete p.restoreTop;
   if (!fromHist) {
-    if (p.kind && p.hi >= 0) p.hist[p.hi] = here(p);
+    if (p.kind && p.hi >= 0) p.hist[p.hi] = pending ? { kind: p.kind, id: p.itemId, top: pending } : here(p);
     p.hist.splice(p.hi + 1, Infinity, { kind, id, top: 0 });
     if (p.hist.length > 100) p.hist.shift();
     p.hi = p.hist.length - 1;
   }
   navState(p);
   commit(p); closeMenu(p);
-  p.kind = kind; p.itemId = id; p.shown = null; p.fileEdit = false; p.editing = false;
+  p.kind = kind; p.itemId = id; p.shown = null; p.shownId = null; p.fileEdit = false; p.editing = false;
   if (kind === "note") p.ta.value = store.notes[id]?.body || "";
   saveLayout(); markCurrent(); renderPane(p);
   if (kind === "note" && !isPhone.matches) p.ta.focus();
@@ -1423,17 +1428,25 @@ async function goHist(p, d) {
   while (p.hist[i] && !exists(p.hist[i])) i += d;   // skip documents deleted since
   const to = p.hist[i];
   if (!to) return;
-  if (p.kind && p.hi >= 0) p.hist[p.hi] = here(p);
+  if (p.kind && p.hi >= 0) p.hist[p.hi] = p.restoreTop ? { kind: p.kind, id: p.itemId, top: p.restoreTop } : here(p);
   p.hi = i;
   openIn(p, to.kind, to.id, true);
-  if (!to.top) return;
-  // A file renders asynchronously: wait until it is tall enough to scroll back to where it was.
-  for (let n = 0; n < 40; n++) {
-    const el = scroller(p);
-    if (p.itemId !== to.id) return;
-    if (el.scrollHeight - el.clientHeight >= to.top || n === 39) { el.scrollTop = to.top; return; }
-    await sleepMs(75);
-  }
+  scrollBack(p, to.id, to.top);
+}
+// A file renders asynchronously (and at startup the file list loads first): wait until the document is tall
+// enough to scroll back to where it was, unless it was closed or scrolled by hand in the meantime.
+async function scrollBack(p, id, top, tries = 80) {
+  if (!top) return;
+  let moved = false;
+  const stop = () => { moved = true; }, on = ["wheel", "touchstart", "keydown", "pointerdown"];
+  for (const t of on) p.el.addEventListener(t, stop, { passive: true });
+  try {
+    for (let n = 0; n < tries && !moved && p.itemId === id; n++) {
+      const el = scroller(p), ready = el !== p.preview || p.shownId === id;   // a file's own text, not the one before
+      if (ready && el.scrollHeight - el.clientHeight >= top || n === tries - 1) { el.scrollTop = top; return; }
+      await sleepMs(75);
+    }
+  } finally { for (const t of on) p.el.removeEventListener(t, stop); }
 }
 // ⌘[ / ⌘] (and ⌘⌥← / ⌘⌥→, as in Obsidian), and a mouse's back and forward buttons, in the focused pane.
 document.addEventListener("keydown", (e) => {
@@ -1570,10 +1583,17 @@ function buildLayout() {
 }
 isPhone.addEventListener("change", () => layout && buildLayout());
 
+// The panes as they were when the app was last closed: what each shows, where it was scrolled to, and its
+// back / forward history (up to 30 entries).
 const layoutKey = () => "suiji:layout:" + uid;
 function saveLayout() {
-  const ser = (n) => n.pane ? { kind: n.pane.kind, id: n.pane.itemId, f: n.pane === focused ? 1 : 0, t: n.pane.graphTags ? 1 : 0, o: n.pane.tocOpen ? 1 : 0 }
-                            : { dir: n.dir, ratio: n.ratio, a: ser(n.a), b: ser(n.b) };
+  const pane = (p) => {
+    const top = p.restoreTop || (p.kind ? Math.round(scroller(p).scrollTop) : 0);   // still waiting to scroll back: keep that
+    if (p.kind && p.hi >= 0) p.hist[p.hi] = { kind: p.kind, id: p.itemId, top };
+    const from = Math.max(0, p.hi - 20), h = p.hist.slice(from, from + 30);
+    return { kind: p.kind, id: p.itemId, f: p === focused ? 1 : 0, t: p.graphTags ? 1 : 0, o: p.tocOpen ? 1 : 0, top, h, hi: p.hi - from };
+  };
+  const ser = (n) => n.pane ? pane(n.pane) : { dir: n.dir, ratio: n.ratio, a: ser(n.a), b: ser(n.b) };
   try { localStorage.setItem(layoutKey(), JSON.stringify(ser(layout))); } catch {}
 }
 function restoreLayout() {
@@ -1587,6 +1607,8 @@ function restoreLayout() {
       if (s && s.f) focused = p;
       p.graphTags = !!(s && s.t);
       p.tocOpen = s && "o" in s ? s.o !== 0 : tocAuto;   // each pane keeps its own outline open or closed
+      if (Array.isArray(s?.h) && s.h[s.hi]?.id === s.id) { p.hist = s.h.filter((x) => x && x.kind); p.hi = Math.min(s.hi, p.hist.length - 1); navState(p); }
+      if (s?.top) p.restoreTop = s.top;
       return { pane: p };
     }
     return { dir: s.dir === "col" ? "col" : "row", ratio: Math.min(0.85, Math.max(0.15, +s.ratio || 0.5)), a: de(s.a), b: de(s.b) };
@@ -1594,7 +1616,13 @@ function restoreLayout() {
   layout = de(saved);
   focused ||= firstPane(layout);
   buildLayout();
+  for (const p of panes.values()) if (p.restoreTop) scrollBack(p, p.itemId, p.restoreTop, 160).finally(() => { delete p.restoreTop; });
 }
+// Scrolling is saved a moment after it stops, and once more when the page goes away (window closed, app quit).
+let saveSoon = 0;
+const saveLater = () => { clearTimeout(saveSoon); saveSoon = setTimeout(saveLayout, 500); };
+addEventListener("pagehide", () => layout && saveLayout());
+document.addEventListener("visibilitychange", () => { if (document.hidden && layout) saveLayout(); });
 
 $("newBtn").onclick = () => {
   const now = new Date().toISOString();
