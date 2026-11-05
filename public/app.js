@@ -689,7 +689,11 @@ document.addEventListener("visibilitychange", () => {
 const NOTES_KEY = "\u0000notes";
 const DND = "application/x-suiji-item";
 
-function titleOf(body) { const l = (body || "").split("\n").find((s) => s.trim()); return l ? l.trim() : t("无标题"); }
+// The first line that has text, without the "# " that makes it a Markdown heading.
+function titleOf(body) {
+  const l = (body || "").split("\n").find((s) => s.trim())?.trim().replace(/^#{1,6}(\s+|$)/, "");
+  return l || t("无标题");
+}
 function fmt(iso) {
   const d = new Date(iso), now = new Date(), p = (n) => String(n).padStart(2, "0");
   if (d.toDateString() === now.toDateString()) return t("今天 {time}", { time: `${p(d.getHours())}:${p(d.getMinutes())}` });
