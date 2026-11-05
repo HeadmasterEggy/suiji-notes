@@ -34,7 +34,7 @@
 ## Features
 
 - **One tree.** Quick notes written in the app sit in a 「随手记」 folder at the top, and the synced folders sit below it. The ⇅ button sorts it by name or by last change.
-- **Edit anywhere.** Edit a file on the phone, and the Mac agent writes it back to disk within a few seconds.
+- **Local folders on the Mac.** Like an Obsidian vault: the Mac app reads and writes your folders on disk, so documents open instantly, even offline. Changes made in the app or in any other editor sync to the cloud, and edits made on the phone are written back to disk within a few seconds.
 - **Outline.** Every document has its own outline beside it: click a heading to jump, and the current section stays marked as you scroll. Drag its edge to resize it.
 - **Split panes.** Split up, down, left or right, by dragging a file onto a pane's edge or with ⌘-click. The layout is remembered.
 - **Styles.** Four looks, picked in 设置 (Settings), each in light and dark (follow the system, or pick one):
@@ -56,7 +56,9 @@
 - **iPhone:** open <https://suiji-notes.vercel.app> in Safari, tap Share, then 添加到主屏幕 (Add to Home Screen).
 - **Android:** download [`Suiji.apk`](https://suiji-notes.vercel.app/android/Suiji.apk) on the phone and open it (allow installing from your browser when asked).
 - **Mac app:** build it with `./mac/build.sh --install` (see [Build from source](#build-from-source)). Without the app, Safari's File → Add to Dock works too.
-- **Sync a folder from the Mac:**
+- **Sync a folder from the Mac:** in the Mac app, open 设置 (Settings) → 本地文件夹 (Local folders) → 添加文件夹… (Add Folder…). The app syncs while it runs, including when only its menu bar item is left; its menu has 登录时打开 (Open at Login).
+
+  Without the app, the Node agent does the same from a terminal:
 
   ```sh
   npm run sync login       # sign in to your Suiji account
@@ -64,7 +66,7 @@
   npm run sync install     # run in the background whenever you log in
   ```
 
-  `npm run sync status` shows the account, folders and file counts. `npm run sync remove ~/some/folder` stops syncing a folder; the cloud copies stay. `npm run sync uninstall` stops the background job.
+  `npm run sync status` shows the account, folders and file counts. `npm run sync remove ~/some/folder` stops syncing a folder; the cloud copies stay. `npm run sync uninstall` stops the background job. Both use the same folder list and state in `~/.suiji/`, so the app takes over the agent's folders as they are; when it starts, it stops the agent's background job so the two don't sync the same folders.
 
 ## Build from source
 
@@ -109,24 +111,24 @@ The first run makes the signing key `android/suiji-release.keystore`, with its p
 |---|---|---|
 | Web app | `public/` | Plain HTML/JS, no framework, hosted on Vercel |
 | Data | Supabase | Postgres tables `notes` and `files`, a private storage bucket, and Realtime. Row-level security means each user sees only their own data. |
-| Folder agent | `agent/suiji-sync.mjs` | Node script run by launchd on the Mac. It watches the synced folders. |
-| Mac app | `mac/` | Native AppKit window around the web app, plus a menu bar item for the agent |
+| Folder sync | `public/syncengine.js` | Syncs local folders with the cloud. The Mac app runs it in its page (`public/localsync.js`), through a file bridge limited to the chosen folders (`mac/LocalFiles.swift`); the Node agent `agent/suiji-sync.mjs` runs it without the app. |
+| Mac app | `mac/` | Native AppKit window around the web app, with access to the local folders and a menu bar item for the sync |
 | Android app | `android/` | WebView around the web app, with the back button, file picking, downloads and a launcher icon per style |
 
 **Notes** are saved on the device, then upserted to `notes`. Other devices receive changes through Realtime. If two devices edit the same note, the last save wins.
 
 **Folder files** sync in both directions:
 
-- **Mac → cloud:** the agent watches the folder. New and changed files are uploaded, and deleted files are removed from the cloud. A full rescan every 5 minutes catches anything a watch event missed.
-- **Phone → Mac:** an edit saved in the app updates the file's row. The agent hears about it through Realtime and writes the new version to disk.
+- **Mac → cloud:** the Mac app (or the agent) watches the folder. New and changed files are uploaded, and deleted files are removed from the cloud. A full rescan every 5 minutes catches anything a watch event missed.
+- **Phone → Mac:** an edit saved on another device updates the file's row. The Mac hears about it through Realtime and writes the new version to disk. In the Mac app, an edit is saved to disk first and uploaded from there.
 - **Conflicts:** if both sides changed a file since the last sync, the local file is kept and uploaded. The cloud version is saved beside it as 「（随记副本）」.
 
 ## Notes
 
 - The Mac window loads the live site, so web changes arrive with every deploy. An open window checks for a new deploy every 10 minutes and when it comes to the front. It reloads by itself when nothing is being edited, and otherwise shows a 「有新版本」 button.
 - The Mac app checks `mac/version.json` on the site at launch and every 6 hours. A newer build downloads in the background, is verified, then installs on restart or on quit.
-- The menu bar item shows whether the folder agent is running, and has 立即同步 (sync now), the synced folder and the sync log. Links to other sites open in your default browser, and downloads go to `~/Downloads`.
-- The folder agent skips hidden files, `node_modules` and `.git`, and does not upload files over 50 MB. Settings, state and the log live in `~/.suiji/`; the log is `~/.suiji/sync.log`.
+- The menu bar item shows the sync state, and has 立即同步 (sync now), the synced folders, the sync log and 登录时打开 (Open at Login). Closing the window keeps the sync running; quit from the menu bar item or ⌘Q. Links to other sites open in your default browser, and downloads go to `~/Downloads`.
+- The folder sync skips hidden files, symlinks, `node_modules` and `.git`, and does not upload files over 50 MB. Settings, state and the log live in `~/.suiji/`; the log is `~/.suiji/sync.log`.
 - Storage can serve the previous copy of a file for a while after an upload, through a URL signed earlier. So reads use freshly signed URLs and must match the size in the row.
 - The interface is in Chinese or English (设置 → 语言; by default it follows the system), and the Mac app's menus follow it.
 - Styles, light / dark and the sort order are saved per device. 方块 loads two pixel fonts from Google Fonts, and only when it is picked.

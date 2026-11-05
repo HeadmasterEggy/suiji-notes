@@ -5,6 +5,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 import { mdMeta } from "./mdmeta.js";
 import { mountGraph } from "./graph.js";
 import { t, lang, langChoice, translatePage } from "./i18n.js";
+import * as local from "./localsync.js";
 
 translatePage();
 
@@ -185,7 +186,7 @@ function fmtSize(n) {
 
 async function loadFiles() {
   if (!uid || !navigator.onLine) return;
-  const { data, error } = await sb.from("files").select("id,name,folder,path,size,mime,created_at,updated_at,links,tags").order("updated_at", { ascending: false }).limit(5000);
+  const { data, error } = await sb.from("files").select("id,name,folder,path,size,mime,created_at,updated_at,links,tags,local_key").order("updated_at", { ascending: false }).limit(5000);
   if (error) { console.error(error); return; }
   const before = new Map(files.map((f) => [f.id, versionOf(f)]));
   for (const f of data) if (before.has(f.id) && before.get(f.id) !== versionOf(f)) forgetUrls(f.path);
@@ -281,6 +282,7 @@ function fileText(f) {
 // the old copy after that, the id goes in staleIds and the pane tries again a little later.
 const staleIds = new Set(), retried = new Set();   // retried: versions already given their one extra try
 async function readText(f) {
+  if (local.localPath(f)) return local.readLocal(f);   // Mac app: the file on disk
   try { const hit = await (await caches.open(FILE_CACHE)).match(cacheReq(f)); if (hit) return await hit.text(); } catch {}
   const url = await signedUrl(f);
   if (!url) throw new Error("no url");
@@ -1050,10 +1052,12 @@ function makePane(item) {
     const f = files.find((x) => x.id === p.itemId);
     if (!f) return;
     p.edit.disabled = true; editLabel(p, t("载入中…"), false);   // the fresh read takes a moment
-    // A fresh signed URL plus a cache-buster, so editing never starts from a stale copy.
+    // The file on disk in the Mac app; otherwise a fresh signed URL plus a cache-buster, so editing never
+    // starts from a stale copy.
     let text = null;
-    const s = await sb.storage.from("files").createSignedUrl(f.path, 60);
-    if (!s.error) try { const r = await fetch(s.data.signedUrl + "&t=" + Date.now(), { cache: "no-store" }); if (r.ok) text = await r.text(); } catch {}
+    if (local.localPath(f)) text = await local.readLocal(f).catch(() => null);
+    else { const s = await sb.storage.from("files").createSignedUrl(f.path, 60);
+      if (!s.error) try { const r = await fetch(s.data.signedUrl + "&t=" + Date.now(), { cache: "no-store" }); if (r.ok) text = await r.text(); } catch {} }
     p.edit.disabled = false; editLabel(p, t("编辑"), false);
     if (text === null) { showNote(t("读取文件失败，请检查网络。"), "err"); return; }
     p.fileBase = text;
@@ -1109,6 +1113,18 @@ async function saveFile(p) {
   const f = files.find((x) => x.id === p.itemId), text = p.ta.value;
   if (!f || text === p.fileBase) { setSync("ok", t("已同步")); return; }
   setSync("saving", t("保存中…"));
+  if (local.localPath(f)) {
+    // Mac app: saved to disk; the folder sync uploads it, then the row's new version reaches loadFiles.
+    try { await local.writeLocal(f, text); } catch (e) {
+      console.error(e); p.editing = true; setSync("err", t("保存失败"));
+      showNote(t("「{name}」没能写入磁盘：{msg}", { name: baseName(f.name), msg: e.message || e }), "err");
+      return;
+    }
+    p.fileBase = text; rendered.delete(versionOf(f));
+    setSync("ok", t("已同步")); showNote("");
+    if (!p.fileEdit) { p.shown = null; renderPane(p); }
+    return;
+  }
   const blob = new Blob([text], { type: f.mime || "text/plain" });
   const now = new Date().toISOString();
   const up = await sb.storage.from("files").upload(f.path, blob, { upsert: true, contentType: f.mime || "text/plain", cacheControl: "0" });
@@ -1467,6 +1483,26 @@ sortSel.onchange = () => {
   try { localStorage.setItem("suiji:sort", sortBy); } catch {}
   renderList();
 };
+// ---------- local folders (Mac app) ----------
+// Files the folder sync wrote: their text on disk changed, maybe before their row did, so drop what was drawn.
+function localChanged(keys) {
+  for (const f of files) if (keys.has(f.local_key)) rendered.delete(versionOf(f));
+  for (const p of panes.values()) {
+    const f = p.kind === "file" && files.find((x) => x.id === p.itemId);
+    if (f && keys.has(f.local_key) && !p.fileEdit) { p.shown = null; renderPane(p); }
+  }
+  loadFiles();
+}
+const LOCAL_STATUS = { syncing: "同步中…", ok: "已同步", offline: "离线 · 联网后同步", error: "同步出错，稍后重试" };
+let localState = "";
+function localStatus(s) {
+  if (s) localState = s;
+  const n = local.listFolders().length;
+  if (!$("localInfo") || !n) return;
+  const line = local.lastLine();
+  $("localInfo").textContent = t(LOCAL_STATUS[localState] || "已同步") + (line ? " · " + line : "");
+}
+
 // ---------- settings ----------
 // One dialog for the per-device preferences, sync, the local cache, the account and updates.
 let tocAuto = true;
@@ -1494,7 +1530,23 @@ function restyled() {
     loadedVersion.then((v) => { $("verInfo").textContent = t("版本 {v}", { v: v ? v.replace(/^suiji-/, "") : t("未知") }); });
     cacheSummary();
   }
-  $("setBtn").onclick = () => { fill(); dlg.showModal(); };
+  function fillLocal() {
+    const ul = $("localList");
+    ul.replaceChildren(...local.listFolders().map((root) => {
+      const li = document.createElement("li"), name = document.createElement("span"), rm = document.createElement("button");
+      name.textContent = root.replace(/^\/Users\/[^/]+/, "~"); name.title = root;
+      rm.type = "button"; rm.className = "ghost bordered small"; rm.textContent = t("停止同步");
+      rm.onclick = async () => {
+        if (!confirm(t("停止同步「{name}」？云端已有的文件会保留。", { name: root.split("/").pop() }))) return;
+        await local.removeFolder(root); fillLocal();
+      };
+      li.append(name, rm); return li;
+    }));
+    localStatus();
+  }
+  $("localSec").hidden = !local.available;
+  $("localAdd").onclick = async () => { await local.addFolder(); fillLocal(); };
+  $("setBtn").onclick = () => { fill(); if (local.available) fillLocal(); dlg.showModal(); };
   $("setClose").onclick = () => dlg.close();
   dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });   // a click on the backdrop
   $("styleChoices").onclick = (e) => {
@@ -1588,6 +1640,7 @@ function enter(session) {
   uid = session ? session.user.id : null;
   $("auth").hidden = !!session; app.hidden = !session;
   if (!session) {
+    local.start(sb, null, { onChange: localChanged, onStatus: localStatus }).catch(console.error);
     store = { notes: {} }; files = []; filesLoaded = false; rendered.clear(); signed.clear();
     // Another account may sign in on this device; its documents must not mix with these.
     caches.delete(FILE_CACHE).catch(() => {}); cacheIndex = null;
@@ -1602,6 +1655,7 @@ function enter(session) {
     unpublished = now; rendered.clear();
     for (const p of panes.values()) if (p.kind === "file") { p.shown = null; renderPane(p); }
   }).catch(() => {});
+  local.start(sb, session, { onChange: localChanged, onStatus: localStatus }).catch(console.error);
   load(); filesLoaded = false; restoreLayout(); render();
   if (focused?.kind) app.dataset.view = "edit";
   // Warm up the Markdown renderer in the background so the first document opens without waiting for it.

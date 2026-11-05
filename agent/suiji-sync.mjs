@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// 随记 Mac 同步程序：把选中的文件夹自动上传到随记的「文件」里。
+// 随记 Mac 同步程序：把选中的文件夹自动上传到随记的「文件」里。随记 Mac App 自带同样的同步（设置 → 本地文件夹），
+// 用 App 时不需要它；两者共用 ~/.suiji/ 里的配置和状态，App 启动时会停掉这里 install 的后台任务。
 // 新增、修改的文件会上传；本地删除的文件，云端也会删除。
 // 在手机上改过的文件会自动下载回来，覆盖本地文件；如果两边同时改了，云端版本另存为「名字（随记副本）」。
 //
@@ -11,13 +12,12 @@
 //   node agent/suiji-sync.mjs install     登录 Mac 后自动在后台运行
 //   node agent/suiji-sync.mjs uninstall   取消后台运行
 import { createClient } from "@supabase/supabase-js";
-import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { mdMeta } from "../public/mdmeta.js";
+import { syncEngine } from "../public/syncengine.js";
 
 const HOME = process.env.SUIJI_HOME || path.join(os.homedir(), ".suiji");
 const CONFIG = path.join(HOME, "config.json");
@@ -25,7 +25,6 @@ const STATE = path.join(HOME, "state.json");
 const SESSION = path.join(HOME, "session.json");
 const LOG = path.join(HOME, "sync.log");
 const PLIST = path.join(os.homedir(), "Library/LaunchAgents/app.suiji.sync.plist");
-const MAX_FILE = 50 * 1024 * 1024;
 const SKIP = new Set(["node_modules", ".git", ".DS_Store", "Thumbs.db"]);
 const SELF = fileURLToPath(import.meta.url);
 
@@ -83,18 +82,7 @@ function chooseFolder() {
   } catch { return ""; }
 }
 
-// ---------- scanning ----------
-const MIME = { txt: "text/plain", md: "text/markdown", csv: "text/csv", json: "application/json", pdf: "application/pdf",
-  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", heic: "image/heic", svg: "image/svg+xml",
-  mp4: "video/mp4", mov: "video/quicktime", mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav",
-  doc: "application/msword", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  xls: "application/vnd.ms-excel", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  ppt: "application/vnd.ms-powerpoint", pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  zip: "application/zip", html: "text/html", py: "text/plain", js: "text/plain", ts: "text/plain" };
-const extOf = (n) => (/\.([a-z0-9]{1,6})$/i.exec(n)?.[1] || "").toLowerCase();
-const isMd = (n) => ["md", "markdown"].includes(extOf(n));
-const metaOf = (rel, buf) => isMd(rel) ? mdMeta(buf.toString("utf8")) : { links: [], tags: [] };
-
+// ---------- syncing (public/syncengine.js, shared with the Mac app) ----------
 function walk(root) {
   const out = [];
   const visit = (dir) => {
@@ -106,161 +94,31 @@ function walk(root) {
       if (e.isDirectory()) visit(abs);
       else if (e.isFile()) {
         const st = fs.statSync(abs);
-        out.push({ abs, rel: path.relative(root, abs).split(path.sep).join("/"), size: st.size, mtimeMs: Math.round(st.mtimeMs) });
+        out.push({ rel: path.relative(root, abs).split(path.sep).join("/"), size: st.size, mtimeMs: Math.round(st.mtimeMs) });
       }
     }
   };
   visit(root);
   return out;
 }
-
-// Stable ids so a re-upload replaces the same cloud file instead of adding a copy.
-function idFor(uid, key) {
-  const h = createHash("sha256").update(uid + "\0" + key).digest("hex");
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
-}
-
-async function syncFolder(sb, uid, root, state) {
-  const folder = path.basename(root);
-  if (!fs.existsSync(root)) { log("文件夹不存在，跳过：", root); return; }
-  const seen = new Set();
-  let up = 0, del = 0;
-  for (const f of walk(root)) {
-    const key = root + "::" + f.rel;
-    seen.add(key);
-    const prev = state[key];
-    if (prev && prev.size === f.size && prev.mtimeMs === f.mtimeMs) {
-      // Files synced before the graph existed: fill in their links and tags once, without re-uploading.
-      if (!prev.meta && prev.id && isMd(f.rel)) {
-        const r = await sb.from("files").update(metaOf(f.rel, fs.readFileSync(f.abs))).eq("id", prev.id);
-        if (r.error) log("更新链接失败", f.rel, r.error.message); else prev.meta = 1;
-      }
-      continue;
-    }
-    if (f.size > MAX_FILE) { if (!prev?.tooBig) log("超过 50 MB，没有上传：", f.rel); state[key] = { ...f, tooBig: true }; continue; }
-    const id = idFor(uid, key), ext = extOf(f.rel);
-    const objPath = `${uid}/${id}${ext ? "." + ext : ""}`;
-    const mime = MIME[ext] || "application/octet-stream";
-    try {
-      const body = fs.readFileSync(f.abs);
-      const r1 = await sb.storage.from("files").upload(objPath, body, { contentType: mime, upsert: true, cacheControl: "0" });
-      if (r1.error) throw r1.error;
-      const now = new Date().toISOString();
-      const r2 = await sb.from("files").upsert(
-        { id, user_id: uid, name: f.rel, folder, path: objPath, size: f.size, mime, local_key: key, updated_at: now, ...metaOf(f.rel, body), ...(prev ? {} : { created_at: now }) },
-        { onConflict: "id" });
-      if (r2.error) throw r2.error;
-      state[key] = { size: f.size, mtimeMs: f.mtimeMs, id, path: objPath, cloudAt: now, meta: 1 };
-      up++;
-      log("已上传", folder + "/" + f.rel);
-    } catch (e) {
-      log("上传失败", f.rel, e.message || e);
-    }
-  }
-  for (const [key, v] of Object.entries(state)) {
-    if (!key.startsWith(root + "::") || seen.has(key)) continue;
-    if (v.path) {
-      const r1 = await sb.storage.from("files").remove([v.path]);
-      const r2 = await sb.from("files").delete().eq("id", v.id);
-      if (r1.error || r2.error) { log("云端删除失败", key.split("::")[1], (r1.error || r2.error).message); continue; }
-      log("本地已删除，云端同步删除", folder + "/" + key.split("::")[1]);
-      del++;
-    }
-    delete state[key];
-  }
-  if (up || del) log(`「${folder}」上传 ${up} 个，删除 ${del} 个`);
-}
-
-// Cloud rows this agent manages. updated_at is set by whoever wrote last: this agent records the value it
-// wrote (cloudAt), so a row whose updated_at differs was edited somewhere else, e.g. in the app on the phone.
-// Storage reads can be served from a cache for a moment after an upload, so fetch through a fresh signed URL.
-async function fetchObject(sb, objPath) {
-  const s = await sb.storage.from("files").createSignedUrl(objPath, 60);
-  if (s.error) throw s.error;
-  const r = await fetch(s.data.signedUrl + "&t=" + Date.now(), { cache: "no-store" });
-  if (!r.ok) throw new Error("HTTP " + r.status);
-  return Buffer.from(await r.arrayBuffer());
-}
-
-async function cloudRows(sb) {
-  const rows = [];
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await sb.from("files").select("id,path,size,updated_at,local_key").not("local_key", "is", null).range(from, from + 999);
-    if (error) throw error;
-    rows.push(...data);
-    if (data.length < 1000) return rows;
-  }
-}
-
-// Returns true when something should be retried shortly (the download did not match the database yet).
-async function pullFolder(sb, root, state, rows) {
-  const folder = path.basename(root);
-  let retry = false;
-  if (!fs.existsSync(root)) return retry;
-  for (const row of rows) {
-    const key = row.local_key, prev = state[key];
-    if (!key.startsWith(root + "::") || !prev?.path) continue;
-    if (!prev.cloudAt) { prev.cloudAt = row.updated_at; continue; }   // first run after upgrading: take the cloud as baseline
-    if (Date.parse(row.updated_at) === Date.parse(prev.cloudAt)) continue;
-    const rel = key.slice(root.length + 2), abs = path.join(root, ...rel.split("/"));
-    let buf;
-    try { buf = await fetchObject(sb, row.path); } catch (e) { log("下载失败", rel, e.message || e); retry = true; continue; }
-    if (buf.length !== row.size) { retry = true; continue; }   // still the old copy; try again in a moment
-    const st = fs.statSync(abs, { throwIfNoEntry: false });
-    if (st && (st.size !== prev.size || Math.round(st.mtimeMs) !== prev.mtimeMs)) {
-      // Changed on both sides: keep the local file (the scan uploads it) and save the cloud version beside it.
-      const ext = path.extname(abs), copy = abs.slice(0, abs.length - ext.length) + "（随记副本）" + ext;
-      fs.writeFileSync(copy, buf);
-      prev.cloudAt = row.updated_at;
-      log("两边都改了，云端版本另存为", folder + "/" + path.relative(root, copy).split(path.sep).join("/"));
-      continue;
-    }
-    fs.mkdirSync(path.dirname(abs), { recursive: true });
-    const tmp = path.join(path.dirname(abs), "." + path.basename(abs) + ".suiji-tmp");
-    fs.writeFileSync(tmp, buf);
-    fs.renameSync(tmp, abs);
-    const now = fs.statSync(abs);
-    state[key] = { ...prev, size: now.size, mtimeMs: Math.round(now.mtimeMs), cloudAt: row.updated_at };
-    log("已写回手机上的修改", folder + "/" + rel);
-  }
-  return retry;
-}
-
-// A synced Hexo `_posts` folder: the blog's skip_render keeps some of its subfolders unpublished. The app
-// gives those no blog link; the list is kept in the account (user metadata), never in the app's code.
-function hexoUnpublished(root) {
-  if (path.basename(root) !== "_posts") return null;
-  const cfg = path.join(root, "..", "..", "_config.yml");
-  if (!fs.existsSync(cfg)) return null;
-  const out = [];
-  let inSkip = false;
-  for (const line of fs.readFileSync(cfg, "utf8").split("\n")) {
-    if (/^skip_render:/.test(line)) { inSkip = true; continue; }
-    if (inSkip && /^\S/.test(line)) break;
-    const m = inSkip && /^\s*-\s*["']?_posts\/([^/*"']+)\//.exec(line);
-    if (m && !out.includes(m[1] + "/")) out.push(m[1] + "/");
-  }
-  return out;
-}
-async function shareUnpublished(sb, user, folders) {
-  const skip = [...new Set(folders.flatMap((f) => hexoUnpublished(f) || []))].sort();
-  const had = user.user_metadata?.blog_skip || [];
-  if (JSON.stringify(had) === JSON.stringify(skip)) return;
-  const { error } = await sb.auth.updateUser({ data: { blog_skip: skip } });
-  if (error) log("没能保存博客未发布的文件夹：", error.message); else log("已更新博客未发布的文件夹：", skip.length, "个");
-}
+const diskFs = {
+  walk: async (root) => walk(root),
+  stat: async (p) => { const st = fs.statSync(p, { throwIfNoEntry: false }); return st && { size: st.size, mtimeMs: Math.round(st.mtimeMs) }; },
+  read: async (p) => new Uint8Array(fs.readFileSync(p)),
+  readText: async (p) => { try { return fs.readFileSync(p, "utf8"); } catch { return null; } },
+  write: async (p, bytes) => {
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    const tmp = path.join(path.dirname(p), "." + path.basename(p) + ".suiji-tmp");
+    fs.writeFileSync(tmp, bytes);
+    fs.renameSync(tmp, p);
+  },
+};
 
 async function syncAll(sb) {
-  const user = await signedIn(sb), uid = user.id;
+  const user = await signedIn(sb);
   const { folders = [] } = readJson(CONFIG, {});
-  await shareUnpublished(sb, user, folders);
   const state = readJson(STATE, {});
-  const rows = await cloudRows(sb);
-  let retry = false;
-  for (const root of folders) {
-    if (await pullFolder(sb, root, state, rows)) retry = true;
-    await syncFolder(sb, uid, root, state);
-  }
+  const { retry } = await syncEngine({ sb, fs: diskFs, log }).syncAll(user, folders, state);
   writeJson(STATE, state);
   return retry;
 }

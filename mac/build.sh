@@ -4,15 +4,15 @@
 #   --publish  also writes public/mac/Suiji.zip and version.json; installed apps update to it after the next deploy
 # Raise BUILD for every release you publish; installed apps only update to a higher BUILD.
 set -e
-VERSION=${VERSION:-1.5}
-BUILD=${BUILD:-5}
-NOTES="New icons: one page-and-pen mark drawn in each style. 新图标：每种风格都用同一个纸页加笔迹的标志。"
+VERSION=${VERSION:-1.6}
+BUILD=${BUILD:-6}
+NOTES="Local folders: the app reads and writes your folders on disk and syncs them itself, no Node needed (Settings → Local folders). 本地文件夹：App 直接读写磁盘上的文件夹并自己同步，不再需要 Node（设置 → 本地文件夹）。"
 cd "$(dirname "$0")"
 APP="build/随记.app"
 rm -rf build && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-swiftc -O -swift-version 5 -target arm64-apple-macos13 -o build/suiji-arm64 SuijiApp.swift
-swiftc -O -swift-version 5 -target x86_64-apple-macos13 -o build/suiji-x86_64 SuijiApp.swift
+swiftc -O -swift-version 5 -target arm64-apple-macos13 -o build/suiji-arm64 main.swift LocalFiles.swift
+swiftc -O -swift-version 5 -target x86_64-apple-macos13 -o build/suiji-x86_64 main.swift LocalFiles.swift
 lipo -create build/suiji-arm64 build/suiji-x86_64 -output "$APP/Contents/MacOS/Suiji"
 rm build/suiji-arm64 build/suiji-x86_64
 

@@ -1,1 +1,1 @@
-{"version":"1.5","build":5,"url":"Suiji.zip","notes":"New icons: one page-and-pen mark drawn in each style. 新图标：每种风格都用同一个纸页加笔迹的标志。"}
+{"version":"1.6","build":6,"url":"Suiji.zip","notes":"Local folders: the app reads and writes your folders on disk and syncs them itself, no Node needed (Settings → Local folders). 本地文件夹：App 直接读写磁盘上的文件夹并自己同步，不再需要 Node（设置 → 本地文件夹）。"}

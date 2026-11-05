@@ -177,6 +177,14 @@
         <button class="ghost bordered small" id="clearCache" type="button">清除</button>
       </div>
     </section>
+    <section id="localSec" hidden>
+      <h3>本地文件夹</h3>
+      <div class="set-row">
+        <span>直接读写这台 Mac 上的文件夹<small id="localInfo">改动会自动同步到云端，其他设备上的修改也会写回磁盘</small></span>
+        <button class="ghost bordered small" id="localAdd" type="button">添加文件夹…</button>
+      </div>
+      <ul class="local-list" id="localList"></ul>
+    </section>
     <section>
       <h3>账号</h3>
       <div class="set-row">

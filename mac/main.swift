@@ -1,11 +1,14 @@
-// 随记 for Mac: the web app in a native window, plus a menu bar item for the folder sync agent
-// (agent/suiji-sync.mjs, run by launchd as app.suiji.sync). Build with mac/build.sh.
+// 随记 for Mac: the web app in a native window. It also syncs local folders: the page runs the sync
+// (public/localsync.js) through the file bridge in LocalFiles.swift, and keeps running while the window is
+// closed, with a menu bar item. Build with mac/build.sh.
 import AppKit
+import ServiceManagement
 import WebKit
 
-let appURL = URL(string: "https://suiji-notes.vercel.app/")!
-let agentLabel = "app.suiji.sync"
-let suijiHome = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".suiji")
+// SUIJI_URL and SUIJI_HOME (see LocalFiles.swift) point a test copy elsewhere.
+let appURL = URL(string: ProcessInfo.processInfo.environment["SUIJI_URL"] ?? "https://suiji-notes.vercel.app/")!
+let testing = ProcessInfo.processInfo.environment["SUIJI_HOME"] != nil
+let agentPlist = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/app.suiji.sync.plist")
 // Published by `mac/build.sh --publish`; `defaults write app.suiji.mac updateFeed <url>` points it elsewhere for testing.
 let updateFeed = URL(string: UserDefaults.standard.string(forKey: "updateFeed") ?? "https://suiji-notes.vercel.app/mac/version.json")!
 let currentBuild = Int(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0") ?? 0
@@ -38,15 +41,22 @@ let macCSS = """
 html.mac-app:not(.fullscreen) body { padding-top: \(Int(titleBarHeight) + 4)px !important; }
 """
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, WKScriptMessageHandler, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, WKScriptMessageHandler, WKScriptMessageHandlerWithReply, NSMenuDelegate {
   var window: NSWindow!
   var web: WKWebView!
   var status: NSStatusItem!
-  let agentLine = NSMenuItem(title: L("同步：检查中…", "Sync: checking…"), action: nil, keyEquivalent: "")
+  let agentLine = NSMenuItem(title: L("同步：等待登录", "Sync: waiting for sign-in"), action: nil, keyEquivalent: "")
+  var syncState = ""
+  let local = LocalFiles()
+  lazy var watcher = FolderWatcher { [weak self] in self?.web.evaluateJavaScript("window.suijiLocal?.changed()") }
 
   func applicationDidFinishLaunching(_ n: Notification) {
     buildMainMenu()
     buildWindow()
+    watcher.watch(local.folders)
+    if testing { return }   // a test copy runs unseen: no window, menu bar item or updates, and leaves the agent alone
+    retireAgent()
+    window.makeKeyAndOrderFront(nil)
     buildStatusItem()
     setDockIcon(UserDefaults.standard.string(forKey: "iconStyle") ?? "")
     NSApp.activate(ignoringOtherApps: true)
@@ -157,10 +167,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     NSApp.applicationIconImage = url.flatMap { NSImage(contentsOf: $0) }   // nil restores the bundle icon
   }
 
+  func fromApp(_ m: WKScriptMessage) -> Bool {
+    m.frameInfo.isMainFrame && m.frameInfo.securityOrigin.host == appURL.host && m.frameInfo.securityOrigin.port == (appURL.port ?? 0)
+  }
+
   // The page reports its style and language: {style, lang}.
   func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) {
-    guard m.frameInfo.isMainFrame, m.frameInfo.securityOrigin.host == appURL.host,
-          let body = m.body as? [String: Any] else { return }
+    guard fromApp(m), let body = m.body as? [String: Any] else { return }
     if let style = body["style"] as? String, ["", "paper", "terminal", "blocks"].contains(style),
        style != UserDefaults.standard.string(forKey: "iconStyle") ?? "" { setDockIcon(style) }
     if let lang = body["lang"] as? String, ["zh", "en"].contains(lang), lang != appLang {
@@ -169,6 +182,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
   }
 
+  // MARK: local folders
+  // The file bridge for public/localsync.js. File work runs off the main thread; replies come back on it.
+
+  let io = DispatchQueue(label: "app.suiji.local-files")
+  func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage, replyHandler: @escaping (Any?, String?) -> Void) {
+    guard fromApp(m), let body = m.body as? [String: Any] else { return replyHandler(nil, "not allowed") }
+    switch body["op"] as? String {
+    case "addFolder":
+      let panel = NSOpenPanel()
+      panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
+      panel.prompt = L("同步这个文件夹", "Sync This Folder")
+      panel.message = L("选一个文件夹，随记会直接读写它，并和云端同步。", "Choose a folder. Suiji reads and writes it directly and syncs it with the cloud.")
+      panel.beginSheetModal(for: window) { r in
+        guard r == .OK, let url = panel.url else { return replyHandler(NSNull(), nil) }
+        let folders = self.local.add(url)
+        self.watcher.watch(folders)
+        replyHandler(folders, nil)
+      }
+    case "status":
+      syncState = body["text"] as? String ?? ""
+      replyHandler(nil, nil)
+    default:
+      io.async {
+        let result: Result<Any?, Error> = Result { try self.local.handle(body) }
+        DispatchQueue.main.async {
+          switch result {
+          case .success(let v): replyHandler(v, nil)
+          case .failure(let e): replyHandler(nil, e.localizedDescription)
+          }
+          if body["op"] as? String == "removeFolder" { self.watcher.watch(self.local.folders) }
+        }
+      }
+    }
+  }
+
+  // The Node agent (npm run sync install) syncs the same folders from the same state; the app does that
+  // now, so its launchd job is stopped and its plist set aside (the agent itself still works by hand).
+  func retireAgent() {
+    guard FileManager.default.fileExists(atPath: agentPlist.path) else { return }
+    run("/bin/launchctl", ["bootout", "gui/\(getuid())", agentPlist.path])
+    let aside = agentPlist.appendingPathExtension("disabled")
+    try? FileManager.default.removeItem(at: aside)
+    try? FileManager.default.moveItem(at: agentPlist, to: aside)
+    local.appendLog(Date().description + " 随记 App 接管了文件夹同步，已停用后台的 Node 同步程序")
+  }
 
   // MARK: window
 
@@ -180,6 +238,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
       "const s=document.createElement('style');s.textContent=\(String(reflecting: macCSS));document.head.append(s);"
     config.userContentController.addUserScript(WKUserScript(source: js, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
     config.userContentController.add(self, name: "suiji")
+    config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "suijiFs")
+    // Keep the page (and so the sync) running at full speed while the window is closed or hidden.
+    if #available(macOS 14.0, *) { config.preferences.inactiveSchedulingPolicy = .none }
     web = WKWebView(frame: .zero, configuration: config)
     web.navigationDelegate = self; web.uiDelegate = self
     web.allowsBackForwardNavigationGestures = false
@@ -208,7 +269,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     window.isReleasedWhenClosed = false
     window.center()
     window.setFrameAutosaveName("SuijiMain")
-    window.makeKeyAndOrderFront(nil)
   }
 
   @objc func showWindow() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
@@ -281,7 +341,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     DispatchQueue.main.asyncAfter(deadline: .now() + 1) { NSWorkspace.shared.activateFileViewerSelecting([dest]) }
   }
 
-  // MARK: menu bar item for the sync agent
+  // MARK: menu bar item for the folder sync
 
   func buildStatusItem() {
     if status != nil { NSStatusBar.system.removeStatusItem(status) }   // rebuilt when the language changes
@@ -295,31 +355,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     m.addItem(withTitle: L("打开同步的文件夹", "Open Synced Folder"), action: #selector(openFolder), keyEquivalent: "")
     m.addItem(withTitle: L("查看同步日志", "Show Sync Log"), action: #selector(openLog), keyEquivalent: "")
     m.addItem(withTitle: L("检查更新…", "Check for Updates…"), action: #selector(checkNow), keyEquivalent: "")
+    let login = m.addItem(withTitle: L("登录时打开", "Open at Login"), action: #selector(toggleLogin), keyEquivalent: "")
+    login.state = SMAppService.mainApp.status == .enabled ? .on : .off
     m.addItem(.separator())
     m.addItem(withTitle: L("打开随记", "Open Suiji"), action: #selector(showWindow), keyEquivalent: "")
     m.addItem(withTitle: L("退出随记", "Quit Suiji"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
     status.menu = m
   }
 
-  func menuWillOpen(_ m: NSMenu) { agentLine.title = agentState() }
-
-  func agentState() -> String {
-    let r = run("/bin/launchctl", ["print", "gui/\(getuid())/\(agentLabel)"])
-    if r.status != 0 { return L("同步：未安装（运行 npm run sync install）", "Sync: not installed (run npm run sync install)") }
-    let running = r.out.contains("state = running")
-    let last = (try? String(contentsOf: suijiHome.appendingPathComponent("sync.log"), encoding: .utf8))?
-      .split(separator: "\n").last.map { String($0.prefix(48)) } ?? ""
-    return (running ? L("同步：运行中", "Sync: running") : L("同步：已停止", "Sync: stopped")) + (last.isEmpty ? "" : " · " + last)
+  func menuWillOpen(_ m: NSMenu) {
+    let n = local.folders.count
+    let state = ["syncing": L("同步中…", "syncing…"), "ok": L("已同步", "up to date"), "offline": L("离线", "offline"), "error": L("出错，稍后重试", "error, retrying soon")][syncState]
+    agentLine.title = n == 0 ? L("同步：还没有本地文件夹（设置 → 本地文件夹）", "Sync: no local folders yet (Settings → Local folders)")
+      : L("同步：\(n) 个文件夹 · ", "Sync: \(n) folder\(n == 1 ? "" : "s") · ") + (state ?? L("等待登录", "waiting for sign-in"))
   }
 
-  @objc func syncNow() { run("/bin/launchctl", ["kickstart", "-k", "gui/\(getuid())/\(agentLabel)"]) }
+  @objc func syncNow() { web.evaluateJavaScript("window.suijiLocal?.kick(0)") }
   @objc func openLog() { NSWorkspace.shared.open(suijiHome.appendingPathComponent("sync.log")) }
-  @objc func openFolder() {
-    struct Config: Decodable { let folders: [String] }
-    let data = try? Data(contentsOf: suijiHome.appendingPathComponent("config.json"))
-    for f in (data.flatMap { try? JSONDecoder().decode(Config.self, from: $0) }?.folders ?? []) {
-      NSWorkspace.shared.open(URL(fileURLWithPath: f))
-    }
+  @objc func openFolder() { local.folders.forEach { NSWorkspace.shared.open(URL(fileURLWithPath: $0)) } }
+  @objc func toggleLogin(_ item: NSMenuItem) {
+    do {
+      if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() } else { try SMAppService.mainApp.register() }
+    } catch { tell(L("没能更改登录项", "Couldn’t change the login item"), error.localizedDescription) }
+    item.state = SMAppService.mainApp.status == .enabled ? .on : .off
   }
 
   // MARK: main menu (the Edit menu is what makes ⌘C/⌘V/⌘Z work inside the web view)
@@ -352,5 +410,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
-app.setActivationPolicy(.regular)
+app.setActivationPolicy(testing ? .prohibited : .regular)
 app.run()
