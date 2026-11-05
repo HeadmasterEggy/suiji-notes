@@ -6,7 +6,7 @@
 set -e
 VERSION=${VERSION:-1.7}
 BUILD=${BUILD:-7}
-NOTES="Eight new styles, each with its own Dock icon: Ink, E-ink, Notebook, Swiss, Neon, Blueprint, Clay and Sunset. 八种新风格，各有自己的 Dock 图标：水墨、墨水屏、手帐、瑞士、霓虹、蓝图、粘土、日落。"
+NOTES="A notes assistant (✦ or ⌘J) that finds, summarises and edits your notes, showing every change before it is made. Eight new styles, each with its own Dock icon. 新增笔记助手（✦ 或 ⌘J），可以查找、总结和修改笔记，每处改动都先给你看；还有八种新风格，各有自己的 Dock 图标。"
 cd "$(dirname "$0")"
 APP="build/随记.app"
 rm -rf build && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
