@@ -194,14 +194,20 @@ export async function localHttp(url, { method = "GET", headers = {}, body } = {}
 }
 
 // The steps of one model turn, as {t:"text"|"reasoning", d} / {t:"tool", id, name, input} / {t:"error", message, code}.
+// The server answers in NDJSON, errors included; anything else (no network, a host's HTML error page, a
+// timeout) is said in words rather than as a JSON parse error.
 async function* serverStream(signal) {
   const res = await fetch("/api/agent", {
     method: "POST", signal,
     headers: { "content-type": "application/json", authorization: "Bearer " + await app.token() },
     body: JSON.stringify({ messages: messages.map(({ reasoning, ...m }) => m), context: { lang, open: app.context() } }),
-  });
-  if (!res.body) throw new Error("HTTP " + res.status);
-  for await (const ln of lines(res.body)) yield JSON.parse(ln);
+  }).catch((e) => { throw e.name === "AbortError" ? e : new Error(t("连不上助手服务，检查一下网络。")); });
+  const down = () => new Error(t("助手服务没有正常回应（HTTP {status}），稍后再试。", { status: res.status }));
+  if (!res.body || !/ndjson/.test(res.headers.get("content-type") || "")) throw down();
+  for await (const ln of lines(res.body)) {
+    let m; try { m = JSON.parse(ln); } catch { throw down(); }
+    yield m;
+  }
 }
 async function* localStream(cfg, signal) {
   const url = cfg.base.replace(/\/+$/, "") + "/chat/completions", whole = viaApp(url);
@@ -423,7 +429,7 @@ export function mountAgent(api) {
   input.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); go(); } };
   input.oninput = () => { input.style.height = ""; input.style.height = Math.min(input.scrollHeight, 160) + "px"; };
   $("agStop").onclick = () => busy?.abort();
-  $("agNew").onclick = reset;
+  $("agNew").onclick = () => { reset(); $("agInput").focus(); };   // a new chat is for typing
   $("agClose").onclick = () => toggleAgent(false);
   $("agentBtn").onclick = () => toggleAgent();
   document.addEventListener("keydown", (e) => {
