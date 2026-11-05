@@ -6,7 +6,8 @@ import { mdMeta } from "./mdmeta.js";
 import { mountGraph } from "./graph.js";
 import { t, lang, langChoice, translatePage } from "./i18n.js";
 import * as local from "./localsync.js";
-import { mountAgent, toggleAgent, resetAgent, localModel, setLocalModel, localHttp, refreshMagpie } from "./agent.js";
+import { mountAgent, toggleAgent, resetAgent, localModel, setLocalModel, localHttp, refreshMagpie, askAgent } from "./agent.js";
+import { mountMenu } from "./ctxmenu.js";
 
 translatePage();
 
@@ -1152,6 +1153,7 @@ async function saveFile(p) {
 // ---------- assistant (public/agent.js) ----------
 let openSettings = () => {};   // set with the settings dialog below; takes the id of a section to scroll to
 // Everything the assistant's tools may use. Its edits arrive here only after the user pressed 应用.
+mountMenu({ ask: (text, _from, question) => askAgent(text, question) });
 mountAgent({
   openSettings: (sec) => openSettings(sec),
   notes: visible, files: () => files, titleOf, isText: isEditable, fileText,

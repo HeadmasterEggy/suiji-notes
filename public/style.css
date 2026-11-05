@@ -875,3 +875,19 @@ label.set-row { cursor: pointer; }
   :root[data-style="terminal"] .ebar .p-back { border-radius: 6px; }
   :root[data-style="paper"] .ebar :is(.p-back, .p-acts) { -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
+
+/* Right-click menu in a document (ctxmenu.js). */
+.cm { position: fixed; z-index: 200; min-width: 190px; padding: 5px; border-radius: 12px; background: var(--glass-strong); display: grid; gap: 1px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .18), 0 0 0 1px var(--line); animation: fade .12s ease; }
+.cm-item { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 6px 10px; border: 0; border-radius: 7px;
+  background: none; color: var(--ink); font: 13px var(--font-body); text-align: left; cursor: default; }
+.cm-item small { color: var(--muted); font-size: 12px; }
+.cm-item:not(:disabled):hover, .cm-item:not(:disabled):focus-visible { background: var(--accent); color: var(--on-accent); outline: none; }
+.cm-item:not(:disabled):hover small { color: inherit; opacity: .8; }
+.cm-item:disabled { color: var(--muted); opacity: .55; }
+.cm-sep { height: 1px; margin: 4px 8px; background: var(--line); }
+/* The passage attached to the next message, and in a sent one. */
+.ag-quote { display: flex; align-items: flex-start; gap: 6px; margin: 0 12px; padding: 8px 6px 8px 10px; border-left: 3px solid var(--accent);
+  border-radius: 8px; background: var(--accent-soft); }
+.ag-quote blockquote { flex: 1; margin: 0; max-height: 84px; overflow: hidden; font-size: 12.5px; line-height: 1.5; color: var(--muted); white-space: pre-wrap; }
+.ag-cite { margin: 0 0 6px; padding-left: 8px; border-left: 2px solid currentColor; opacity: .75; font-size: 12.5px; white-space: pre-wrap; }

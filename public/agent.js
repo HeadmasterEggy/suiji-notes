@@ -338,11 +338,19 @@ async function runTool(c, bubble) {
   }
 }
 async function send(text) {
-  if (busy || !text.trim()) return;
+  const q = quote;
+  if (busy || !text.trim() && !q) return;
+  if (!text.trim()) text = t("解释一下这段内容。");
+  setQuote(null);
   const log = $("agLog");
   $("agEmpty")?.remove();
-  log.append(el("div", "ag-user", text));
-  messages.push({ role: "user", content: [{ type: "text", text }] });
+  const mine = el("div", "ag-user");
+  if (q) mine.append(el("blockquote", "ag-cite", q.text.length > 400 ? q.text.slice(0, 400) + "…" : q.text));
+  mine.append(text);
+  log.append(mine);
+  // The quoted passage goes to the model in full, with where it is from.
+  const said = q ? text + "\n\n" + t("引用的内容（来自「{title}」）：", { title: q.title || t("无标题") }) + "\n\"\"\"\n" + q.text + "\n\"\"\"" : text;
+  messages.push({ role: "user", content: [{ type: "text", text: said }] });
   const bubble = el("div", "ag-bot"); log.append(bubble);
   busy = new AbortController(); setBusy(true); scroll();
   try {
@@ -373,7 +381,7 @@ function setBusy(on) {
 }
 const scroll = () => { const l = $("agLog"); l.scrollTop = l.scrollHeight; };
 function reset() {
-  busy?.abort(); messages = [];
+  busy?.abort(); messages = []; setQuote(null);
   $("agLog").replaceChildren(empty());
 }
 function empty() {
@@ -383,6 +391,20 @@ function empty() {
     const b = el("button", "ghost bordered small", q); b.type = "button"; b.onclick = () => send(q); box.append(b);
   }
   return box;
+}
+
+// Text selected in a document, attached to the next message (right-click → 问助手, or ⌘J with a selection).
+let quote = null;
+function setQuote(q) {
+  quote = q;
+  const box = $("agQuote");
+  box.hidden = !q;
+  box.querySelector("blockquote").textContent = q ? (q.text.length > 240 ? q.text.slice(0, 240) + "…" : q.text) : "";
+}
+export function askAgent(text, question) {
+  setQuote({ text: text.trim().slice(0, 20000), title: app.context()?.title || "" });
+  toggleAgent(true);
+  if (question) send(question);
 }
 
 export function toggleAgent(force) {
@@ -404,7 +426,14 @@ export function mountAgent(api) {
   $("agNew").onclick = reset;
   $("agClose").onclick = () => toggleAgent(false);
   $("agentBtn").onclick = () => toggleAgent();
-  document.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") { e.preventDefault(); toggleAgent(); } });
+  document.addEventListener("keydown", (e) => {
+    if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "j") return;
+    e.preventDefault();
+    const ta = e.target.closest?.("textarea.p-ta");
+    const sel = ta ? ta.value.slice(ta.selectionStart, ta.selectionEnd) : getSelection().anchorNode?.parentElement?.closest(".p-preview") ? String(getSelection()) : "";
+    if (sel.trim()) askAgent(sel); else toggleAgent();
+  });
+  $("agQuote").querySelector("button").onclick = () => { setQuote(null); input.focus(); };
   // Links the assistant writes as [title](suiji:ID) open that document.
   $("agLog").addEventListener("click", (e) => {
     const a = e.target.closest('a[href^="#suiji:"]');

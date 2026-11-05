@@ -273,7 +273,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "suijiFs")
     // Keep the page (and so the sync) running at full speed while the window is closed or hidden.
     if #available(macOS 14.0, *) { config.preferences.inactiveSchedulingPolicy = .none }
+    config.preferences.setValue(true, forKey: "developerExtrasEnabled")   // 检查元素 in the system menu (⇧ + right-click)
     web = WKWebView(frame: .zero, configuration: config)
+    if #available(macOS 13.3, *) { web.isInspectable = true }
     web.navigationDelegate = self; web.uiDelegate = self
     web.allowsBackForwardNavigationGestures = false
     web.allowsMagnification = true
@@ -304,6 +306,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
   }
 
   @objc func showWindow() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
+  // WebKit's inspector, like a browser's developer tools. WebKit only opens it from its own menu, so this
+  // reaches its private inspector object; if a later macOS drops that, ⇧ + right-click → 检查元素 still works.
+  @objc func showInspector() {
+    guard let i = web.value(forKey: "_inspector") as? NSObject, i.responds(to: Selector(("show"))) else { NSSound.beep(); return }
+    i.perform(Selector(("show")))
+  }
+
   @objc func reload() { web.reload() }
   @objc func zoomIn() { web.pageZoom = min(web.pageZoom + 0.1, 2) }
   @objc func zoomOut() { web.pageZoom = max(web.pageZoom - 0.1, 0.6) }
@@ -432,7 +441,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                mi(L("粘贴", "Paste"), #selector(NSText.paste(_:)), "v"), mi(L("全选", "Select All"), #selector(NSText.selectAll(_:)), "a")])
     sub(L("显示", "View"), [mi(L("重新载入", "Reload"), #selector(reload), "r"), .separator(),
                mi(L("放大", "Zoom In"), #selector(zoomIn), "="), mi(L("缩小", "Zoom Out"), #selector(zoomOut), "-"), mi(L("实际大小", "Actual Size"), #selector(zoomReset), "0"), .separator(),
-               mi(L("进入全屏幕", "Enter Full Screen"), #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control])])
+               mi(L("进入全屏幕", "Enter Full Screen"), #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]), .separator(),
+               mi(L("网页检查器", "Web Inspector"), #selector(showInspector), "i", [.command, .option])])
     sub(L("窗口", "Window"), [mi(L("最小化", "Minimize"), #selector(NSWindow.performMiniaturize(_:)), "m"), mi(L("关闭窗口", "Close Window"), #selector(NSWindow.performClose(_:)), "w"),
                .separator(), mi(L("随记", "Suiji"), #selector(showWindow), "1")])
     NSApp.mainMenu = main
