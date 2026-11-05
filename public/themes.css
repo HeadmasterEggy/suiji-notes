@@ -1,11 +1,11 @@
 /* More styles, each in light and dark (data-mode). Loaded after style.css; same variables, same hooks.
-   ink 水墨 · eink 墨水屏 · notebook 手帐 · swiss 瑞士 · neon 霓虹 · blueprint 蓝图 · clay 粘土 · sunset 日落 */
+   ink 水墨 · eink 墨水屏 · notebook 手帐 · swiss 瑞士 · neon 霓虹 · blueprint 蓝图 · clay 粘土 · sunset 日落 · eyecare 护眼 */
 
 /* Styles without glass: panels are solid, nothing blurs behind them. */
-:root:is([data-style="ink"], [data-style="eink"], [data-style="notebook"], [data-style="swiss"], [data-style="blueprint"], [data-style="clay"]) .glass {
+:root:is([data-style="ink"], [data-style="eink"], [data-style="notebook"], [data-style="swiss"], [data-style="blueprint"], [data-style="clay"], [data-style="eyecare"]) .glass {
   -webkit-backdrop-filter: none; backdrop-filter: none;
 }
-:root:is([data-style="eink"], [data-style="swiss"], [data-style="blueprint"], [data-style="notebook"], [data-style="ink"]) .glass::after { display: none; }
+:root:is([data-style="eink"], [data-style="swiss"], [data-style="blueprint"], [data-style="notebook"], [data-style="ink"], [data-style="eyecare"]) .glass::after { display: none; }
 
 /* ---- 水墨: rice paper, layered ink, a vermilion seal ---- */
 :root[data-style="ink"] {
@@ -328,6 +328,40 @@
 :root[data-style="sunset"][data-mode="dark"] :is(.md-body blockquote, .md-body pre) { background: #2a2050; }
 :root[data-style="sunset"][data-mode="dark"] .graph { --g-node: #ff9a6b; --g-edge: rgba(255, 122, 176, .3); }
 
+/* ---- 护眼: easy on the eyes for long reading. Light is the soft bean green (豆沙绿) of eye-care screens:
+   no pure white or black, gentle contrast, roomy lines. Dark is warm and low in blue light: beige text on
+   a dim olive-brown, amber accents. Little motion and no glare. ---- */
+:root[data-style="eyecare"] {
+  --bg: #c7e3c9; --panel: #dcefdc; --ink: #2e3a2f; --muted: #5b6c5c; --line: #b3d1b5;
+  --accent: #3f7a52; --on-accent: #f1f8ef; --accent-soft: rgba(63, 122, 82, .12); --danger: #b5523f; --warn: #b08a3a;
+  --glass: #d6ebd6; --glass-strong: #e3f2e2; --rim: transparent; --rim-low: rgba(46, 58, 47, .12);
+  --shadow: 0 10px 24px -14px rgba(46, 70, 50, .35); --blob: transparent;
+  color-scheme: light;
+}
+:root[data-style="eyecare"] body { background: var(--bg); }
+:root[data-style="eyecare"] body::before, :root[data-style="eyecare"] body::after { display: none; }
+:root[data-style="eyecare"] .glass { border: 1px solid var(--rim-low); border-radius: 18px; box-shadow: var(--shadow); }
+:root[data-style="eyecare"] .md-body { line-height: 1.9; letter-spacing: .01em; }
+:root[data-style="eyecare"] .md-body a { color: var(--accent); }
+:root[data-style="eyecare"] .md-body mark { background: #e8e1a8; color: inherit; }
+:root[data-style="eyecare"] .md-body blockquote { background: rgba(63, 122, 82, .08); border-left-color: #7fb08c; }
+:root[data-style="eyecare"] :is(.md-body pre, .md-body :not(pre) > code) { background: rgba(46, 58, 47, .06); }
+:root[data-style="eyecare"] .tree-file[aria-current="true"] { background: var(--accent); color: var(--on-accent); box-shadow: none; }
+:root[data-style="eyecare"] .md-body { --mm-node: #e3f2e2; --mm-border: #3f7a52; --mm-line: #5b6c5c; --mm-cluster: #d2e8d3; }
+:root[data-style="eyecare"] .graph { --g-node: #3f7a52; --g-edge: rgba(46, 58, 47, .28); }
+:root[data-style="eyecare"][data-mode="dark"] {
+  --bg: #1d1e19; --panel: #25271f; --ink: #d9d0b6; --muted: #9a927b; --line: #3a3c31;
+  --accent: #c9a25a; --on-accent: #1d1e19; --accent-soft: rgba(201, 162, 90, .14); --danger: #d27d62; --warn: #c9a25a;
+  --glass: #23251e; --glass-strong: #2b2d24; --rim-low: rgba(217, 208, 182, .1);
+  --shadow: 0 10px 24px -14px rgba(0, 0, 0, .6);
+  color-scheme: dark;
+}
+:root[data-style="eyecare"][data-mode="dark"] .md-body mark { background: #5a4d2a; }
+:root[data-style="eyecare"][data-mode="dark"] .md-body blockquote { background: rgba(201, 162, 90, .07); border-left-color: #8a7444; }
+:root[data-style="eyecare"][data-mode="dark"] :is(.md-body pre, .md-body :not(pre) > code) { background: rgba(217, 208, 182, .06); }
+:root[data-style="eyecare"][data-mode="dark"] .md-body { --mm-node: #2b2d24; --mm-border: #c9a25a; --mm-line: #9a927b; --mm-cluster: #25271f; }
+:root[data-style="eyecare"][data-mode="dark"] .graph { --g-node: #c9a25a; --g-edge: rgba(217, 208, 182, .22); }
+
 /* Settings swatches */
 .swatch.ink-sw { background: radial-gradient(circle at 75% 70%, #1d1d1b 0 22%, transparent 60%), #f1ede4; box-shadow: inset -4px -4px 0 -2px #b23a2a; }
 .swatch.eink-sw { background: linear-gradient(#000 0 0) 20% 30% / 60% 2px no-repeat, linear-gradient(#000 0 0) 20% 55% / 45% 2px no-repeat, linear-gradient(#000 0 0) 20% 78% / 55% 2px no-repeat, #e9e9e6; border-color: #000; }
@@ -336,5 +370,6 @@
 .swatch.neon-sw { background: #0b0716; box-shadow: inset 0 0 0 4px #0b0716, inset 0 0 0 6px #ff3ec8, inset 0 0 10px 6px rgba(0, 240, 255, .6); }
 .swatch.blueprint-sw { background: linear-gradient(rgba(255, 255, 255, .3) 1px, transparent 1px) 0 0 / 8px 8px, linear-gradient(90deg, rgba(255, 255, 255, .3) 1px, transparent 1px) 0 0 / 8px 8px, #0f3a6b; }
 .swatch.clay-sw { border: 0; border-radius: 14px; background: linear-gradient(135deg, #c9b8ff, #ffc6da); box-shadow: inset 0 2px 1px rgba(255, 255, 255, .8), inset 0 -4px 8px rgba(90, 70, 160, .25); }
+.swatch.eyecare-sw { background: radial-gradient(circle at 72% 70%, #3f7a52 0 16%, transparent 17%), linear-gradient(#2e3a2f 0 0) 18% 30% / 50% 2px no-repeat, linear-gradient(#5b6c5c 0 0) 18% 50% / 38% 2px no-repeat, #c7e3c9; }
 .swatch.sunset-sw { background: radial-gradient(circle at 50% 120%, #fff3c4 0 30%, transparent 32%), linear-gradient(#ffb88c, #ff9a8b 45%, #9d8ad9); }
 @media (max-width: 720px) { :root[data-style="swiss"] .md-title { font-size: 1.9em; } }

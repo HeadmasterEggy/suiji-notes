@@ -63,5 +63,9 @@
         android:icon="@mipmap/ic_sunset" android:roundIcon="@mipmap/ic_sunset">
       <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
     </activity-alias>
+    <activity-alias android:name=".Eyecare" android:targetActivity=".MainActivity" android:exported="true" android:enabled="false"
+        android:icon="@mipmap/ic_eyecare" android:roundIcon="@mipmap/ic_eyecare">
+      <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+    </activity-alias>
   </application>
 </manifest>

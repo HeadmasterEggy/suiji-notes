@@ -37,7 +37,7 @@
 - **Local folders on the Mac.** Like an Obsidian vault: the Mac app reads and writes your folders on disk, so documents open instantly, even offline. Changes made in the app or in any other editor sync to the cloud, and edits made on the phone are written back to disk within a few seconds.
 - **Outline.** Every document has its own outline beside it: click a heading to jump, and the current section stays marked as you scroll. Drag its edge to resize it.
 - **Split panes.** Split up, down, left or right, by dragging a file onto a pane's edge or with ⌘-click. The layout is remembered.
-- **Styles.** Twelve looks, picked in 设置 (Settings), each in light and dark (follow the system, or pick one):
+- **Styles.** Thirteen looks, picked in 设置 (Settings), each in light and dark (follow the system, or pick one):
   - 玻璃 *Glass*: frosted, see-through panels
   - 纸张 *Paper*: warm paper and serif text; dark is paper by lamplight
   - 终端 *Terminal*: green on black, monospace; light is dark green on pale paper
@@ -50,10 +50,11 @@
   - 蓝图 *Blueprint*: white lines on drafting blue, with a coordinate grid
   - 粘土 *Clay*: soft pastels and puffy rounded cards
   - 日落 *Sunset*: an orange-to-violet sky; dark is the starry sky after dusk
+  - 护眼 *Eye care*: the soft bean green of eye-care screens, with gentle contrast; dark is warm and low in blue light
 
   The tab icon, the Mac app's Dock icon, the Android launcher icon and the graph change with the style.
 - **Settings.** 设置 at the bottom of the sidebar holds the style, light / dark, text size, the interface language (中文 / English), whether new documents show their outline, widths, sync, the local cache, the account and update checks.
-- **Assistant.** The ✦ button (or ⌘J) opens a chat panel on the right, a sheet from the bottom on phones. Ask it to find, summarise or edit your notes: it searches and reads them in the app, and every change it suggests appears as a diff. Nothing changes until you press 应用 (Apply). It runs on your own API key for any OpenAI-compatible service (DeepSeek, OpenRouter, Kimi, GLM, Qwen, OpenAI, or a custom address), set in 设置 → 助手 (Settings → Assistant). The key is stored encrypted in your account, so it works on every device.
+- **Assistant.** The ✦ button (or ⌘J) opens a chat panel on the right, a sheet from the bottom on phones. Ask it to find, summarise or edit your notes: it searches and reads them in the app, and every change it suggests appears as a diff. Nothing changes until you press 应用 (Apply). It runs on your own API key for any OpenAI-compatible service (DeepSeek, OpenRouter, Kimi, GLM, Qwen, OpenAI, or a custom address), set in 设置 → 助手 (Settings → Assistant). The key is stored encrypted in your account, so it works on every device. It can also use a model running on this computer (Magpie, Ollama, LM Studio): pick it under 这台电脑上 (On this computer). That setting stays on this device, and the page talks to the model directly. A browser must be allowed to reach it (in Magpie: Settings → Network and sharing → Web pages); the Mac app doesn't need this.
 - **Relationship graph.** Like Obsidian's graph, built from `[[wikilinks]]`, relative `.md` links and front-matter tags.
 - **Markdown.** Math (KaTeX), Mermaid diagrams, and Obsidian's `[[wikilinks]]` (shown by their alias, opening the linked note) and `==highlights==`.
 - **Blog links.** Every published post links to its page on the blog (`https://qiao1.top/posts/<abbrlink>.html`).

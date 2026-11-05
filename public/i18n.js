@@ -182,6 +182,8 @@ const EN = {
   "粘土": "Clay",
   "柔和、圆润、鼓起来": "Soft, round and puffy",
   "日落": "Sunset",
+  "豆沙绿，深色时暖光少蓝光": "Soft green; warm, low-blue at night",
+  "护眼": "Eye care",
   "暖橙到紫的天空": "An orange-to-violet sky",
   "本地文件夹": "Local folders",
   "直接读写这台 Mac 上的文件夹": "Folders on this Mac, read and written on disk",

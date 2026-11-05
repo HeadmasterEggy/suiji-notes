@@ -16,8 +16,8 @@ android {
     minSdk = 26
     targetSdk = 35
     manifestPlaceholders["cleartext"] = "false"
-    versionCode = 2
-    versionName = "1.7"
+    versionCode = 3
+    versionName = "1.8"
     buildConfigField("String", "HOME", "\"https://suiji-notes.vercel.app/\"")
   }
   buildFeatures { buildConfig = true }

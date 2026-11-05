@@ -132,7 +132,7 @@ class MainActivity : Activity() {
 
   // Switching the enabled launcher alias while the app is on screen can close it on some launchers,
   // so this waits until the app is in the background.
-  private val aliases = mapOf("paper" to "Paper", "terminal" to "Terminal", "blocks" to "Blocks", "ink" to "Ink", "eink" to "Eink", "notebook" to "Notebook", "swiss" to "Swiss", "neon" to "Neon", "blueprint" to "Blueprint", "clay" to "Clay", "sunset" to "Sunset")
+  private val aliases = mapOf("paper" to "Paper", "terminal" to "Terminal", "blocks" to "Blocks", "ink" to "Ink", "eink" to "Eink", "notebook" to "Notebook", "swiss" to "Swiss", "neon" to "Neon", "blueprint" to "Blueprint", "clay" to "Clay", "sunset" to "Sunset", "eyecare" to "Eyecare")
   private fun setIcon(s: String) {
     val want = aliases[s] ?: "Glass"
     for (a in aliases.values + "Glass") {
