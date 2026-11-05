@@ -22,6 +22,8 @@ export function mountGraph(host, data, { onOpen, isActive }) {
 
   let W = 0, H = 0, dpr = 1, raf = 0, alpha = 1;
   let view = { x: 0, y: 0, k: 1 }, userMoved = false, hover = null;
+  // Nodes picked from outside (the assistant): they and their neighbours stay lit and the view frames them.
+  let picked = null;   // { core: Set of node indices, near: core plus neighbours }
 
   // ---------- simulation ----------
   function tick() {
@@ -60,7 +62,11 @@ export function mountGraph(host, data, { onOpen, isActive }) {
   function fit() {
     if (!N.length || !W) return false;
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const p of N) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+    for (const p of picked ? [...picked.near].map((i) => N[i]) : N) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+    if (picked) {   // a few picked nodes: keep some of their surroundings in view
+      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, hw = Math.max((x1 - x0) / 2, 160), hh = Math.max((y1 - y0) / 2, 120);
+      x0 = cx - hw; x1 = cx + hw; y0 = cy - hh; y1 = cy + hh;
+    }
     const k = Math.min(W / (x1 - x0 + 80), H / (y1 - y0 + 80), 2.5);
     if (!Number.isFinite(k) || k <= 0) return false;
     const tx = -((x0 + x1) / 2) * k, ty = -((y0 + y1) / 2) * k;
@@ -83,11 +89,12 @@ export function mountGraph(host, data, { onOpen, isActive }) {
     ctx.translate(W / 2 + view.x, H / 2 + view.y);
     ctx.scale(view.k, view.k);
     const focus = hover, lit = focus ? focus.nb : null;
+    const sel = !focus && picked;
 
     ctx.lineWidth = ew / view.k;
     ctx.lineCap = square ? "square" : "butt";
     ctx.strokeStyle = edge;
-    ctx.globalAlpha = focus ? edgeAlpha * 0.35 : edgeAlpha;
+    ctx.globalAlpha = focus || sel ? edgeAlpha * 0.35 : edgeAlpha;
     ctx.beginPath();
     for (const [a, b] of E) { if (focus && (a === focus.i || b === focus.i)) continue; ctx.moveTo(N[a].x, N[a].y); ctx.lineTo(N[b].x, N[b].y); }
     ctx.stroke();
@@ -99,11 +106,17 @@ export function mountGraph(host, data, { onOpen, isActive }) {
       for (const j of focus.nb) { ctx.moveTo(focus.x, focus.y); ctx.lineTo(N[j].x, N[j].y); }
       ctx.stroke();
     }
+    if (sel) {
+      ctx.globalAlpha = 0.7; ctx.strokeStyle = ink; ctx.lineWidth = 1.2 * ew / view.k;
+      ctx.beginPath();
+      for (const [a, b] of E) if (sel.core.has(a) || sel.core.has(b)) { ctx.moveTo(N[a].x, N[a].y); ctx.lineTo(N[b].x, N[b].y); }
+      ctx.stroke();
+    }
 
     if (glow) { ctx.shadowColor = node; ctx.shadowBlur = glow; }
     for (const p of N) {
-      const on = p === focus || (lit && lit.has(p.i)), active = isActive(p);
-      ctx.globalAlpha = focus && !on ? 0.25 : 1;
+      const on = p === focus || (lit && lit.has(p.i)) || (sel && sel.near.has(p.i)), active = isActive(p);
+      ctx.globalAlpha = (focus || sel) && !on ? 0.18 : 1;
       const r = radius(p);
       dot(p.x, p.y, r);
       if (p.kind === "tag") { ctx.lineWidth = 1.2 / view.k; ctx.strokeStyle = on ? ink : node; ctx.fillStyle = bg; ctx.fill(); ctx.stroke(); }
@@ -124,8 +137,10 @@ export function mountGraph(host, data, { onOpen, isActive }) {
     const byDeg = (a, b) => b.deg - a.deg;
     const order = [];
     if (focus) order.push(focus);
+    if (sel) order.push(...[...sel.core].map((i) => N[i]));
     order.push(...N.filter((p) => p !== focus && isActive(p)));
     if (focus) order.push(...[...focus.nb].map((j) => N[j]).sort(byDeg).slice(0, 30));
+    else if (sel) order.push(...[...sel.near].map((i) => N[i]).sort(byDeg).slice(0, 40));
     else if (zoomLabels > 0.02) order.push(...[...N].sort(byDeg));
     const [vx0, vy0] = toWorld([0, 0]), [vx1, vy1] = toWorld([W, H]);
     const placed = [], seen = new Set();
@@ -134,7 +149,7 @@ export function mountGraph(host, data, { onOpen, isActive }) {
       if (seen.has(p)) continue;
       seen.add(p);
       if (p.x < vx0 || p.x > vx1 || p.y < vy0 || p.y > vy1) continue;
-      const main = p === focus;
+      const main = p === focus || (sel && sel.core.size <= 8 && sel.core.has(p.i));
       ctx.font = `${main ? 600 : 400} ${main ? fs * 1.15 : fs}px ${font}`;
       const max = main ? 48 : 22;
       const text = p.label.length > max ? p.label.slice(0, max - 1) + "…" : p.label;
@@ -147,8 +162,8 @@ export function mountGraph(host, data, { onOpen, isActive }) {
         ctx.beginPath(); ctx.roundRect(x, y, w, h, square ? 0 : h / 2); ctx.fill();
         ctx.globalAlpha = 1; ctx.fillStyle = ink;
       } else {
-        ctx.globalAlpha = focus || isActive(p) ? 0.9 : zoomLabels;
-        ctx.fillStyle = focus || isActive(p) ? ink : muted;
+        ctx.globalAlpha = focus || sel || isActive(p) ? 0.9 : zoomLabels;
+        ctx.fillStyle = focus || sel || isActive(p) ? ink : muted;
       }
       ctx.fillText(text, p.x, y + pad);
     }
@@ -255,7 +270,14 @@ export function mountGraph(host, data, { onOpen, isActive }) {
 
   return {
     redraw: kick,
-    fit() { userMoved = false; kick(); },
+    fit() { picked = null; userMoved = false; kick(); },
+    // Lights up the nodes for which match(node) is true, with their neighbours, and frames them; returns their labels.
+    focus(match) {
+      const core = new Set(N.filter((n) => match(n)).map((n) => n.i));
+      picked = core.size ? { core, near: new Set([...core].flatMap((i) => [i, ...N[i].nb])) } : null;
+      userMoved = false; kick();
+      return [...core].map((i) => N[i].label);
+    },
     destroy() { cancelAnimationFrame(raf); raf = -1; ro.disconnect(); scheme.removeEventListener("change", kick); },
   };
 }

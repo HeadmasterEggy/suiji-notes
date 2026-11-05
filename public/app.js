@@ -1162,9 +1162,21 @@ mountAgent({
   token: async () => (await sb.auth.getSession()).data.session?.access_token || "",
   async markdown(text) {
     await loadMarkdownLibs();
-    return window.DOMPurify.sanitize(window.marked.parse(text.replace(/\]\(suiji:/g, "](#suiji:"), { gfm: true, breaks: true }));
+    // Formulas as in documents: pulled out before Markdown sees them, code spans left alone.
+    const math = [], keep = (tex, display) => {
+      math.push(window.katex.renderToString(tex.trim(), { displayMode: display, throwOnError: false, output: "html" }));
+      return `KATEXMATH${math.length - 1}END`;
+    };
+    text = text.replace(/\]\(suiji:/g, "](#suiji:").split(/(```[\s\S]*?```|`[^`\n]+`)/g).map((part, i) => i % 2 ? part : part
+      .replace(/\$\$([\s\S]+?)\$\$/g, (_, t) => keep(t, true))
+      .replace(/\\\[([\s\S]+?)\\\]/g, (_, t) => keep(t, true))
+      .replace(/\\\(([\s\S]+?)\\\)/g, (_, t) => keep(t, false))
+      .replace(/(?<![\\$\w])\$(?!\s)([^\n$]+?)(?<![\s\\])\$(?!\d)/g, (_, t) => keep(t, false))).join("");
+    return window.DOMPurify.sanitize(window.marked.parse(text, { gfm: true, breaks: true }))
+      .replace(/KATEXMATH(\d+)END/g, (_, i) => math[i]);
   },
   open(kind, id) { if (isPhone.matches) toggleAgent(false); openIn(focused, kind, id); },
+  ui: { open: uiOpen, graph: uiGraph, sidebar: uiSidebar },
   newNote(body) {
     const now = new Date().toISOString(), id = crypto.randomUUID();
     store.notes[id] = { id, body, created_at: now, updated_at: now, deleted: false, dirty: true };
@@ -1230,7 +1242,7 @@ function showGraph(p) {
   const tagBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: p.graphTags ? t("隐藏标签") : t("显示标签") });
   tagBtn.onclick = () => { p.graphTags = !p.graphTags; p.shown = null; saveLayout(); renderPane(p); };
   const fitBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: t("居中") });
-  fitBtn.onclick = () => p.graph?.fit();
+  fitBtn.onclick = () => { p.graphFocus = null; p.graph?.fit(); };
   tools.append(tagBtn, fitBtn);
   wrap.append(tools);
   if (!data.nodes.length) wrap.append(Object.assign(document.createElement("p"), { className: "graph-empty", textContent: t("还没有 Markdown 文件或笔记。") }));
@@ -1247,6 +1259,84 @@ function showGraph(p) {
       else split(p, "row", false, { kind: n.kind, id: n.ref });
     },
   });
+  if (p.graphFocus) p.graph.focus(p.graphFocus);
+}
+
+// ---------- what the assistant can do in the interface ----------
+// Its show/open tools (public/agent.js). Each acts at once — nothing here changes a document — and returns
+// what happened, for the model.
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+// Opens a document where the user can see it: the pane already showing it, else beside a graph (or beside
+// the current document when asked), else the focused pane.
+function showItem(kind, id, beside) {
+  const have = [...panes.values()].find((x) => x.kind === kind && x.itemId === id);
+  if (have) { focusPane(have); app.dataset.view = "edit"; return have; }
+  if (!isPhone.matches && (beside || focused.kind === "graph") && focused.kind) {
+    const other = [...panes.values()].find((x) => x !== focused && x.kind !== "graph");
+    if (other && focused.kind === "graph" && !beside) { openIn(other, kind, id); return other; }
+    split(focused, "row", false, { kind, id }); return focused;
+  }
+  openIn(focused, kind, id); return focused;
+}
+const norm = (x) => String(x || "").replace(/^#+\s*/, "").replace(/\s+/g, " ").trim().toLowerCase();
+async function uiOpen({ kind, id, heading, beside }) {
+  if (isPhone.matches) toggleAgent(false);
+  const p = showItem(kind, id, beside);
+  if (!heading) return { opened: true };
+  const want = norm(heading);
+  if (kind === "note") {
+    const ta = p.ta, lines = ta.value.split("\n");
+    const i = lines.findIndex((l) => /^#{1,6}\s/.test(l) && norm(l).includes(want));
+    if (i < 0) return { opened: true, heading: "not found", headings: lines.filter((l) => /^#{1,6}\s/.test(l)).slice(0, 60) };
+    const at = lines.slice(0, i).join("\n").length + (i ? 1 : 0);
+    ta.focus(); ta.setSelectionRange(at, at + lines[i].length);
+    ta.scrollTop = Math.max(0, (i / lines.length) * ta.scrollHeight - 40);
+    return { opened: true, heading: lines[i] };
+  }
+  // A file renders asynchronously; wait for its headings.
+  for (let n = 0; n < 60 && !(p.itemId === id && p.heads.length); n++) await sleepMs(100);
+  const i = p.heads.findIndex((h) => norm(h.textContent).includes(want));
+  if (i < 0) return { opened: true, heading: "not found", headings: p.heads.slice(0, 60).map((h) => h.textContent.trim()) };
+  const h = p.heads[i], top = p.preview.getBoundingClientRect().top;
+  p.preview.scrollTo({ top: p.preview.scrollTop + h.getBoundingClientRect().top - top - 12, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  h.classList.remove("ag-flash"); void h.offsetWidth; h.classList.add("ag-flash");
+  return { opened: true, heading: h.textContent.trim() };
+}
+async function uiGraph({ ids, query, tag }) {
+  if (isPhone.matches) toggleAgent(false);
+  let g = [...panes.values()].find((x) => x.kind === "graph");
+  if (g) { focusPane(g); app.dataset.view = "edit"; }
+  else if (!isPhone.matches && focused.kind) { split(focused, "row", false, { kind: "graph", id: "all" }); g = focused; }
+  else { openIn(focused, "graph", "all"); g = focused; }
+  const idSet = new Set(ids || []), q = norm(query), tg = norm(tag).replace(/^#/, "");
+  const pathOf = new Map(files.map((f) => [f.id, fullPath(f).join("/").toLowerCase()]));
+  const match = (n) => idSet.has(n.ref)
+    || (q && n.kind !== "tag" && (n.label.toLowerCase().includes(q) || (pathOf.get(n.ref) || "").includes(q)))
+    || (tg && n.kind === "tag" && n.ref.toLowerCase() === tg);
+  if (tg && !g.graphTags) { g.graphTags = true; g.shown = null; }
+  g.graphFocus = idSet.size || q || tg ? match : null;
+  if (g.shown == null) renderPane(g);   // a fresh graph applies graphFocus when it is built
+  const labels = g.graphFocus ? g.graph.focus(match) : (g.graph.fit(), []);
+  if (g.graphFocus && !labels.length) g.graphFocus = null;
+  saveLayout();
+  return { shown: true, focused: labels.length, nodes: labels.slice(0, 30) };
+}
+async function uiSidebar({ kind, id, folder, filter }) {
+  if (isPhone.matches) { toggleAgent(false); commitAll(); app.dataset.view = "list"; }
+  if (filter != null) { search.value = filter; renderList(); return { filtered: filter, matches: list.querySelectorAll(".tree-file").length }; }
+  search.value = "";
+  let segs = null;
+  if (kind === "note") expanded.add(NOTES_KEY);
+  else if (kind === "file") { const f = files.find((x) => x.id === id); if (!f) return { error: "no such file" }; segs = fullPath(f).slice(0, -1); }
+  else if (folder) segs = String(folder).split("/").filter(Boolean);
+  for (let i = 1; segs && i <= segs.length; i++) expanded.add(segs.slice(0, i).join("/"));
+  saveExpanded(); renderList();
+  const row = id ? list.querySelector(`.tree-file[data-id="${CSS.escape(id)}"]`)
+    : [...list.querySelectorAll(".tree-folder")].find((b) => b.nextElementSibling && segs && b.querySelector(".tree-name")?.textContent === segs.at(-1));
+  if (!row) return { error: "not found in the sidebar" };
+  row.scrollIntoView({ block: "center", behavior: "smooth" });
+  row.classList.remove("ag-flash"); void row.offsetWidth; row.classList.add("ag-flash");
+  return { shown: true };
 }
 
 function renderPane(p) {

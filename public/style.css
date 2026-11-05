@@ -791,6 +791,9 @@ label.set-row { cursor: pointer; }
   :root.agent-open .app { margin-right: 0; }
   .ag-form textarea { font-size: 16px; }   /* iOS zooms into smaller inputs */
 }
+/* What the assistant just showed: a heading in a document, a row in the sidebar. */
+.ag-flash { animation: ag-flash 2.2s var(--ease) 1; border-radius: 6px; }
+@keyframes ag-flash { 0%, 30% { background: color-mix(in srgb, var(--accent) 22%, transparent); } 100% { background: transparent; } }
 @keyframes sheet { from { transform: translateY(40%); opacity: 0; } to { transform: none; opacity: 1; } }
 :root[data-style="blocks"] .agent { border-radius: 0; }
 :root:is([data-style="terminal"], [data-style="swiss"], [data-style="eink"], [data-style="blueprint"]) :is(.ag-card, .ag-user, .ag-form textarea) { border-radius: 4px; }

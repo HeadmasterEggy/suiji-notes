@@ -194,9 +194,24 @@ async function step(bubble, signal) {
   messages.push({ role: "assistant", content: [...(text ? [{ type: "text", text }] : []), ...calls.map((c) => ({ type: "tool-call", toolCallId: c.id, toolName: c.name, input: c.input }))] });
   return calls;
 }
+// Tools that act in the interface right away: they only show things, never change a document.
+const UI = {
+  open_document({ id, heading, beside }) {
+    const d = find(id);
+    return d ? app.ui.open({ kind: d.kind, id, heading, beside }) : { error: "no document with id " + id };
+  },
+  show_graph: ({ ids, query, tag }) => app.ui.graph({ ids, query, tag }),
+  show_in_sidebar({ id, folder, filter }) {
+    if (id) { const d = find(id); return d ? app.ui.sidebar({ kind: d.kind, id }) : { error: "no document with id " + id }; }
+    return app.ui.sidebar({ folder, filter });
+  },
+};
 const CHIP = {
   search: (i) => t("搜索「{q}」", { q: i.query }), list: (i) => i.folder ? t("查看「{f}」", { f: i.folder }) : t("查看所有文件夹"),
   read: (i) => t("读取「{n}」", { n: find(i.id)?.title || i.id }), propose_edit: () => t("准备修改"), propose_note: () => t("准备新建笔记"),
+  open_document: (i) => t("打开「{n}」", { n: find(i.id)?.title || i.id }) + (i.heading ? " · " + i.heading : ""),
+  show_graph: (i) => i.ids?.length || i.query || i.tag ? t("在图谱中聚焦") : t("打开关系图谱"),
+  show_in_sidebar: (i) => i.filter != null ? t("在侧边栏筛选「{q}」", { q: i.filter }) : t("在侧边栏中定位"),
 };
 async function runTool(c, bubble) {
   const chip = el("div", "ag-chip", CHIP[c.name]?.(c.input || {}) || c.name);
@@ -204,7 +219,8 @@ async function runTool(c, bubble) {
   try {
     const i = c.input || {};
     const out = c.name === "search" ? await search(i) : c.name === "list" ? list(i) : c.name === "read" ? await read(i)
-      : c.name === "propose_edit" ? await proposeEdit(i, bubble) : c.name === "propose_note" ? proposeNote(i, bubble) : { error: "unknown tool" };
+      : c.name === "propose_edit" ? await proposeEdit(i, bubble) : c.name === "propose_note" ? proposeNote(i, bubble)
+      : c.name in UI ? await UI[c.name](i) : { error: "unknown tool" };
     if (c.name === "search" && !out.error) chip.textContent += " · " + t("{n} 条", { n: out.total });
     if (out.error) chip.classList.add("bad");
     return out;
