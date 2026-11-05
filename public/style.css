@@ -10,7 +10,7 @@
   --accent-soft: rgba(0, 0, 0, .05);
   --danger: #b3261e;
   --warn: #9a9a9a;
-  /* Liquid glass: translucent fill, bright rim, soft drop shadow over a slowly drifting backdrop. */
+  /* Liquid glass: translucent fill, bright rim, soft drop shadow over two still, blurred colour washes. */
   --glass: rgba(255, 255, 255, .42);
   --glass-strong: rgba(255, 255, 255, .78);
   --rim: rgba(255, 255, 255, .85);
@@ -49,9 +49,9 @@ body::before, body::after {
   width: 55vmax; height: 55vmax; filter: blur(60px);
   background: radial-gradient(circle at 50% 50%, var(--blob), transparent 65%);
 }
-body::before { top: -20vmax; left: -15vmax; animation: drift 26s ease-in-out infinite alternate; }
-body::after { bottom: -25vmax; right: -20vmax; animation: drift 32s ease-in-out infinite alternate-reverse; }
-@keyframes drift { from { transform: translate(0, 0) scale(1); } to { transform: translate(12vmax, 8vmax) scale(1.15); } }
+/* Still on purpose: moving them made every glass panel redo its backdrop blur each frame (≈30 % CPU when idle). */
+body::before { top: -20vmax; left: -15vmax; }
+body::after { bottom: -25vmax; right: -20vmax; }
 [hidden] { display: none !important; }
 .glass {
   position: relative; isolation: isolate;
