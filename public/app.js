@@ -664,17 +664,6 @@ function toPlace(p, at) {
   if (b) pv.scrollTop += b.getBoundingClientRect().top - pv.getBoundingClientRect().top + at.off;
   else pv.scrollTop = at.share * pv.scrollHeight;
 }
-// Redrawing the same document (a new theme for its diagrams, a sync, a file changed on disk) keeps the reader's
-// place, also while its diagrams and images settle, until they scroll themselves.
-function holdPlace(p, at, token) {
-  toPlace(p, at);
-  let moved = false;
-  const stop = () => { moved = true; }, on = ["wheel", "touchstart", "keydown", "pointerdown"];
-  for (const t of on) p.el.addEventListener(t, stop, { passive: true });
-  const ro = new ResizeObserver(() => { if (!moved && token === p.token) toPlace(p, at); });
-  for (const c of p.preview.children) ro.observe(c);
-  setTimeout(() => { ro.disconnect(); for (const t of on) p.el.removeEventListener(t, stop); }, 2500);
-}
 
 async function showFile(f, p) {
   const token = ++p.token, preview = p.preview, again = p.shownId === f.id;
@@ -683,9 +672,11 @@ async function showFile(f, p) {
   preview.classList.toggle("doc", md);
   const show = (el) => {
     if (token !== p.token) return;
-    const at = again && p.shownId === f.id && preview.scrollTop > 0 ? readingPlace(p) : null;
+    const at = again && p.place?.id === f.id ? p.place : null;
+    for (const c of preview.children) p.keep.unobserve(c);
     clearTimeout(wait); preview.replaceChildren(el); preview.scrollTop = 0; p.shownId = f.id;
-    if (at) holdPlace(p, at, token);
+    p.keep.observe(el);
+    if (at) { p.place = at; toPlace(p, at); }
     if (staleIds.has(f.id) && !retried.has(versionOf(f))) {
       retried.add(versionOf(f));
       setTimeout(() => { if (token === p.token) { p.shown = null; renderPane(p); } }, 5000);
@@ -1118,7 +1109,13 @@ function makePane(item) {
   });
   let spy = 0, settle = 0;
   p.ta.addEventListener("scroll", () => saveLater(), { passive: true });
+  // The reading place is noted on every scroll; when the pane or its document changes size without the reader
+  // scrolling (outline, font size, phone layout, a diagram or image settling), the view goes back to it.
+  let noting = 0;
+  p.keep = new ResizeObserver(() => { if (p.place && p.place.id === p.shownId && !p.fileEdit && p.preview.offsetParent) toPlace(p, p.place); });
+  p.keep.observe(p.preview);
   p.preview.addEventListener("scroll", () => {
+    if (!noting) noting = requestAnimationFrame(() => { noting = 0; if (p.shownId && p.preview.offsetParent) p.place = { ...readingPlace(p), id: p.shownId }; });
     saveLater();
     clearTimeout(settle); settle = setTimeout(() => { p.tocLock = null; }, 200);
     if (!spy) spy = requestAnimationFrame(() => { spy = 0; markHeading(p); });
@@ -1137,6 +1134,9 @@ function makePane(item) {
       p.edit.disabled = true;
       await commit(p); await p.saving;
       p.edit.disabled = false;
+      // Back in the preview at the place the editor was scrolled to (if it was moved), else where it was.
+      const share = p.ta.scrollTop / Math.max(1, p.ta.scrollHeight);
+      if (p.place && Math.abs(share - (p.editShare ?? share)) > 0.005) p.place = { i: -1, off: 0, share, id: p.shownId };
       p.fileEdit = false; p.shown = null; renderPane(p); return;
     }
     const f = files.find((x) => x.id === p.itemId);
@@ -1152,7 +1152,11 @@ function makePane(item) {
     if (text === null) { showNote(t("读取文件失败，请检查网络。"), "err"); return; }
     p.fileBase = text;
     p.ta.value = p.fileBase; p.fileEdit = true; p.editing = false;
-    renderPane(p); p.ta.focus();
+    renderPane(p);
+    // The editor opens where the preview was, with the cursor on that line rather than at the top.
+    const share = p.place?.share || 0, v = p.ta.value, at = share ? v.indexOf("\n", Math.floor(share * v.length)) + 1 : 0;
+    p.ta.focus({ preventScroll: true }); p.ta.setSelectionRange(at, at);
+    p.ta.scrollTop = share * p.ta.scrollHeight; p.editShare = p.ta.scrollTop / Math.max(1, p.ta.scrollHeight);
   };
 
 
@@ -1495,7 +1499,7 @@ function openIn(p, kind, id, fromHist) {
   navState(p);
   commit(p); closeMenu(p);
   const left = p.kind === "note" && p.itemId;
-  p.kind = kind; p.itemId = id; p.shown = null; p.shownId = null; p.fileEdit = false; p.editing = false;
+  p.kind = kind; p.itemId = id; p.shown = null; p.shownId = null; p.place = null; p.fileEdit = false; p.editing = false;
   if (kind === "note") p.ta.value = store.notes[id]?.body || "";
   saveLayout(); markCurrent(); renderPane(p); dropIfEmpty(left);
   if (kind === "note" && !isPhone.matches) p.ta.focus();
@@ -1608,7 +1612,7 @@ function closePane(p) {
   const leaf = findLeaf(layout, p), parent = parentOf(layout, leaf);
   const sibling = parent.a === leaf ? parent.b : parent.a;
   layout = replaceNode(layout, parent, sibling);
-  panes.delete(p.id); p.el.remove(); p.graph?.destroy(); paneSizes.unobserve(p.el);
+  panes.delete(p.id); p.el.remove(); p.graph?.destroy(); paneSizes.unobserve(p.el); p.keep.disconnect();
   if (focused === p) focused = firstPane(sibling);
   buildLayout(); saveLayout(); render();
   if (p.kind === "note") dropIfEmpty(p.itemId);
@@ -1650,7 +1654,7 @@ function buildLayout() {
   // Moving a pane's element to a new place in the page resets its scrolling, so note it first and put it back.
   // As a share of the way through: a pane that gets narrower or wider reflows its text.
   const at = (el) => el.scrollTop / Math.max(1, el.scrollHeight);
-  const kept = [...panes.values()].map((p) => [p, at(p.ta), p.preview.scrollTop > 0 && readingPlace(p), p.tocList?.scrollTop || 0]);
+  const kept = [...panes.values()].map((p) => [p, at(p.ta), p.place?.id === p.shownId && p.place, p.tocList?.scrollTop || 0]);
   const mk = (node) => {
     if (node.pane) { node.pane.el.classList.toggle("focused", node.pane === focused); return node.pane.el; }
     const box = document.createElement("div");
