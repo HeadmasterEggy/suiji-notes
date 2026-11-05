@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The whole artwork is the background layer, so it fills the launcher's shape edge to edge. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+  <background android:drawable="@drawable/icon_blueprint" />
+  <foreground android:drawable="@android:color/transparent" />
+</adaptive-icon>

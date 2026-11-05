@@ -37,11 +37,19 @@
 - **Local folders on the Mac.** Like an Obsidian vault: the Mac app reads and writes your folders on disk, so documents open instantly, even offline. Changes made in the app or in any other editor sync to the cloud, and edits made on the phone are written back to disk within a few seconds.
 - **Outline.** Every document has its own outline beside it: click a heading to jump, and the current section stays marked as you scroll. Drag its edge to resize it.
 - **Split panes.** Split up, down, left or right, by dragging a file onto a pane's edge or with ⌘-click. The layout is remembered.
-- **Styles.** Four looks, picked in 设置 (Settings), each in light and dark (follow the system, or pick one):
+- **Styles.** Twelve looks, picked in 设置 (Settings), each in light and dark (follow the system, or pick one):
   - 玻璃 *Glass*: frosted, see-through panels
   - 纸张 *Paper*: warm paper and serif text; dark is paper by lamplight
   - 终端 *Terminal*: green on black, monospace; light is dark green on pale paper
   - 方块 *Blocks*: a pixel-art world of sky, grass and stone panels; dark is night, with a moon
+  - 水墨 *Ink*: rice paper, layered ink and a red seal
+  - 墨水屏 *E-ink*: black, white and greys, with no motion or translucency
+  - 手帐 *Notebook*: dot-grid paper, washi tape and highlighter
+  - 瑞士 *Swiss*: a strict grid, bold sans-serif and one red
+  - 霓虹 *Neon*: glowing magenta and cyan signs at night; light is daytime
+  - 蓝图 *Blueprint*: white lines on drafting blue, with a coordinate grid
+  - 粘土 *Clay*: soft pastels and puffy rounded cards
+  - 日落 *Sunset*: an orange-to-violet sky; dark is the starry sky after dusk
 
   The tab icon, the Mac app's Dock icon, the Android launcher icon and the graph change with the style.
 - **Settings.** 设置 at the bottom of the sidebar holds the style, light / dark, text size, the interface language (中文 / English), whether new documents show their outline, widths, sync, the local cache, the account and update checks.

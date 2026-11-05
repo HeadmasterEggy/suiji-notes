@@ -31,5 +31,37 @@
         android:icon="@mipmap/ic_blocks" android:roundIcon="@mipmap/ic_blocks">
       <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
     </activity-alias>
+    <activity-alias android:name=".Ink" android:targetActivity=".MainActivity" android:exported="true" android:enabled="false"
+        android:icon="@mipmap/ic_ink" android:roundIcon="@mipmap/ic_ink">
+      <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".Eink" android:targetActivity=".MainActivity" android:exported="true" android:enabled="false"
+        android:icon="@mipmap/ic_eink" android:roundIcon="@mipmap/ic_eink">
+      <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".Notebook" android:targetActivity=".MainActivity" android:exported="true" android:enabled="false"
+        android:icon="@mipmap/ic_notebook" android:roundIcon="@mipmap/ic_notebook">
+      <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".Swiss" android:targetActivity=".MainActivity" android:exported="true" android:enabled="false"
+        android:icon="@mipmap/ic_swiss" android:roundIcon="@mipmap/ic_swiss">
+      <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".Neon" android:targetActivity=".MainActivity" android:exported="true" android:enabled="false"
+        android:icon="@mipmap/ic_neon" android:roundIcon="@mipmap/ic_neon">
+      <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".Blueprint" android:targetActivity=".MainActivity" android:exported="true" android:enabled="false"
+        android:icon="@mipmap/ic_blueprint" android:roundIcon="@mipmap/ic_blueprint">
+      <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".Clay" android:targetActivity=".MainActivity" android:exported="true" android:enabled="false"
+        android:icon="@mipmap/ic_clay" android:roundIcon="@mipmap/ic_clay">
+      <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".Sunset" android:targetActivity=".MainActivity" android:exported="true" android:enabled="false"
+        android:icon="@mipmap/ic_sunset" android:roundIcon="@mipmap/ic_sunset">
+      <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+    </activity-alias>
   </application>
 </manifest>

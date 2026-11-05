@@ -174,7 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
   // The page reports its style and language: {style, lang}.
   func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) {
     guard fromApp(m), let body = m.body as? [String: Any] else { return }
-    if let style = body["style"] as? String, ["", "paper", "terminal", "blocks"].contains(style),
+    if let style = body["style"] as? String, ["", "paper", "terminal", "blocks", "ink", "eink", "notebook", "swiss", "neon", "blueprint", "clay", "sunset"].contains(style),
        style != UserDefaults.standard.string(forKey: "iconStyle") ?? "" { setDockIcon(style) }
     if let lang = body["lang"] as? String, ["zh", "en"].contains(lang), lang != appLang {
       appLang = lang; UserDefaults.standard.set(lang, forKey: "lang")

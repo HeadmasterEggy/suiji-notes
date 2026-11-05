@@ -14,7 +14,7 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 # Launcher icons: the site's icon for each style, square (the launcher shapes it), at 108 dp for xxxhdpi.
 # Launchers show only the middle 72 dp, so the icon goes there at full size, over a blown-up copy of itself
 # that fills the edges the launcher may reveal when it moves the icon.
-for s in glass paper terminal blocks; do
+for s in glass paper terminal blocks ink eink notebook swiss neon blueprint clay sunset; do
   src=../public/icon-$s.svg; [ $s = glass ] && src=../public/icon.svg
   art=$(sed -e 's/rx="22"/rx="0"/g' "$src" | base64)
   printf '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="432" height="432"><image width="432" height="432" xlink:href="data:image/svg+xml;base64,%s"/><image x="72" y="72" width="288" height="288" xlink:href="data:image/svg+xml;base64,%s"/></svg>' "$art" "$art" \

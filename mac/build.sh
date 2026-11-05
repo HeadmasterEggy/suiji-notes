@@ -4,9 +4,9 @@
 #   --publish  also writes public/mac/Suiji.zip and version.json; installed apps update to it after the next deploy
 # Raise BUILD for every release you publish; installed apps only update to a higher BUILD.
 set -e
-VERSION=${VERSION:-1.6}
-BUILD=${BUILD:-6}
-NOTES="Local folders: the app reads and writes your folders on disk and syncs them itself, no Node needed (Settings → Local folders). 本地文件夹：App 直接读写磁盘上的文件夹并自己同步，不再需要 Node（设置 → 本地文件夹）。"
+VERSION=${VERSION:-1.7}
+BUILD=${BUILD:-7}
+NOTES="Eight new styles, each with its own Dock icon: Ink, E-ink, Notebook, Swiss, Neon, Blueprint, Clay and Sunset. 八种新风格，各有自己的 Dock 图标：水墨、墨水屏、手帐、瑞士、霓虹、蓝图、粘土、日落。"
 cd "$(dirname "$0")"
 APP="build/随记.app"
 rm -rf build && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -24,7 +24,7 @@ for s in 16 32 128 256 512; do
   d=$((s * 2)); sips -z $d $d AppIcon.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
-cp AppIcon-paper.png AppIcon-terminal.png AppIcon-blocks.png "$APP/Contents/Resources/"   # Dock icons for the other styles
+cp AppIcon-*.png "$APP/Contents/Resources/"   # Dock icons for the other styles
 rm -rf "$ICONSET"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
