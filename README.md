@@ -53,6 +53,7 @@
 
   The tab icon, the Mac app's Dock icon, the Android launcher icon and the graph change with the style.
 - **Settings.** 设置 at the bottom of the sidebar holds the style, light / dark, text size, the interface language (中文 / English), whether new documents show their outline, widths, sync, the local cache, the account and update checks.
+- **Assistant.** The ✦ button (or ⌘J) opens a chat panel on the right, a sheet from the bottom on phones. Ask it to find, summarise or edit your notes: it searches and reads them in the app, and every change it suggests appears as a diff. Nothing changes until you press 应用 (Apply). The model runs through Vercel AI Gateway (DeepSeek by default).
 - **Relationship graph.** Like Obsidian's graph, built from `[[wikilinks]]`, relative `.md` links and front-matter tags.
 - **Markdown.** Math (KaTeX), Mermaid diagrams, and Obsidian's `[[wikilinks]]` (shown by their alias, opening the linked note) and `==highlights==`.
 - **Blog links.** Every published post links to its page on the blog (`https://qiao1.top/posts/<abbrlink>.html`).
@@ -90,6 +91,8 @@ npm run dev             # serves the app on port 5173
 npx vercel deploy --prod
 ```
 
+The assistant needs AI Gateway turned on for the Vercel team. To use your own DeepSeek key, add it under AI Gateway → Bring Your Own Key. To pick another model, set `AI_GATEWAY_MODEL` to any tool-using model id from `https://ai-gateway.vercel.sh/v1/models`.
+
 ### Mac app
 
 Requires the Xcode Command Line Tools.
@@ -119,6 +122,7 @@ The first run makes the signing key `android/suiji-release.keystore`, with its p
 |---|---|---|
 | Web app | `public/` | Plain HTML/JS, no framework, hosted on Vercel |
 | Data | Supabase | Postgres tables `notes` and `files`, a private storage bucket, and Realtime. Row-level security means each user sees only their own data. |
+| Assistant | `public/agent.js`, `api/agent.js` | The page runs the tools (search, read, propose an edit) on the notes it already has. The Vercel function checks the Supabase session and streams the model's next step through AI Gateway. |
 | Folder sync | `public/syncengine.js` | Syncs local folders with the cloud. The Mac app runs it in its page (`public/localsync.js`), through a file bridge limited to the chosen folders (`mac/LocalFiles.swift`); the Node agent `agent/suiji-sync.mjs` runs it without the app. |
 | Mac app | `mac/` | Native AppKit window around the web app, with access to the local folders and a menu bar item for the sync |
 | Android app | `android/` | WebView around the web app, with the back button, file picking, downloads and a launcher icon per style |

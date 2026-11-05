@@ -9,7 +9,8 @@
     "sync": "node agent/suiji-sync.mjs"
   },
   "dependencies": {
-    "@supabase/supabase-js": "2.45.4"
+    "@supabase/supabase-js": "2.45.4",
+    "ai": "7.0.163"
   },
   "devDependencies": {
     "pg": "8.13.1"

@@ -6,6 +6,7 @@ import { mdMeta } from "./mdmeta.js";
 import { mountGraph } from "./graph.js";
 import { t, lang, langChoice, translatePage } from "./i18n.js";
 import * as local from "./localsync.js";
+import { mountAgent, toggleAgent, resetAgent } from "./agent.js";
 
 translatePage();
 
@@ -1108,21 +1109,14 @@ const commitAll = () => panes.forEach(commit);
 const TEXT_EXT = ["md", "markdown", "txt", "csv", "log", "json", "yml", "yaml", "toml", "tex", "py", "js", "ts", "html", "css", "sh"];
 const isEditable = (f) => f.size < 2 * 1024 * 1024 && (f.mime.startsWith("text/") || /json|xml/.test(f.mime) || TEXT_EXT.includes(extOf(f.name)));
 
-async function saveFile(p) {
-  p.editing = false;
-  const f = files.find((x) => x.id === p.itemId), text = p.ta.value;
-  if (!f || text === p.fileBase) { setSync("ok", t("已同步")); return; }
-  setSync("saving", t("保存中…"));
+// Replaces a text file's content: on disk in the Mac app (the folder sync then uploads it), otherwise in the
+// cloud. Throws an error whose message is for the user.
+async function writeFileText(f, text) {
   if (local.localPath(f)) {
-    // Mac app: saved to disk; the folder sync uploads it, then the row's new version reaches loadFiles.
     try { await local.writeLocal(f, text); } catch (e) {
-      console.error(e); p.editing = true; setSync("err", t("保存失败"));
-      showNote(t("「{name}」没能写入磁盘：{msg}", { name: baseName(f.name), msg: e.message || e }), "err");
-      return;
+      console.error(e); throw new Error(t("「{name}」没能写入磁盘：{msg}", { name: baseName(f.name), msg: e.message || e }));
     }
-    p.fileBase = text; rendered.delete(versionOf(f));
-    setSync("ok", t("已同步")); showNote("");
-    if (!p.fileEdit) { p.shown = null; renderPane(p); }
+    rendered.delete(versionOf(f));
     return;
   }
   const blob = new Blob([text], { type: f.mime || "text/plain" });
@@ -1132,18 +1126,65 @@ async function saveFile(p) {
   const row = up.error ? up : await sb.from("files").update({ size: blob.size, updated_at: now, ...meta }).eq("id", f.id);
   if (up.error || row.error) {
     console.error(up.error || row.error);
-    p.editing = true;   // keep it unsaved so the next edit or blur retries
-    setSync("err", t("保存失败"));
-    showNote(t("「{name}」没保存上，请联网后再改一下或点「完成」重试。", { name: baseName(f.name) }), "err");
-    return;
+    throw new Error(t("「{name}」没保存上，请联网后再改一下或点「完成」重试。", { name: baseName(f.name) }));
   }
-  p.fileBase = text; Object.assign(f, { size: blob.size, updated_at: now }, meta);
+  Object.assign(f, { size: blob.size, updated_at: now }, meta);
   forgetUrls(f.path);
   await cacheText(f, text);   // the preview shows exactly what was saved, without downloading it again
-  p.shown = versionOf(f);   // the preview refreshes when editing ends, not now
+}
+
+async function saveFile(p) {
+  p.editing = false;
+  const f = files.find((x) => x.id === p.itemId), text = p.ta.value;
+  if (!f || text === p.fileBase) { setSync("ok", t("已同步")); return; }
+  setSync("saving", t("保存中…"));
+  try { await writeFileText(f, text); } catch (e) {
+    p.editing = true;   // keep it unsaved so the next edit or blur retries
+    setSync("err", t("保存失败")); showNote(e.message, "err");
+    return;
+  }
+  p.fileBase = text;
+  p.shown = local.localPath(f) ? null : versionOf(f);   // the preview refreshes when editing ends, not now
   setSync("ok", t("已同步")); showNote("");
   if (!p.fileEdit) renderPane(p);
 }
+
+// ---------- assistant (public/agent.js) ----------
+// Everything the assistant's tools may use. Its edits arrive here only after the user pressed 应用.
+mountAgent({
+  notes: visible, files: () => files, titleOf, isText: isEditable, fileText,
+  context() {
+    const p = focused, item = p?.kind === "note" ? store.notes[p.itemId] : p?.kind === "file" ? files.find((f) => f.id === p.itemId) : null;
+    return item ? { id: item.id, kind: p.kind, title: p.kind === "note" ? titleOf(item.body) : baseName(item.name) } : null;
+  },
+  token: async () => (await sb.auth.getSession()).data.session?.access_token || "",
+  async markdown(text) {
+    await loadMarkdownLibs();
+    return window.DOMPurify.sanitize(window.marked.parse(text.replace(/\]\(suiji:/g, "](#suiji:"), { gfm: true, breaks: true }));
+  },
+  open(kind, id) { if (isPhone.matches) toggleAgent(false); openIn(focused, kind, id); },
+  newNote(body) {
+    const now = new Date().toISOString(), id = crypto.randomUUID();
+    store.notes[id] = { id, body, created_at: now, updated_at: now, deleted: false, dirty: true };
+    persist(); render(); scheduleSync();
+    return id;
+  },
+  async apply(d, text) {
+    const open = [...panes.values()].filter((p) => p.itemId === d.id);
+    if (open.some((p) => p.editing || p.fileEdit)) throw new Error(t("这篇正在编辑，先点「完成」再应用。"));
+    if (d.kind === "note") {
+      const n = store.notes[d.id];
+      n.body = text; n.updated_at = new Date().toISOString(); n.dirty = true;
+      persist(); scheduleSync();
+      for (const p of open) p.ta.value = text;
+      render();
+      return;
+    }
+    await writeFileText(d.file, text);
+    for (const p of open) { p.shown = null; renderPane(p); }
+    render();
+  },
+});
 
 // ---------- graph ----------
 // Nodes: Markdown files and notes (plus tags when switched on). Edges: [[links]] and relative .md links,
@@ -1642,6 +1683,7 @@ function enter(session) {
   if (!session) {
     local.start(sb, null, { onChange: localChanged, onStatus: localStatus }).catch(console.error);
     store = { notes: {} }; files = []; filesLoaded = false; rendered.clear(); signed.clear();
+    resetAgent(); toggleAgent(false);
     // Another account may sign in on this device; its documents must not mix with these.
     caches.delete(FILE_CACHE).catch(() => {}); cacheIndex = null;
     return;

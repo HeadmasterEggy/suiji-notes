@@ -53,6 +53,7 @@
 
   浏览器标签页的图标、Mac App 的 Dock 图标、安卓桌面图标和关系图谱都会跟着风格变。
 - **设置：**侧边栏底部的「设置」里有风格、明暗、正文字号、界面语言（中文 / English）、新文档是否显示大纲、宽度、同步、本机缓存、账号和检查更新。
+- **助手：**点 ✦ 按钮（或按 ⌘J）在右侧打开对话面板，手机上从底部弹出。可以让它查找、总结或修改笔记：它会在 App 里搜索和阅读你的笔记，每处改动都先以对比的形式给你看，按「应用」之前什么都不会改。模型通过 Vercel AI Gateway 调用（默认 DeepSeek）。
 - **关系图谱：**类似 Obsidian 的图谱，根据 `[[双链]]`、相对 `.md` 链接和 front matter 里的标签生成。
 - **Markdown：**支持数学公式（KaTeX）、Mermaid 图，以及 Obsidian 的 `[[双链]]`（显示别名，点击打开对应笔记）和 `==高亮==`。
 - **博客链接：**每篇已发布的文章都链接到它在博客上的页面（`https://qiao1.top/posts/<abbrlink>.html`）。
@@ -90,6 +91,8 @@ npm run dev             # 在本地 5173 端口运行
 npx vercel deploy --prod
 ```
 
+助手需要在 Vercel 团队里打开 AI Gateway。想用自己的 DeepSeek key，在 AI Gateway → Bring Your Own Key 里添加。想换模型，把 `AI_GATEWAY_MODEL` 设成 `https://ai-gateway.vercel.sh/v1/models` 里任何支持工具调用的模型。
+
 ### Mac App
 
 需要 Xcode 命令行工具。
@@ -119,6 +122,7 @@ npx vercel deploy --prod
 |---|---|---|
 | 网页 App | `public/` | 纯 HTML/JS，不用框架，部署在 Vercel |
 | 数据 | Supabase | Postgres 表 `notes` 和 `files`、私有存储桶和 Realtime。行级安全保证每个人只能看到自己的数据。 |
+| 助手 | `public/agent.js`、`api/agent.js` | 工具（搜索、阅读、提出修改）在页面里对已有的笔记运行；Vercel 函数验证 Supabase 登录，再通过 AI Gateway 流式返回模型的下一步 |
 | 文件夹同步 | `public/syncengine.js` | 把本地文件夹和云端同步。Mac App 在页面里运行它（`public/localsync.js`），通过只能访问所选文件夹的文件桥（`mac/LocalFiles.swift`）；没有 App 时由 Node 同步程序 `agent/suiji-sync.mjs` 运行 |
 | Mac App | `mac/` | 用原生 AppKit 窗口装着网页 App，能访问本地文件夹，外加一个显示同步状态的菜单栏图标 |
 | 安卓 App | `android/` | 用 WebView 装着网页 App，支持返回键、选文件、下载，桌面图标跟随风格 |

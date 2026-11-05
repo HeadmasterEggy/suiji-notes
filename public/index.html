@@ -48,6 +48,7 @@
           <option value="new">从新到旧</option><option value="old">从旧到新</option>
         </select></label>
       <button class="ghost icon" id="graphBtn" type="button" title="图谱" aria-label="图谱"><svg viewBox="0 0 16 16"><circle cx="4" cy="4.5" r="1.8"/><circle cx="12" cy="3.5" r="1.5"/><circle cx="10" cy="11.5" r="2"/><circle cx="3.5" cy="12" r="1.3"/><path d="M5.7 5.2l2.9 4.7M5.8 4.3l4.7-.6M11.7 5l-1.2 4.5M4.7 11.8l3.3-.2"/></svg></button>
+      <button class="ghost icon" id="agentBtn" type="button" title="助手 (⌘J)" aria-label="助手"><svg viewBox="0 0 16 16"><path d="M8 1.8l1.3 3.4 3.4 1.3-3.4 1.3L8 11.2 6.7 7.8 3.3 6.5l3.4-1.3z"/><path d="M12.6 10.4l.6 1.5 1.5.6-1.5.6-.6 1.5-.6-1.5-1.5-.6 1.5-.6z"/></svg></button>
       <button class="ghost icon" id="foldBtn" type="button" title="全部折叠" aria-label="全部折叠"><svg viewBox="0 0 16 16"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg></button>
     </div>
     <footer class="foot">
@@ -63,6 +64,19 @@
   <div class="divider side-handle" id="sideHandle" role="separator" aria-orientation="vertical" aria-label="调整侧边栏宽度" title="拖动调整宽度，双击恢复" tabindex="0"></div>
   <main class="workspace" id="ws" data-multi="false"></main>
   <div class="scrim" id="scrim"></div>
+  <aside class="agent glass" id="agPanel" hidden aria-label="助手">
+    <header class="ag-head">
+      <b>助手</b>
+      <button class="ghost bordered small" id="agNew" type="button">新对话</button>
+      <button class="ghost icon" id="agClose" type="button" title="关闭" aria-label="关闭"><svg viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg></button>
+    </header>
+    <div class="ag-log" id="agLog" aria-live="polite"></div>
+    <form class="ag-form" id="agForm">
+      <textarea id="agInput" rows="1" placeholder="问问你的笔记…" aria-label="给助手的消息"></textarea>
+      <button class="btn-primary small" id="agSend" type="submit">发送</button>
+      <button class="ghost bordered small" id="agStop" type="button" hidden>停止</button>
+    </form>
+  </aside>
 </div>
 <div class="dropzone" id="dropzone" hidden><div>松开即可上传到随记</div></div>
 
