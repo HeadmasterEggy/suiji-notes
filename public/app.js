@@ -287,10 +287,25 @@ function loadCacheIndex(store) {
   }).catch(() => new Map());
 }
 const inflight = new Map();   // version -> Promise<text>
+const bodies = new Map();     // id -> lowercased text of every text file read so far, for search
 function fileText(f) {
   const v = versionOf(f);
-  if (!inflight.has(v)) inflight.set(v, readText(f).finally(() => inflight.delete(v)));
+  if (!inflight.has(v)) inflight.set(v, readText(f).then((text) => { bodies.set(f.id, text.toLowerCase()); return text; }).finally(() => inflight.delete(v)));
   return inflight.get(v);
+}
+// Search also looks inside text files: the first search reads every one this device already has (cached
+// copies, the Mac app's files on disk) without downloading anything, then shows the results again.
+let warming = null;
+function warmBodies() {
+  return warming ||= (async () => {
+    let index = new Map();
+    try { index = await loadCacheIndex(await caches.open(FILE_CACHE)); } catch {}
+    for (const f of files) {
+      if (!isTextish(f) || bodies.has(f.id)) continue;
+      const cached = index.get(f.id)?.url.endsWith("__files/" + encodeURIComponent(versionOf(f)));
+      if (cached || local.localPath(f)) await fileText(f).catch(() => {});
+    }
+  })().finally(() => { if (search.value.trim()) renderList(); });
 }
 // Storage can serve the previous copy for a moment after an upload, so reads bypass caches and must match
 // the size in the row; a mismatched read is retried and never cached under the new version. If it is still
@@ -855,7 +870,7 @@ function renderList() {
   const notes = orderNotes(visible());
   const hitNotes = q ? notes.filter((n) => n.body.toLowerCase().includes(q)) : notes;
   const tag = q.startsWith("#") && q.slice(1);   // "#name" also finds files whose front matter has that tag
-  const hitFiles = q ? files.filter((f) => fullPath(f).join("/").toLowerCase().includes(q) || (tag && (f.tags || []).some((x) => x.toLowerCase() === tag))) : files;
+  const hitFiles = q ? files.filter((f) => fullPath(f).join("/").toLowerCase().includes(q) || (tag && (f.tags || []).some((x) => x.toLowerCase() === tag)) || bodies.get(f.id)?.includes(q)) : files;
   if (!hitNotes.length && !hitFiles.length) {
     const li = document.createElement("li");
     li.className = "empty";
@@ -871,7 +886,10 @@ function renderList() {
   li.className = "tree";
   if (q) {
     for (const n of hitNotes) li.append(noteRow(n, 0, t("随手记")));
-    for (const f of orderFiles(hitFiles)) li.append(fileRow(f, 0, fullPath(f).slice(0, -1).join("/")));
+    // Files whose path matches come before those that only mention the word inside.
+    const byPath = (f) => fullPath(f).join("/").toLowerCase().includes(q);
+    const ranked = orderFiles(hitFiles);
+    for (const f of [...ranked.filter(byPath), ...ranked.filter((f) => !byPath(f))]) li.append(fileRow(f, 0, fullPath(f).slice(0, -1).join("/")));
   } else {
     if (notes.length) folderRow(li, NOTES_KEY, t("随手记"), notes.length, 0, (inner) => { for (const n of notes) inner.append(noteRow(n, 1)); });
     renderNode(buildTree(), [], 0, li);
@@ -1737,7 +1755,7 @@ window.addEventListener("paste", (e) => {
   const fl = e.clipboardData?.files;
   if (fl && fl.length) { e.preventDefault(); uploadFiles(fl); }
 });
-search.addEventListener("input", renderList);
+search.addEventListener("input", () => { renderList(); if (search.value.trim() && filesLoaded) warmBodies(); });
 // From the keyboard: Enter in the search box opens the first hit, ↓ moves into the list, and ↑ / ↓ step
 // through the rows that are showing (↑ from the top row goes back to the search box).
 const shownRows = () => [...list.querySelectorAll(".tree-row")].filter((r) => !r.closest(".drawer:not(.open)"));
@@ -2038,7 +2056,7 @@ function enter(session) {
   $("auth").hidden = !!session; app.hidden = !session;
   if (!session) {
     local.start(sb, null, { onChange: localChanged, onStatus: localStatus }).catch(console.error);
-    store = { notes: {} }; files = []; filesLoaded = filesErr = false; clearTimeout(filesRetry); rendered.clear(); signed.clear();
+    store = { notes: {} }; files = []; filesLoaded = filesErr = false; clearTimeout(filesRetry); bodies.clear(); warming = null; rendered.clear(); signed.clear();
     resetAgent(); toggleAgent(false);
     // Another account may sign in on this device; its documents must not mix with these.
     caches.delete(FILE_CACHE).catch(() => {}); cacheIndex = null;
