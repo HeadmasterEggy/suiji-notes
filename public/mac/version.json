@@ -1,1 +1,1 @@
-{"version":"2.1","build":11,"url":"https://github.com/HeadmasterEggy/suiji-notes/releases/download/v2.1/Suiji-2.1.zip","notes":"Full screen no longer leaves an empty bar at the top after the page updates or reloads. 全屏时顶部不再留一条空白栏（页面更新或重新载入后也一样）。"}
+{"version":"2.2","build":12,"url":"https://github.com/HeadmasterEggy/suiji-notes/releases/download/v2.2/Suiji-2.2.zip","notes":"No more menu bar icon: the sync log, open at login and update check are in Settings → Local folders. 去掉了菜单栏图标：同步日志、登录时打开和检查更新都在 设置 → 本地文件夹 里。"}

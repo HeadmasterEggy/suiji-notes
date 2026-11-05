@@ -6,10 +6,10 @@
 # Raise BUILD for every release you publish; installed apps only update to a higher BUILD. The Swift app is at 9.
 # Apple silicon only for now.
 set -e
-VERSION=${VERSION:-2.1}
-BUILD=${BUILD:-11}
+VERSION=${VERSION:-2.2}
+BUILD=${BUILD:-12}
 REPO=HeadmasterEggy/suiji-notes
-NOTES="Full screen no longer leaves an empty bar at the top after the page updates or reloads. 全屏时顶部不再留一条空白栏（页面更新或重新载入后也一样）。"
+NOTES="No more menu bar icon: the sync log, open at login and update check are in Settings → Local folders. 去掉了菜单栏图标：同步日志、登录时打开和检查更新都在 设置 → 本地文件夹 里。"
 cd "$(dirname "$0")"
 
 [ -d node_modules/electron-builder ] || npm ci
