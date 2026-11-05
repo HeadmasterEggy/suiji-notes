@@ -378,6 +378,12 @@ async function send(text) {
     // An unanswered tool call would make the next request invalid, so the turn is dropped back to the question.
     while (messages.length && messages.at(-1).role !== "user") messages.pop();
     if (messages.at(-1)?.role === "user") messages.pop();
+    // The question (and its quote) go back in the box, so trying again is one click, not retyping.
+    const box = $("agInput");
+    if (e.name !== "AbortError" && !box.value.trim() && !quote) {
+      box.value = text; box.dispatchEvent(new Event("input"));
+      if (q) setQuote(q);
+    }
   }
   busy = null; setBusy(false); scroll();
 }
