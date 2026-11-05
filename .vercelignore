@@ -1,0 +1,6 @@
+# Native apps and their builds: not part of the site (the published downloads live in public/).
+desktop/
+mac/build/
+android/build/
+android/app/build/
+android/.gradle/
