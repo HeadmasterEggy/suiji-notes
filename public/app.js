@@ -345,11 +345,12 @@ function keepRender(f, node) {
   while (rendered.size > 30) rendered.delete(rendered.keys().next().value);
 }
 
-function skeleton() {
+// Text gets lines shaped like a document; an image, video or PDF one block in its place.
+function skeleton(media) {
   const d = document.createElement("div");
-  d.className = "skeleton";
+  d.className = "skeleton" + (media ? " media" : "");
   d.setAttribute("aria-label", t("加载中"));
-  for (let i = 0; i < 9; i++) d.append(document.createElement("i"));
+  for (let i = 0; i < (media ? 1 : 9); i++) d.append(document.createElement("i"));
   return d;
 }
 
@@ -634,7 +635,8 @@ async function showFile(f, p) {
     }
   };
   // The skeleton only appears if loading takes a noticeable moment, so cached documents never flash.
-  const wait = setTimeout(() => { if (token === p.token) preview.replaceChildren(skeleton()); }, 120);
+  const media = isImage(f) || /^(video|audio)\/|\/pdf$/.test(f.mime);
+  const wait = setTimeout(() => { if (token === p.token) preview.replaceChildren(skeleton(media)); }, 120);
   // The download link is not needed to show the file; fetch it alongside.
   p.dl.removeAttribute("href");
   p.web.hidden = true; p.web.removeAttribute("href");

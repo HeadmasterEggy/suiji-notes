@@ -456,6 +456,7 @@ textarea {
 .skeleton i:nth-child(6) { width: 64%; margin-bottom: 14px; }
 .skeleton i:nth-child(9) { width: 40%; }
 .skeleton i:nth-child(odd) { animation-delay: .08s; }
+.skeleton.media i { width: 100%; height: min(60vh, 480px); border-radius: 12px; }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
 @media (max-width: 720px) { .skeleton { padding: 18px 16px; } }
 
