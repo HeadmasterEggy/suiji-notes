@@ -349,7 +349,9 @@ function zoomBy(d) {
 
 function buildStatusItem() {
   if (!tray) {
-    const icon = nativeImage.createFromNamedImage("arrow.triangle.2.circlepath");
+    // The SF Symbol comes back at 74 × 70 px; the menu bar wants about 15 pt, drawn sharp at 1× and 2×.
+    const big = nativeImage.createFromNamedImage("arrow.triangle.2.circlepath"), icon = nativeImage.createEmpty();
+    for (const s of [1, 2]) icon.addRepresentation({ scaleFactor: s, buffer: big.resize({ height: 15 * s, quality: "best" }).toPNG() });
     icon.setTemplateImage(true);
     tray = new Tray(icon);
     const open = () => tray.popUpContextMenu(trayMenu());
