@@ -23,7 +23,7 @@ const setPref = (k, v) => { if (testing) memory[k] = v; else systemPreferences.s
 
 // Published by `desktop/build.sh --publish`; `defaults write app.suiji.mac updateFeed <url>` points it elsewhere for testing.
 const updateFeed = () => new URL(pref("updateFeed") || "https://suiji-notes.vercel.app/mac/version.json");
-let currentBuild = 0;
+let currentBuild = 0, version = app.getVersion();   // version: "2.0" from the bundle, like the Swift app, not package.json's "2.0.0"
 // Interface language: the one the page reports (its 设置 → 语言), before that the system's.
 let appLang = "en";
 const L = (zh, en) => appLang === "zh" ? zh : en;
@@ -40,6 +40,7 @@ app.on("second-instance", () => showWindow());
 
 app.whenReady().then(() => {
   currentBuild = Number(readPlist(path.join(bundlePath, "Contents/Info.plist"), "CFBundleVersion")) || 0;
+  version = readPlist(path.join(bundlePath, "Contents/Info.plist"), "CFBundleShortVersionString") || version;
   appLang = pref("lang") || (app.getPreferredSystemLanguages()[0]?.startsWith("zh") ? "zh" : "en");
   buildMainMenu();
   buildWindow();
@@ -84,7 +85,7 @@ async function checkForUpdates(manual) {
   }
   if (r.build <= currentBuild) {
     checking = false;
-    if (manual) tell(L("已是最新版本", "You’re up to date"), L(`随记 ${app.getVersion()} 是最新的。`, `Suiji ${app.getVersion()} is the latest version.`));
+    if (manual) tell(L("已是最新版本", "You’re up to date"), L(`随记 ${version} 是最新的。`, `Suiji ${version} is the latest version.`));
     return;
   }
   let staged = null;
@@ -215,7 +216,7 @@ async function localHttp(body) {
   const ctl = new AbortController();
   let idle;
   const touch = () => { clearTimeout(idle); idle = setTimeout(() => ctl.abort(new Error("timed out")), 600_000); };
-  const headers = { "user-agent": `Suiji/${app.getVersion()}` };   // how Magpie tells 随记's requests apart
+  const headers = { "user-agent": `Suiji/${version}` };   // how Magpie tells 随记's requests apart
   for (const [k, v] of Object.entries(body.headers && typeof body.headers === "object" ? body.headers : {})) if (typeof v === "string") headers[k.toLowerCase()] = v;
   touch();
   try {
@@ -382,7 +383,7 @@ function toggleLogin() {
 // ---------- main menu ----------
 
 function buildMainMenu() {
-  app.setAboutPanelOptions({ applicationName: L("随记", "Suiji"), applicationVersion: app.getVersion(), version: String(currentBuild || "") });
+  app.setAboutPanelOptions({ applicationName: L("随记", "Suiji"), applicationVersion: version, version: String(currentBuild || "") });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: L("随记", "Suiji"), submenu: [
       { role: "about", label: L("关于随记", "About Suiji") },

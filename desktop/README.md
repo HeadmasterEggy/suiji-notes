@@ -3,10 +3,12 @@
 An Electron build of the Mac app, meant to replace the Swift app in [`../mac`](../mac). It loads https://suiji-notes.vercel.app and gives the page the same bridge as the Swift app. `preload.js` exposes `window.webkit.messageHandlers.suijiFs` and `.suiji` with the same shape, so nothing in `public/` changes. `mac/` stays as it is until you decide to switch.
 
 ```sh
-sh desktop/build.sh             # dist/mac-arm64/随记.app, ad-hoc signed
+sh desktop/build.sh             # dist/mac-arm64/随记.app, ad-hoc signed, Apple silicon only
 sh desktop/build.sh --install   # also copies it to /Applications, replacing the Swift app
-ARCH=universal sh desktop/build.sh   # Intel Macs too
+sh desktop/build.sh --publish   # dist/Suiji-2.0.zip for the GitHub release v2.0, and public/mac/version.json pointing at it
 ```
+
+To release: raise `BUILD` (and `VERSION`) in `build.sh`, run it with `--publish`, upload the zip to the release `v<VERSION>` (`gh release upload` or `gh release create`), then deploy so `version.json` goes live. Upload first: once the feed is live, installed apps fetch the zip from the release.
 
 Versions are pinned exactly: Electron 44.9.3 and electron-builder 26.18.0. `npm start` in this folder runs it unpackaged.
 
@@ -20,7 +22,7 @@ Versions are pinned exactly: Electron 44.9.3 and electron-builder 26.18.0. `npm 
 
 | | Swift (mac/, 1.9) | Electron (desktop/, 2.0.0) |
 |---|---|---|
-| App size | 2.2 MB (universal) | 262 MB arm64 only; about 2× that universal |
+| App size | 2.2 MB (universal) | 262 MB (Apple silicon only) |
 | Update download (zip) | 1.7 MB | 113 MB |
 | Memory, page loaded and idle (RSS, all processes) | ≈155 MB: 78 MB app + 77 MB in 3 WebKit processes | ≈185 MB in 4 processes |
 | Right-click → Inspect Element | Only with ⇧ + right-click → 检查元素, or a private WebKit call | Always in the system menu (spelling, Look Up, links, images, cut/copy/paste, Inspect Element); ⌥⌘I opens DevTools |
@@ -52,8 +54,9 @@ Both apps have the same features:
   - it downloads the zip, then checks the bundle ID, the build number and `codesign --verify --deep`;
   - it swaps the bundle on restart or on quit.
 
-  The Electron build is build 10; the Swift app is at 9. So `sh desktop/build.sh --publish`, followed by a deploy, moves installed Swift apps to Electron on their next update check.
-- **Size of the update.** The 113 MB zip is too big to keep in git, and may be over Vercel's per-file limit. Set `ZIP_URL` to host it elsewhere, for example a GitHub release asset: `ZIP_URL=https://…/Suiji.zip sh desktop/build.sh --publish`. That leaves the zip in `dist/` for upload and only writes `public/mac/version.json`.
+  The Electron build is build 10; the Swift app is at 9. So publishing it moves installed Swift apps to Electron on their next update check.
+- **Where the zip lives.** The 113 MB zip is too big for git, so it is a GitHub release asset (`Suiji-<VERSION>.zip`, as with earlier releases). `version.json` stays on the site and points at it; both updaters follow the redirect to GitHub's download host.
+- **Apple silicon only.** The Swift app is universal and its updater does not check the architecture, so an Intel Mac running it would install this build and fail to open it. Leave Intel users on the Swift app (or build a universal one) before publishing if that matters.
 - **Hardening.** The build turns off the `RunAsNode`, `NODE_OPTIONS` and `--inspect` fuses and loads the app only from its asar. Ad-hoc signing does not protect against these, so they are off. Chromium's `--remote-debugging-port` still works for testing.
 
 ## Testing
