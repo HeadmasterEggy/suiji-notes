@@ -1008,6 +1008,8 @@ function makePane(item) {
     const tag = e.target.closest("[data-tag]");
     if (tag) searchTag(tag.dataset.tag);
   });
+  // A narrow pane cuts the file's details short; hovering them shows the whole line.
+  p.meta.onpointerenter = () => { p.meta.title = p.meta.scrollWidth > p.meta.clientWidth ? p.meta.textContent : ""; };
   // Phones keep the file's details, Web and Download in a menu under ⋯.
   p.more.onclick = () => {
     p.info.textContent = p.meta.textContent;
