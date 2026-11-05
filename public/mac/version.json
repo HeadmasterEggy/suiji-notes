@@ -1,1 +1,1 @@
-{"version":"1.8","build":8,"url":"Suiji.zip","notes":"The assistant can use a model on this Mac: pick Magpie (or Ollama, LM Studio…) in Settings → Assistant. 助手可以用这台 Mac 上的模型：在「设置 → 助手」里选 Magpie（或 Ollama、LM Studio 等）。"}
+{"version":"1.9","build":9,"url":"Suiji.zip","notes":"Magpie lists 随记 on its Agents page: connect it there and the assistant uses the model you pick, nothing to fill in. Magpie 的 Agent 页面里能看到随记了：在那里接入，助手就用你选的模型，不用再填。"}
