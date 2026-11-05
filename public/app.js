@@ -975,7 +975,7 @@ function makePane(item) {
   const q = (c) => el.querySelector("." + c);
   const p = {
     id: ++paneSeq, el, ta: q("p-ta"), ph: q("p-ph"), fv: q("p-fv"), preview: q("p-preview"), meta: q("p-meta"),
-    dl: q("p-dl"), hint: q("p-hint"), edit: q("p-edit"), web: q("p-web"), fileEdit: false, fileBase: null,
+    dl: q("p-dl"), del: q("p-del"), hint: q("p-hint"), edit: q("p-edit"), web: q("p-web"), fileEdit: false, fileBase: null,
     acts: q("p-acts"), more: q("p-more"), info: q("p-info"),
     outline: q("p-outline"), toc: q("p-toc"), heads: [], tocOpen: tocAuto, tocNarrow: false, tocLock: null, tocCur: null,
     tocList: null, tocInk: null, tocBar: null,
@@ -1008,6 +1008,15 @@ function makePane(item) {
     p.more.setAttribute("aria-expanded", String(p.acts.classList.toggle("menu")));
   };
   p.acts.addEventListener("click", (e) => { if (e.target.closest(".p-extra a")) closeMenu(p); });
+  // Deleting a note marks it deleted and syncs that; an empty one goes without asking.
+  p.del.onclick = () => {
+    const n = p.kind === "note" && store.notes[p.itemId];
+    closeMenu(p);
+    if (!n || ((n.body.trim() || p.ta.value.trim()) && !confirm(t("删除这条笔记？")))) return;
+    clearTimeout(p.editTimer); p.editing = false;
+    Object.assign(n, { deleted: true, updated_at: new Date().toISOString(), dirty: true });
+    persist(); render(); scheduleSync();
+  };
   p.outline.onclick = () => {
     if (isNarrow(p)) p.tocNarrow = !p.tocNarrow;
     else { p.tocOpen = !p.tocOpen; saveLayout(); }
@@ -1370,7 +1379,7 @@ function renderPane(p) {
   const editingFile = !!file && p.fileEdit;
   if (!file) p.fileEdit = false;
   p.ta.hidden = !(note || editingFile); p.fv.hidden = !file || editingFile; p.ph.hidden = !!(note || file || waiting);
-  p.dl.hidden = !file;
+  p.dl.hidden = !file; p.del.hidden = !note;
   if (!file || editingFile) p.web.hidden = true;
   p.edit.hidden = !(file && isEditable(file)); editLabel(p, editingFile ? t("完成") : t("编辑"), editingFile);
   applyToc(p);

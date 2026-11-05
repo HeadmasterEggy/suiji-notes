@@ -199,13 +199,13 @@ input[type="search"]:focus, input[type="email"]:focus, input[type="password"]:fo
 .p-edit:disabled { opacity: .55; cursor: progress; }
 .p-edit.on .tick { display: inline; }
 @container pane (max-width: 480px) {
-  .ebar :is(.p-edit, .p-web, .p-dl) { padding: 6px; display: inline-grid; place-items: center; }
-  .ebar :is(.p-edit, .p-web, .p-dl) .ico { display: block; }
-  .ebar :is(.p-edit, .p-web, .p-dl) .lbl { display: none; }
+  .ebar :is(.p-edit, .p-web, .p-dl, .p-del) { padding: 6px; display: inline-grid; place-items: center; }
+  .ebar :is(.p-edit, .p-web, .p-dl, .p-del) .ico { display: block; }
+  .ebar :is(.p-edit, .p-web, .p-dl, .p-del) .lbl { display: none; }
 }
 @container pane (max-width: 340px) {   /* a third of a laptop screen: tighter, so all seven controls fit */
   .ebar { padding: 8px; gap: 1px; }
-  .ebar .ghost.icon, .ebar :is(.p-edit, .p-web, .p-dl) { padding: 4px; }
+  .ebar .ghost.icon, .ebar :is(.p-edit, .p-web, .p-dl, .p-del) { padding: 4px; }
   :root[data-style="blocks"] .ebar .ghost { padding: 2px; border-width: 2px; }
 }
 .ghost.danger:hover, .ghost.danger.armed { color: var(--danger); border-color: var(--danger); }
@@ -858,10 +858,10 @@ label.set-row { cursor: pointer; }
   .p-acts.menu .p-extra { display: flex; animation: rise .2s var(--ease) both; }
   .p-acts.menu .p-more { background: var(--accent-soft); }
   .p-info:not(:empty) { display: block; padding: 6px 10px 9px; margin-bottom: 4px; border-bottom: 1px solid var(--line); font: 11px/1.5 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
-  :root .ebar .p-extra :is(.p-web, .p-dl) { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 10px; font-size: 15px; color: var(--ink); }
-  :root .ebar .p-extra :is(.p-web, .p-dl)[hidden] { display: none; }
-  :root .ebar .p-extra :is(.p-web, .p-dl) .ico { display: block; width: 18px; height: 18px; }
-  :root .ebar .p-extra :is(.p-web, .p-dl) .lbl { display: inline; }
+  :root .ebar .p-extra :is(.p-web, .p-dl, .p-del) { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 10px; font-size: 15px; color: var(--ink); }
+  :root .ebar .p-extra :is(.p-web, .p-dl, .p-del)[hidden] { display: none; }
+  :root .ebar .p-extra :is(.p-web, .p-dl, .p-del) .ico { display: block; width: 18px; height: 18px; }
+  :root .ebar .p-extra :is(.p-web, .p-dl, .p-del) .lbl { display: inline; }
   /* Room at the top for the floating buttons. */
   .md-body { padding: 70px max(16px, env(safe-area-inset-right, 0px)) 40px max(16px, env(safe-area-inset-left, 0px)); }
   .preview:not(.doc) { padding-top: 58px; }
