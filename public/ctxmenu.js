@@ -4,7 +4,7 @@
 // Mac app includes 检查元素 (Inspect Element). Edits go through execCommand("insertText") so ⌘Z undoes them.
 import { t } from "./i18n.js";
 
-let menu = null, api = null;
+let menu = null, api = null, origin = null;   // origin: what had focus before the menu opened
 
 const sep = { sep: true };
 const today = () => new Date().toLocaleDateString("sv");   // 2026-11-05
@@ -99,14 +99,18 @@ function viewItems(target, sel) {
 }
 
 // ---------- the menu itself ----------
-function close() { document.querySelectorAll(".cm").forEach((m) => m.remove()); menu = null; }
+function close(refocus) {
+  document.querySelectorAll(".cm").forEach((m) => m.remove()); menu = null;
+  if (refocus && origin?.isConnected) origin.focus({ preventScroll: true });
+  origin = null;
+}
 function build(items, x, y, parent) {
   const box = document.createElement("div");
   box.className = "cm glass"; box.setAttribute("role", "menu");
   for (const it of items) {
     if (it.sep) { box.append(Object.assign(document.createElement("div"), { className: "cm-sep" })); continue; }
     const b = document.createElement("button");
-    b.type = "button"; b.className = "cm-item"; b.setAttribute("role", "menuitem"); b.disabled = !!it.off;
+    b.type = "button"; b.className = "cm-item" + (it.sub ? " has-sub" : ""); b.setAttribute("role", "menuitem"); b.disabled = !!it.off;
     b.append(Object.assign(document.createElement("span"), { textContent: it.label }));
     if (it.key || it.sub) b.append(Object.assign(document.createElement("small"), { textContent: it.sub ? "›" : it.key }));
     if (it.sub) {
@@ -145,10 +149,29 @@ export function mountMenu(a) {
     if (!ta && !view) return;
     e.preventDefault();
     const sel = ta ? ta.value.slice(ta.selectionStart, ta.selectionEnd) : String(getSelection()).trim();
+    origin = document.activeElement;
     build(ta ? editorItems(ta, sel) : viewItems(e.target, sel), e.clientX, e.clientY);
   });
   addEventListener("pointerdown", (e) => { if (menu && !e.target.closest(".cm")) close(); }, true);
-  addEventListener("keydown", (e) => { if (menu && e.key === "Escape") close(); }, true);
+  // From the keyboard: ↑ / ↓ (and Home / End) move through the items, → opens a submenu, ← goes back out,
+  // Enter picks, Escape closes and returns to where the focus was. Keys don't reach the text underneath.
+  addEventListener("keydown", (e) => {
+    if (!menu) return;
+    const k = e.key;
+    if (!["Escape", "ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "Home", "End"].includes(k)) return;
+    e.preventDefault(); e.stopPropagation();
+    if (k === "Escape") return close(true);
+    const box = document.activeElement.closest?.(".cm") || menu;
+    const items = [...box.querySelectorAll(".cm-item:not(:disabled)")], i = items.indexOf(document.activeElement);
+    if (k === "ArrowRight") {
+      if (items[i]?.classList.contains("has-sub")) { items[i].click(); items[i].closest(".cm").sub?.querySelector(".cm-item:not(:disabled)")?.focus(); }
+      return;
+    }
+    if (k === "ArrowLeft") { if (box !== menu) { box.remove(); box.from.focus(); } return; }
+    const n = k === "Home" ? 0 : k === "End" ? items.length - 1 : i < 0 ? (k === "ArrowDown" ? 0 : items.length - 1)
+      : (i + (k === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+    items[n]?.focus();
+  }, true);
   addEventListener("blur", close);
   addEventListener("resize", close);
   document.addEventListener("scroll", close, true);
