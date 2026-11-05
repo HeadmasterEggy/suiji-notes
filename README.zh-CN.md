@@ -12,6 +12,7 @@
 [![网址](https://img.shields.io/badge/网址-suiji--notes.vercel.app-000?style=flat-square&logo=vercel)](https://suiji-notes.vercel.app)
 ![iPhone](https://img.shields.io/badge/iPhone-PWA-555?style=flat-square&logo=apple)
 ![macOS](https://img.shields.io/badge/macOS-原生%20App-black?style=flat-square&logo=apple)
+![Android](https://img.shields.io/badge/安卓-App-3DDC84?style=flat-square&logo=android&logoColor=white)
 ![Supabase](https://img.shields.io/badge/数据-Supabase-3ECF8E?style=flat-square&logo=supabase&logoColor=white)
 
 <img src="docs/style-glass-light.jpg" width="820" alt="文档和它的大纲">
@@ -42,7 +43,7 @@
   - 终端：黑底绿字，等宽；浅色是浅底深绿字
   - 方块：像素方块世界，有天空、草地和石头面板；深色是夜晚，有月亮
 
-  浏览器标签页的图标、Mac App 的 Dock 图标和关系图谱都会跟着风格变。
+  浏览器标签页的图标、Mac App 的 Dock 图标、安卓桌面图标和关系图谱都会跟着风格变。
 - **设置：**侧边栏底部的「设置」里有风格、明暗、正文字号、界面语言（中文 / English）、新文档是否显示大纲、宽度、同步、本机缓存、账号和检查更新。
 - **关系图谱：**类似 Obsidian 的图谱，根据 `[[双链]]`、相对 `.md` 链接和 front matter 里的标签生成。
 - **Markdown：**支持数学公式（KaTeX）、Mermaid 图，以及 Obsidian 的 `[[双链]]`（显示别名，点击打开对应笔记）和 `==高亮==`。
@@ -53,6 +54,7 @@
 ## 安装
 
 - **iPhone：**用 Safari 打开 <https://suiji-notes.vercel.app>，点分享按钮，再点「添加到主屏幕」。
+- **安卓：**在手机上下载 [`Suiji.apk`](https://suiji-notes.vercel.app/android/Suiji.apk) 并打开（按提示允许从浏览器安装应用）。
 - **Mac App：**运行 `./mac/build.sh --install` 生成（见[从源码构建](#从源码构建)）。不装 App 的话，在 Safari 里选「文件 → 添加到程序坞」也可以。
 - **在 Mac 上同步一个文件夹：**
 
@@ -90,6 +92,17 @@ npx vercel deploy --prod
 
 发布新版本：把 `mac/build.sh` 里的 `BUILD` 加一，带 `--publish` 运行，再部署。
 
+### 安卓 App
+
+需要 JDK 17 以上和 Android SDK（平台 35、build tools），例如 `brew install --cask android-commandlinetools`。
+
+```sh
+./android/build.sh             # 生成签名的 android/build/Suiji.apk
+./android/build.sh --publish   # 同时复制到 public/android/Suiji.apk，随下次部署发布
+```
+
+第一次运行会生成签名密钥 `android/suiji-release.keystore`，密码在 `android/keystore.properties`。两个文件都不进 git，请另外备份：只有用同一把密钥签名，新版本才能覆盖安装旧版本。每次发布前把 `android/app/build.gradle.kts` 里的 `versionCode` 加一。调试版（`./gradlew assembleDebug`）改为打开 `http://localhost:5174/`，配合 `adb reverse tcp:5174 tcp:5174` 使用。
+
 ## 工作原理
 
 | 部分 | 位置 | 作用 |
@@ -98,6 +111,7 @@ npx vercel deploy --prod
 | 数据 | Supabase | Postgres 表 `notes` 和 `files`、私有存储桶和 Realtime。行级安全保证每个人只能看到自己的数据。 |
 | 文件夹同步程序 | `agent/suiji-sync.mjs` | 由 launchd 在 Mac 上运行的 Node 脚本，监听要同步的文件夹 |
 | Mac App | `mac/` | 用原生 AppKit 窗口装着网页 App，外加一个管理同步程序的菜单栏图标 |
+| 安卓 App | `android/` | 用 WebView 装着网页 App，支持返回键、选文件、下载，桌面图标跟随风格 |
 
 **随手记**先存在本机，再写入 `notes` 表，其他设备通过 Realtime 实时收到改动。两台设备改同一条笔记时，以最后保存的为准。
 

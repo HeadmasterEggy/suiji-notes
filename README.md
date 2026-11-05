@@ -12,6 +12,7 @@
 [![Live](https://img.shields.io/badge/live-suiji--notes.vercel.app-000?style=flat-square&logo=vercel)](https://suiji-notes.vercel.app)
 ![iPhone](https://img.shields.io/badge/iPhone-PWA-555?style=flat-square&logo=apple)
 ![macOS](https://img.shields.io/badge/macOS-native%20app-black?style=flat-square&logo=apple)
+![Android](https://img.shields.io/badge/Android-app-3DDC84?style=flat-square&logo=android&logoColor=white)
 ![Supabase](https://img.shields.io/badge/data-Supabase-3ECF8E?style=flat-square&logo=supabase&logoColor=white)
 
 <img src="docs/style-glass-light.jpg" width="820" alt="A document with its outline">
@@ -42,7 +43,7 @@
   - 终端 *Terminal*: green on black, monospace; light is dark green on pale paper
   - 方块 *Blocks*: a pixel-art world of sky, grass and stone panels; dark is night, with a moon
 
-  The tab icon, the Mac app's Dock icon and the graph change with the style.
+  The tab icon, the Mac app's Dock icon, the Android launcher icon and the graph change with the style.
 - **Settings.** 设置 at the bottom of the sidebar holds the style, light / dark, text size, the interface language (中文 / English), whether new documents show their outline, widths, sync, the local cache, the account and update checks.
 - **Relationship graph.** Like Obsidian's graph, built from `[[wikilinks]]`, relative `.md` links and front-matter tags.
 - **Markdown.** Math (KaTeX), Mermaid diagrams, and Obsidian's `[[wikilinks]]` (shown by their alias, opening the linked note) and `==highlights==`.
@@ -53,6 +54,7 @@
 ## Install
 
 - **iPhone:** open <https://suiji-notes.vercel.app> in Safari, tap Share, then 添加到主屏幕 (Add to Home Screen).
+- **Android:** download [`Suiji.apk`](https://suiji-notes.vercel.app/android/Suiji.apk) on the phone and open it (allow installing from your browser when asked).
 - **Mac app:** build it with `./mac/build.sh --install` (see [Build from source](#build-from-source)). Without the app, Safari's File → Add to Dock works too.
 - **Sync a folder from the Mac:**
 
@@ -90,6 +92,17 @@ Requires the Xcode Command Line Tools.
 
 To release a new build: raise `BUILD` in `mac/build.sh`, run it with `--publish`, then deploy.
 
+### Android app
+
+Requires JDK 17+ and the Android SDK (platform 35, build tools), e.g. `brew install --cask android-commandlinetools`.
+
+```sh
+./android/build.sh             # builds the signed android/build/Suiji.apk
+./android/build.sh --publish   # also copies it to public/android/Suiji.apk for the next deploy
+```
+
+The first run makes the signing key `android/suiji-release.keystore`, with its passwords in `android/keystore.properties`. Both stay out of git; keep a copy, because later builds only install over earlier ones when signed with the same key. Raise `versionCode` in `android/app/build.gradle.kts` for each published build. A debug build (`./gradlew assembleDebug`) opens `http://localhost:5174/` instead, through `adb reverse tcp:5174 tcp:5174`.
+
 ## How it works
 
 | Part | Where | What it does |
@@ -98,6 +111,7 @@ To release a new build: raise `BUILD` in `mac/build.sh`, run it with `--publish`
 | Data | Supabase | Postgres tables `notes` and `files`, a private storage bucket, and Realtime. Row-level security means each user sees only their own data. |
 | Folder agent | `agent/suiji-sync.mjs` | Node script run by launchd on the Mac. It watches the synced folders. |
 | Mac app | `mac/` | Native AppKit window around the web app, plus a menu bar item for the agent |
+| Android app | `android/` | WebView around the web app, with the back button, file picking, downloads and a launcher icon per style |
 
 **Notes** are saved on the device, then upserted to `notes`. Other devices receive changes through Realtime. If two devices edit the same note, the last save wins.
 

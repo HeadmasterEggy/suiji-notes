@@ -1,4 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#040904"/>
-    <g fill="none" stroke="#4ade80" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="21" y="25" width="58" height="50" rx="7" stroke-width="3"/>
-      <path d="M31 44l8 6-8 6" stroke-width="4"/><path d="M44 58h12" stroke-width="4"/></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs>
+<radialGradient id="g" cx=".5" cy=".5" r=".6"><stop offset="0" stop-color="#4ade80" stop-opacity=".16"/><stop offset="1" stop-color="#4ade80" stop-opacity="0"/></radialGradient>
+<filter id="glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<pattern id="scan" width="4" height="3" patternUnits="userSpaceOnUse"><rect width="4" height="1" y="2" fill="#000" opacity=".35"/></pattern></defs>
+<rect width="100" height="100" rx="22" fill="#040904"/><rect width="100" height="100" rx="22" fill="url(#g)"/><g transform="translate(50 50) scale(1.32) translate(-50 -50)">
+<g fill="none" stroke="#4ade80" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)">
+<path d="M34 19h25l13 13v43a6 6 0 0 1-6 6H34a6 6 0 0 1-6-6V25a6 6 0 0 1 6-6z" stroke-width="2.6"/><path d="M59 19v8a5 5 0 0 0 5 5h8" stroke-width="2.6"/>
+<path d="M36 41h17" stroke-width="3.2"/><path d="M36 57c3-6 7-9 9-6s-2 9 1 9 6-11 9-9-1 8 2 8 5-4 7-6" stroke-width="2.6"/></g>
+<rect x="36" y="67" width="6" height="6" fill="#4ade80" filter="url(#glow)"/>
+</g><rect width="100" height="100" rx="22" fill="url(#scan)"/><rect width="100" height="100" rx="22" fill="url(#scan)"/></svg>

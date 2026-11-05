@@ -24,8 +24,10 @@ function applyStyle(name, save) {
   }
   if (save) try { name ? localStorage.setItem("suiji:style", name) : localStorage.removeItem("suiji:style"); } catch {}
   for (const b of $("styleChoices").querySelectorAll("[data-style]")) b.setAttribute("aria-checked", String(b.dataset.style === (name || "")));
-  // The tab icon follows the style; in the Mac app the Dock icon does too.
+  // The tab icon follows the style; in the Mac app the Dock icon does too. iPhone keeps the Home Screen icon
+  // it was added with, so adding the app after picking a style gives that style's icon.
   document.querySelector('link[rel="icon"]').href = name ? `icon-${name}.svg` : "icon.svg";
+  document.querySelector('link[rel="apple-touch-icon"]').href = name ? `icon-${name}-180.png` : "icon-180.png";
   window.webkit?.messageHandlers?.suiji?.postMessage({ style: name || "", lang });
   paintBar();
 }
@@ -33,6 +35,8 @@ function applyStyle(name, save) {
 function paintBar() {
   const bar = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
   for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.content = bar;
+  // The Android app colours its system bars to match and switches its launcher icon to the style.
+  window.suijiAndroid?.post(JSON.stringify({ style: document.documentElement.dataset.style || "", bg: bar, dark: isDark() }));
 }
 applyStyle(document.documentElement.dataset.style || "");
 // Light / dark: data-mode on the root is always "light" or "dark", which every style reads. The choice is
@@ -1247,6 +1251,15 @@ function openIn(p, kind, id) {
   if (kind === "note" && !isPhone.matches) p.ta.focus();
 }
 function openFile(id) { openIn(focused, "file", id); }
+// Android's back button: closes what is open (settings, a ⋯ menu, an outline over the text), then goes from a
+// document to the sidebar. false means nothing was left to close, and the app goes to the background.
+window.suijiBack = () => {
+  if ($("settings").open) { $("settings").close(); return true; }
+  for (const p of panes.values()) if (p.acts.classList.contains("menu")) { closeMenu(p); return true; }
+  if (focused?.tocNarrow && !focused.toc.hidden) { focused.tocNarrow = false; applyToc(focused); return true; }
+  if (isPhone.matches && app.dataset.view !== "list") { commitAll(); app.dataset.view = "list"; return true; }
+  return false;
+};
 function closeMenu(p) { p.acts.classList.remove("menu"); p.more.setAttribute("aria-expanded", "false"); }
 document.addEventListener("pointerdown", (e) => { for (const p of panes.values()) if (!p.acts.contains(e.target)) closeMenu(p); });
 // Shows the files with a tag; on a phone that means opening the sidebar.

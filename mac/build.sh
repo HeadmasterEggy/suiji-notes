@@ -4,9 +4,9 @@
 #   --publish  also writes public/mac/Suiji.zip and version.json; installed apps update to it after the next deploy
 # Raise BUILD for every release you publish; installed apps only update to a higher BUILD.
 set -e
-VERSION=${VERSION:-1.3}
-BUILD=${BUILD:-4}
-NOTES="English interface: menus follow the language chosen in Settings. 英文界面：菜单跟随设置里的语言。"
+VERSION=${VERSION:-1.5}
+BUILD=${BUILD:-5}
+NOTES="New icons: one page-and-pen mark drawn in each style. 新图标：每种风格都用同一个纸页加笔迹的标志。"
 cd "$(dirname "$0")"
 APP="build/随记.app"
 rm -rf build && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
