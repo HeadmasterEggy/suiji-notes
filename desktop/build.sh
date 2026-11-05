@@ -6,10 +6,10 @@
 # Raise BUILD for every release you publish; installed apps only update to a higher BUILD. The Swift app is at 9.
 # Apple silicon only for now.
 set -e
-VERSION=${VERSION:-2.0}
-BUILD=${BUILD:-10}
+VERSION=${VERSION:-2.1}
+BUILD=${BUILD:-11}
 REPO=HeadmasterEggy/suiji-notes
-NOTES="随记 for Mac now runs on Electron: right-click → Inspect Element, and a fuller right-click menu. Sign in once more after updating. 随记 Mac 版换成了 Electron：右键可以「检查元素」，右键菜单更完整。更新后需要重新登录一次。"
+NOTES="Full screen no longer leaves an empty bar at the top after the page updates or reloads. 全屏时顶部不再留一条空白栏（页面更新或重新载入后也一样）。"
 cd "$(dirname "$0")"
 
 [ -d node_modules/electron-builder ] || npm ci
