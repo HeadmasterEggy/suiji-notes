@@ -977,6 +977,8 @@ function makePane(item) {
     tocList: null, tocInk: null, tocBar: null,
     kind: item?.kind || null, itemId: item?.id || null, shown: null, token: 0,
     editing: false, editTimer: null,
+    hist: item?.kind ? [{ kind: item.kind, id: item.id, top: 0 }] : [], hi: item?.kind ? 0 : -1,
+    prev: q("p-prev"), next: q("p-next"),
   };
   if (p.kind === "note") p.ta.value = store.notes[p.itemId]?.body || "";
   panes.set(p.id, p);
@@ -1039,6 +1041,8 @@ function makePane(item) {
   }, { passive: true });
   paneSizes.observe(el);
   q("p-back").onclick = () => { commitAll(); app.dataset.view = "list"; };
+  p.prev.onclick = () => goHist(p, -1);
+  p.next.onclick = () => goHist(p, 1);
   q("p-split-r").onclick = () => split(p, "row", false, p.kind && { kind: p.kind, id: p.itemId });
   q("p-split-d").onclick = () => split(p, "col", false, p.kind && { kind: p.kind, id: p.itemId });
   q("p-close").onclick = () => closePane(p);
@@ -1391,10 +1395,17 @@ function markCurrent() {
   for (const p of panes.values()) p.graph?.redraw();
 }
 
-function openIn(p, kind, id) {
+function openIn(p, kind, id, fromHist) {
   focusPane(p);
   app.dataset.view = "edit";
   if (p.kind === kind && p.itemId === id) { if (kind === "note" && !isPhone.matches) p.ta.focus(); return; }
+  if (!fromHist) {
+    if (p.kind && p.hi >= 0) p.hist[p.hi] = here(p);
+    p.hist.splice(p.hi + 1, Infinity, { kind, id, top: 0 });
+    if (p.hist.length > 100) p.hist.shift();
+    p.hi = p.hist.length - 1;
+  }
+  navState(p);
   commit(p); closeMenu(p);
   p.kind = kind; p.itemId = id; p.shown = null; p.fileEdit = false; p.editing = false;
   if (kind === "note") p.ta.value = store.notes[id]?.body || "";
@@ -1402,6 +1413,41 @@ function openIn(p, kind, id) {
   if (kind === "note" && !isPhone.matches) p.ta.focus();
 }
 function openFile(id) { openIn(focused, "file", id); }
+// Back and forward, per pane, like a browser's: the documents opened in it, each where it was scrolled to.
+const scroller = (p) => p.kind === "note" || p.fileEdit ? p.ta : p.preview;
+const here = (p) => ({ kind: p.kind, id: p.itemId, top: scroller(p).scrollTop });
+const exists = (h) => h.kind === "note" ? store.notes[h.id] && !store.notes[h.id].deleted : h.kind === "file" ? files.some((f) => f.id === h.id) : true;
+function navState(p) { p.prev.disabled = !p.hist.slice(0, p.hi).some(exists); p.next.disabled = !p.hist.slice(p.hi + 1).some(exists); }
+async function goHist(p, d) {
+  let i = p.hi + d;
+  while (p.hist[i] && !exists(p.hist[i])) i += d;   // skip documents deleted since
+  const to = p.hist[i];
+  if (!to) return;
+  if (p.kind && p.hi >= 0) p.hist[p.hi] = here(p);
+  p.hi = i;
+  openIn(p, to.kind, to.id, true);
+  if (!to.top) return;
+  // A file renders asynchronously: wait until it is tall enough to scroll back to where it was.
+  for (let n = 0; n < 40; n++) {
+    const el = scroller(p);
+    if (p.itemId !== to.id) return;
+    if (el.scrollHeight - el.clientHeight >= to.top || n === 39) { el.scrollTop = to.top; return; }
+    await sleepMs(75);
+  }
+}
+// ⌘[ / ⌘] (and ⌘⌥← / ⌘⌥→, as in Obsidian), and a mouse's back and forward buttons, in the focused pane.
+document.addEventListener("keydown", (e) => {
+  if (!(e.metaKey || e.ctrlKey) || e.shiftKey || !focused) return;
+  const d = e.key === "[" || e.altKey && e.key === "ArrowLeft" ? -1 : e.key === "]" || e.altKey && e.key === "ArrowRight" ? 1 : 0;
+  if (!d || e.altKey !== e.key.startsWith("Arrow")) return;
+  e.preventDefault(); goHist(focused, d);
+});
+addEventListener("mouseup", (e) => {
+  if (e.button !== 3 && e.button !== 4) return;
+  e.preventDefault();   // otherwise the browser itself goes back, out of the app
+  const p = [...panes.values()].find((x) => x.el.contains(e.target)) || focused;
+  if (p) goHist(p, e.button === 3 ? -1 : 1);
+});
 // Android's back button: closes what is open (settings, a ⋯ menu, an outline over the text), then goes from a
 // document to the sidebar. false means nothing was left to close, and the app goes to the background.
 window.suijiBack = () => {

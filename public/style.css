@@ -181,6 +181,8 @@ input[type="search"]:focus, input[type="email"]:focus, input[type="password"]:fo
 .ebar { display: flex; align-items: center; gap: 4px; padding: 10px 14px; border-bottom: 1px solid var(--rim-low); background: var(--glass-strong); }
 .p-acts, .p-extra { display: contents; }
 .ebar .p-back, .ebar .p-more, .p-info { display: none; }   /* phone-only: the sidebar button and the ⋯ menu */
+.ebar .p-nav { width: 28px; padding: 6px 0; }
+.ebar .p-nav:disabled { opacity: .3; pointer-events: none; }
 .ebar .meta { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
 .ghost { border: 1px solid transparent; background: transparent; border-radius: 999px; padding: 6px 12px; color: var(--muted); }
 .ghost:hover { background: var(--accent-soft); color: var(--ink); }
@@ -836,7 +838,7 @@ label.set-row { cursor: pointer; }
     background: none; border: 0; pointer-events: none;
   }
   .ebar > *, .ebar .p-acts > * { pointer-events: auto; }
-  .ebar .meta { display: none; }
+  .ebar .meta, .ebar .p-nav { display: none; }
   .ebar .p-back, .p-acts {
     background: var(--glass-strong); border: 1px solid var(--rim-low);
     -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6);
