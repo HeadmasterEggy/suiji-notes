@@ -1468,6 +1468,14 @@ document.addEventListener("keydown", (e) => {
   if (!d || e.altKey !== e.key.startsWith("Arrow")) return;
   e.preventDefault(); goHist(focused, d);
 });
+// ⌘O (Obsidian's quick switcher; ⌘K is already a link in the editor) jumps to the search box with what was
+// typed there selected. On phones the sidebar slides in first.
+document.addEventListener("keydown", (e) => {
+  if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "o" || $("settings").open) return;
+  e.preventDefault();
+  if (isPhone.matches) app.dataset.view = "list";
+  search.focus(); search.select();
+});
 // WebKit doesn't pass a mouse's side buttons to the page, so the Mac app catches them and calls this.
 window.suijiNav = (d) => { if (focused) goHist(focused, d); };
 addEventListener("mouseup", (e) => {

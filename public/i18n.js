@@ -185,6 +185,7 @@ const EN = {
   "先在「设置 → 助手」里填上你的 API key，就可以开始用了。": "Add your API key in Settings → Assistant to start.",
   "去设置": "Open Settings",
   "助手 (⌘J)": "Assistant (⌘J)",
+  "搜索 (⌘O)": "Search (⌘O)",
   "新对话": "New chat",
   "问问你的笔记…": "Ask about your notes…",
   "给助手的消息": "Message to the assistant",
