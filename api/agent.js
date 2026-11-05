@@ -5,10 +5,11 @@
 import { streamText, jsonSchema } from "ai";
 import { createClient } from "@supabase/supabase-js";
 
-// Any model id from https://ai-gateway.vercel.sh/v1/models that supports tool use; DeepSeek runs on the
-// team's own key (AI Gateway → Bring Your Own Key).
+// Any model id from https://ai-gateway.vercel.sh/v1/models that supports tool use. DeepSeek runs on the
+// owner's own key: DEEPSEEK_API_KEY, passed to the gateway with each request (or AI Gateway → Bring Your Own Key).
 const MODEL = process.env.AI_GATEWAY_MODEL || "deepseek/deepseek-v4.1-flash";
 const PROVIDER = MODEL.split("/")[0];
+const BYOK = PROVIDER === "deepseek" && process.env.DEEPSEEK_API_KEY ? { deepseek: [{ apiKey: process.env.DEEPSEEK_API_KEY }] } : null;
 const MAX_CHARS = 600_000;   // whole conversation, so one request can't run up a huge bill
 
 const tool = (description, properties, required) => ({ description, inputSchema: jsonSchema({ type: "object", properties, required, additionalProperties: false }) });
@@ -65,7 +66,7 @@ export async function POST(request) {
     messages,
     tools: TOOLS,
     abortSignal: request.signal,
-    providerOptions: { gateway: { only: [PROVIDER], user: data.user.id, tags: ["suiji-agent"] } },
+    providerOptions: { gateway: { only: [PROVIDER], user: data.user.id, tags: ["suiji-agent"], ...(BYOK && { byok: BYOK }) } },
   });
   const enc = new TextEncoder();
   const stream = new ReadableStream({
