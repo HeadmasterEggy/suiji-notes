@@ -1016,14 +1016,15 @@ function makePane(item) {
     p.more.setAttribute("aria-expanded", String(p.acts.classList.toggle("menu")));
   };
   p.acts.addEventListener("click", (e) => { if (e.target.closest(".p-extra a")) closeMenu(p); });
-  // Deleting a note marks it deleted and syncs that; an empty one goes without asking.
+  // Deleting a note marks it deleted and syncs that; an empty one goes without asking. The pane then goes
+  // back to what it showed before, if anything.
   p.del.onclick = () => {
     const n = p.kind === "note" && store.notes[p.itemId];
     closeMenu(p);
     if (!n || ((n.body.trim() || p.ta.value.trim()) && !confirm(t("删除这条笔记？")))) return;
     clearTimeout(p.editTimer); p.editing = false;
     Object.assign(n, { deleted: true, updated_at: new Date().toISOString(), dirty: true });
-    persist(); render(); scheduleSync();
+    persist(); render(); goHist(p, -1); scheduleSync();
   };
   p.outline.onclick = () => {
     if (isNarrow(p)) p.tocNarrow = !p.tocNarrow;
