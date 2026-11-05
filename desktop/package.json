@@ -1,0 +1,16 @@
+{
+  "name": "suiji-desktop",
+  "productName": "随记",
+  "version": "2.0.0",
+  "private": true,
+  "description": "随记 for Mac (Electron)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "sh build.sh"
+  },
+  "devDependencies": {
+    "electron": "44.9.3",
+    "electron-builder": "26.18.0"
+  }
+}
