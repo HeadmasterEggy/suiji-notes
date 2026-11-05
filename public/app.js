@@ -440,8 +440,11 @@ function parseFrontMatter(src) {
   const m = /^﻿?---\r?\n([\s\S]*?)\r?\n---[ \t]*(\r?\n|$)/.exec(src);
   if (!m) return { body: src, meta: {} };
   const meta = {};
-  let listKey = null;
+  let listKey = null, block = null;
   for (const line of m[1].split(/\r?\n/)) {
+    // A YAML block scalar (key: > or |) continues on the indented lines after it.
+    if (block && /^\s+\S/.test(line)) { const [k, sep] = block; meta[k] += (meta[k] ? sep : "") + line.trim(); continue; }
+    block = null;
     const item = /^\s+-\s+(.*)$/.exec(line);
     if (item && listKey) { meta[listKey].push(item[1].replace(/^["']|["']$/g, "")); continue; }
     const kv = /^([A-Za-z_]+):\s*(.*)$/.exec(line);
@@ -450,6 +453,7 @@ function parseFrontMatter(src) {
     listKey = null;
     if (!v) { meta[k] = []; listKey = k; }
     else if (/^\[.*\]$/.test(v)) meta[k] = v.slice(1, -1).split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+    else if (/^[>|][+-]?$/.test(v)) { meta[k] = ""; block = [k, v[0] === ">" ? " " : "\n"]; }
     else meta[k] = v.replace(/^["']|["']$/g, "");
   }
   return { body: src.slice(m[0].length), meta };
@@ -528,22 +532,7 @@ async function renderMarkdown(src, f) {
   art.className = "md-body";
   const web = blogUrl(f, fm);
   if (web) art.dataset.web = web;
-  if (fm.title || (fm.tags && fm.tags.length) || web) {
-    const head = document.createElement("header");
-    head.className = "md-head";
-    if (fm.title) head.append(Object.assign(document.createElement("h1"), { textContent: fm.title }));
-    if (web) {
-      const a = Object.assign(document.createElement("a"), { className: "md-web", href: web, target: "_blank", rel: "noopener", textContent: web.replace(/^https?:\/\//, "") });
-      head.append(a);
-    }
-    const tags = [].concat(fm.tags || []);
-    if (tags.length) {
-      const t = document.createElement("div"); t.className = "md-tags";
-      for (const tag of tags) t.append(Object.assign(document.createElement("span"), { textContent: tag }));
-      head.append(t);
-    }
-    art.append(head);
-  }
+  art.append(docHead(f, fm, web, body));
   // Parse inside a <template> so relative images aren't fetched from this site before we resolve them.
   const tpl = document.createElement("template");
   tpl.innerHTML = html;
@@ -567,6 +556,9 @@ async function renderMarkdown(src, f) {
   const content = document.createElement("div");
   content.append(frag);
   art.append(content);
+  // A document that opens with its own # heading: that heading is the title, above the properties.
+  const first = content.firstElementChild;
+  if (first?.tagName === "H1") { first.classList.add("md-title"); art.querySelector(".md-head").prepend(first); }
   const find = wiki.length ? linkResolver(files.filter(isMarkdown)) : null, wdir = f.name.split("/").slice(0, -1);
   for (const a of content.querySelectorAll('a[href^="#suiji-wiki-"]')) {
     const target = find(wdir, wiki[+a.getAttribute("href").slice(12)] || "");
@@ -581,6 +573,43 @@ async function renderMarkdown(src, f) {
     else if (!href.startsWith("#")) { a.target = "_blank"; a.rel = "noopener"; }
   }
   return art;
+}
+
+// The title (front matter title, else the file name, unless the text opens with its own # heading), the blog
+// link, and every front matter field as a row of a properties card. Tags are buttons that search for the tag.
+const PROP_ICONS = {
+  text: '<path d="M2.5 4h11M2.5 8h11M2.5 12h7"/>',
+  list: '<path d="M6 4h7.5M6 8h7.5M6 12h7.5M2.5 4h.5M2.5 8h.5M2.5 12h.5"/>',
+  tags: '<path d="M2 2.5h5.5l6.5 6.5-5 5L2.5 7.5z"/><circle cx="5.3" cy="5.3" r=".8"/>',
+  date: '<rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3"/>',
+  link: '<path d="M7 9a3 3 0 0 0 4.2 0l2-2A3 3 0 0 0 9 2.8l-.8.8M9 7a3 3 0 0 0-4.2 0l-2 2A3 3 0 0 0 7 13.2l.8-.8"/>',
+};
+let propsOpen = true;
+try { propsOpen = localStorage.getItem("suiji:props") !== "0"; } catch {}
+function docHead(f, fm, web, body) {
+  const head = el$("header", "md-head");
+  if (!/^\s*#\s/.test(body)) head.append(el$("h1", "md-title", fm.title || stripMd(baseName(f.name))));   // else renderMarkdown moves that heading here
+  if (web) head.append(Object.assign(el$("a", "md-web", web.replace(/^https?:\/\//, "")), { href: web, target: "_blank", rel: "noopener" }));
+  const keys = Object.keys(fm).filter((k) => [].concat(fm[k]).some((v) => v !== ""));
+  if (!keys.length) return head;
+  const box = el$("details", "md-props"), rows = el$("dl", "md-prop-list");
+  box.open = propsOpen;
+  box.addEventListener("toggle", () => { propsOpen = box.open; try { localStorage.setItem("suiji:props", propsOpen ? "1" : "0"); } catch {} });
+  for (const k of keys) {
+    const v = fm[k], many = Array.isArray(v), tags = k === "tags";
+    const kind = tags ? "tags" : many ? "list" : /^\d{4}-\d\d-\d\d/.test(v) ? "date" : /^https?:\/\//.test(v) ? "link" : "text";
+    const dt = el$("dt"), dd = el$("dd"), row = el$("div", "md-prop");
+    dt.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true">${PROP_ICONS[kind]}</svg>`;
+    dt.append(el$("span", null, k));
+    if (tags) for (const tag of v) { const b = el$("button", "md-tag", tag); b.type = "button"; b.dataset.tag = tag; dd.append(b); }
+    else if (many) for (const x of v) dd.append(el$("span", "md-chip", x));
+    else if (kind === "link") dd.append(Object.assign(el$("a", null, v), { href: v, target: "_blank", rel: "noopener" }));
+    else { dd.textContent = v; if (v.length > 90) { dd.className = "clamp"; dd.onclick = () => dd.classList.remove("clamp"); } }
+    row.append(dt, dd); rows.append(row);
+  }
+  box.append(el$("summary", null, t("属性")), rows);
+  head.append(box);
+  return head;
 }
 
 async function showFile(f, p) {
@@ -776,7 +805,7 @@ function folderRow(box, key, name, count, depth, fillChildren) {
       drawer.classList.add("opening");
       setTimeout(() => drawer.classList.remove("opening"), 600);
     } else expanded.delete(key);
-    saveExpanded();
+    saveExpanded(); showCounts();
     head.setAttribute("aria-expanded", String(now));
     drawer.classList.toggle("open", now);
   };
@@ -796,13 +825,15 @@ function renderList() {
   list.replaceChildren();
   const notes = orderNotes(visible());
   const hitNotes = q ? notes.filter((n) => n.body.toLowerCase().includes(q)) : notes;
-  const hitFiles = q ? files.filter((f) => fullPath(f).join("/").toLowerCase().includes(q)) : files;
+  const tag = q.startsWith("#") && q.slice(1);   // "#name" also finds files whose front matter has that tag
+  const hitFiles = q ? files.filter((f) => fullPath(f).join("/").toLowerCase().includes(q) || (tag && (f.tags || []).some((x) => x.toLowerCase() === tag))) : files;
   if (!hitNotes.length && !hitFiles.length) {
     const li = document.createElement("li");
     li.className = "empty";
     li.innerHTML = q ? t("<strong>没有找到</strong>换个关键词试试。")
                      : t("<strong>这里还是空的</strong>点「新建」写一条笔记，或者点「上传」放文件进来。Mac 上运行同步程序后，选中的文件夹会自动出现在这里。");
     list.append(li);
+    showCounts();
     return;
   }
   const li = document.createElement("li");
@@ -816,6 +847,19 @@ function renderList() {
   }
   list.append(li);
   list.scrollTop = keepScroll;
+  showCounts();
+}
+// Under the app's name: how many files and folders there are. The fold button closes every open folder,
+// or opens them all when none is open.
+function folderKeys() {
+  const keys = [], walk = (node, path) => { for (const [name, child] of node.dirs) { keys.push([...path, name].join("/")); walk(child, [...path, name]); } };
+  walk(buildTree(), []);
+  return keys;
+}
+function showCounts() {
+  $("counts").textContent = t("{files} 个文件 · {folders} 个文件夹", { files: files.length, folders: folderKeys().length });
+  const label = expanded.size ? t("全部折叠") : t("全部展开");
+  $("foldBtn").title = label; $("foldBtn").setAttribute("aria-label", label);
 }
 
 // ---------- panes ----------
@@ -920,6 +964,7 @@ function makePane(item) {
   const p = {
     id: ++paneSeq, el, ta: q("p-ta"), ph: q("p-ph"), fv: q("p-fv"), preview: q("p-preview"), meta: q("p-meta"),
     dl: q("p-dl"), hint: q("p-hint"), edit: q("p-edit"), web: q("p-web"), fileEdit: false, fileBase: null,
+    acts: q("p-acts"), more: q("p-more"), info: q("p-info"),
     outline: q("p-outline"), toc: q("p-toc"), heads: [], tocOpen: tocAuto, tocNarrow: false, tocLock: null, tocCur: null,
     tocList: null, tocInk: null, tocBar: null,
     kind: item?.kind || null, itemId: item?.id || null, shown: null, token: 0,
@@ -940,7 +985,15 @@ function makePane(item) {
   p.preview.addEventListener("click", (e) => {
     const a = e.target.closest("a[data-open]");
     if (a) { e.preventDefault(); openIn(p, "file", a.dataset.open); }
+    const tag = e.target.closest("[data-tag]");
+    if (tag) searchTag(tag.dataset.tag);
   });
+  // Phones keep the file's details, Web and Download in a menu under ⋯.
+  p.more.onclick = () => {
+    p.info.textContent = p.meta.textContent;
+    p.more.setAttribute("aria-expanded", String(p.acts.classList.toggle("menu")));
+  };
+  p.acts.addEventListener("click", (e) => { if (e.target.closest(".p-extra a")) closeMenu(p); });
   p.outline.onclick = () => {
     if (isNarrow(p)) p.tocNarrow = !p.tocNarrow;
     else { p.tocOpen = !p.tocOpen; saveLayout(); }
@@ -1123,7 +1176,7 @@ function showGraph(p) {
   p.graph = mountGraph(wrap, data, {
     isActive: (n) => n.kind !== "tag" && [...panes.values()].some((x) => x !== p && x.kind === n.kind && x.itemId === n.ref),
     onOpen: (n) => {
-      if (n.kind === "tag") { search.value = n.ref; if (isPhone.matches) app.dataset.view = "list"; renderList(); return; }
+      if (n.kind === "tag") { searchTag(n.ref); return; }
       // Open beside the graph: in another pane if there is one, otherwise in a new pane on the right.
       const other = [...panes.values()].find((x) => x !== p && x.kind !== "graph");
       if (isPhone.matches) openIn(p, n.kind, n.ref);
@@ -1136,6 +1189,7 @@ function showGraph(p) {
 function renderPane(p) {
   if (p.kind === "note" && !(store.notes[p.itemId] && !store.notes[p.itemId].deleted)) p.kind = p.itemId = null;
   if (p.kind === "file" && filesLoaded && !files.some((f) => f.id === p.itemId)) p.kind = p.itemId = null;
+  p.el.classList.toggle("empty", !p.kind);
   const note = p.kind === "note" && store.notes[p.itemId];
   const file = p.kind === "file" && files.find((f) => f.id === p.itemId);
   const waiting = p.kind === "file" && !file;   // files list not loaded yet
@@ -1186,13 +1240,20 @@ function openIn(p, kind, id) {
   focusPane(p);
   app.dataset.view = "edit";
   if (p.kind === kind && p.itemId === id) { if (kind === "note" && !isPhone.matches) p.ta.focus(); return; }
-  commit(p);
+  commit(p); closeMenu(p);
   p.kind = kind; p.itemId = id; p.shown = null; p.fileEdit = false; p.editing = false;
   if (kind === "note") p.ta.value = store.notes[id]?.body || "";
   saveLayout(); markCurrent(); renderPane(p);
   if (kind === "note" && !isPhone.matches) p.ta.focus();
 }
 function openFile(id) { openIn(focused, "file", id); }
+function closeMenu(p) { p.acts.classList.remove("menu"); p.more.setAttribute("aria-expanded", "false"); }
+document.addEventListener("pointerdown", (e) => { for (const p of panes.values()) if (!p.acts.contains(e.target)) closeMenu(p); });
+// Shows the files with a tag; on a phone that means opening the sidebar.
+function searchTag(tag) {
+  search.value = "#" + tag; renderList();
+  if (isPhone.matches) { commitAll(); app.dataset.view = "list"; }
+}
 
 function focusPane(p) {
   if (focused === p) return;
@@ -1339,6 +1400,31 @@ $("graphBtn").onclick = () => {
   if (g) { focusPane(g); app.dataset.view = "edit"; return; }
   openIn(focused, "graph", "all");
 };
+$("foldBtn").onclick = () => {
+  expanded = new Set(expanded.size ? [] : [NOTES_KEY, ...folderKeys()]);
+  saveExpanded(); renderList();
+};
+// Phones: the sidebar is a drawer. A tap beside it, Escape or a swipe to the left closes it; a swipe in
+// from the left edge opens it.
+const closeDrawer = () => { if (app.dataset.view === "list") app.dataset.view = "edit"; };
+$("scrim").onclick = closeDrawer;
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && isPhone.matches && !$("settings").open) closeDrawer(); });
+{
+  let x0 = null, y0 = 0;
+  addEventListener("touchstart", (e) => {
+    const pt = e.touches[0];
+    x0 = isPhone.matches && e.touches.length === 1 && (app.dataset.view === "list" || pt.clientX < 24) ? pt.clientX : null;
+    y0 = pt.clientY;
+  }, { passive: true });
+  addEventListener("touchend", (e) => {
+    if (x0 == null) return;
+    const pt = e.changedTouches[0], dx = pt.clientX - x0, dy = pt.clientY - y0;
+    x0 = null;
+    if (Math.abs(dx) < 60 || Math.abs(dy) > Math.abs(dx) * .7) return;
+    if (dx < 0) closeDrawer();
+    else if (app.dataset.view !== "list") { commitAll(); app.dataset.view = "list"; }
+  }, { passive: true });
+}
 $("upBtn").onclick = () => $("fileInput").click();
 $("fileInput").addEventListener("change", (e) => { const fl = e.target.files; if (fl.length) uploadFiles(fl); e.target.value = ""; });
 $("folderBtn").onclick = () => $("folderInput").click();
@@ -1504,6 +1590,7 @@ function enter(session) {
     for (const p of panes.values()) if (p.kind === "file") { p.shown = null; renderPane(p); }
   }).catch(() => {});
   load(); filesLoaded = false; restoreLayout(); render();
+  if (focused?.kind) app.dataset.view = "edit";
   // Warm up the Markdown renderer in the background so the first document opens without waiting for it.
   (window.requestIdleCallback || ((fn) => setTimeout(fn, 1500)))(() => loadMarkdownLibs().catch(() => {})); sync(); loadFiles(); subscribe();
 }

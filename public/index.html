@@ -29,35 +29,39 @@
 <body>
 <div class="app" id="app" data-view="list" hidden>
   <section class="pane listpane glass">
-    <header class="head">
-      <h1 class="brand">随记</h1>
-      <span class="sync" id="sync" data-s="wait"><span class="dot"></span><span id="syncText">连接中…</span></span>
-      <label class="ghost small sort-btn" title="排序"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2v11M2 10l3 3 3-3M11 14V3M8 6l3-3 3 3"/></svg>
-        <select id="sortSel" aria-label="排序">
-          <option value="name">名称 A→Z</option><option value="name-desc">名称 Z→A</option>
-          <option value="new">从新到旧</option><option value="old">从旧到新</option>
-        </select></label>
-      <button class="ghost small graph-btn" id="graphBtn" type="button">图谱</button>
-    </header>
     <div class="note" id="note" hidden></div>
     <div class="tools">
       <input class="search" id="search" type="search" placeholder="搜索" aria-label="搜索">
-      <button class="btn-primary" id="newBtn" type="button">新建</button>
-      <button class="ghost bordered" id="upBtn" type="button">上传</button>
-      <button class="ghost bordered" id="folderBtn" type="button" hidden>上传文件夹</button>
       <input id="fileInput" type="file" multiple hidden>
       <input id="folderInput" type="file" webkitdirectory multiple hidden>
     </div>
     <div class="chips" id="chips" hidden></div>
     <ul class="list" id="list"></ul>
+    <div class="dock" role="toolbar" aria-label="工具">
+      <button class="ghost icon" id="newBtn" type="button" title="新建" aria-label="新建"><svg viewBox="0 0 16 16"><path d="M13.5 8.5v4a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h4"/><path d="M11.8 1.7l2.5 2.5L8.5 10H6V7.5z"/></svg></button>
+      <button class="ghost icon" id="upBtn" type="button" title="上传" aria-label="上传"><svg viewBox="0 0 16 16"><path d="M8 11V2.5M4.5 6L8 2.5 11.5 6M2.5 10.5v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2"/></svg></button>
+      <button class="ghost icon" id="folderBtn" type="button" hidden title="上传文件夹" aria-label="上传文件夹"><svg viewBox="0 0 16 16"><path d="M1.5 4a1 1 0 0 1 1-1h3.5l1.5 1.5h6a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg></button>
+      <label class="ghost icon sort-btn" title="排序"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2v11M2 10l3 3 3-3M11 14V3M8 6l3-3 3 3"/></svg>
+        <select id="sortSel" aria-label="排序">
+          <option value="name">名称 A→Z</option><option value="name-desc">名称 Z→A</option>
+          <option value="new">从新到旧</option><option value="old">从旧到新</option>
+        </select></label>
+      <button class="ghost icon" id="graphBtn" type="button" title="图谱" aria-label="图谱"><svg viewBox="0 0 16 16"><circle cx="4" cy="4.5" r="1.8"/><circle cx="12" cy="3.5" r="1.5"/><circle cx="10" cy="11.5" r="2"/><circle cx="3.5" cy="12" r="1.3"/><path d="M5.7 5.2l2.9 4.7M5.8 4.3l4.7-.6M11.7 5l-1.2 4.5M4.7 11.8l3.3-.2"/></svg></button>
+      <button class="ghost icon" id="foldBtn" type="button" title="全部折叠" aria-label="全部折叠"><svg viewBox="0 0 16 16"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg></button>
+    </div>
     <footer class="foot">
-      <span id="who"></span>
-      <button class="ghost small" id="setBtn" type="button" aria-haspopup="dialog">设置</button>
+      <div class="vault">
+        <h1 class="brand">随记</h1>
+        <p><span class="sync" id="sync" data-s="wait"><span class="dot"></span><span id="syncText">连接中…</span></span><span class="counts" id="counts"></span></p>
+      </div>
+      <span id="who" hidden></span>
+      <button class="ghost icon gear" id="setBtn" type="button" title="设置" aria-label="设置" aria-haspopup="dialog"><svg viewBox="0 0 24 24" style="stroke-width:1.8"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
     </footer>
   </section>
 
   <div class="divider side-handle" id="sideHandle" role="separator" aria-orientation="vertical" aria-label="调整侧边栏宽度" title="拖动调整宽度，双击恢复" tabindex="0"></div>
   <main class="workspace" id="ws" data-multi="false"></main>
+  <div class="scrim" id="scrim"></div>
 </div>
 <div class="dropzone" id="dropzone" hidden><div>松开即可上传到随记</div></div>
 
@@ -86,15 +90,21 @@
 <template id="paneTpl">
   <section class="pane editor glass">
     <div class="ebar">
-      <button class="ghost back p-back" type="button">← 列表</button>
+      <button class="ghost icon back p-back" type="button" title="侧边栏" aria-label="侧边栏"><svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2.5"/><path d="M6 2.5v11"/></svg></button>
       <span class="meta p-meta"></span>
-      <button class="ghost icon p-split-r" type="button" title="左右分屏" aria-label="左右分屏"><svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2.5"/><path d="M8 2.5v11"/></svg></button>
-      <button class="ghost icon p-split-d" type="button" title="上下分屏" aria-label="上下分屏"><svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2.5"/><path d="M1.5 8h13"/></svg></button>
-      <button class="ghost icon p-outline" type="button" hidden title="大纲" aria-label="大纲" aria-pressed="false"><svg viewBox="0 0 16 16"><path d="M2.5 4h11M5 8h8.5M7.5 12h6"/></svg></button>
-      <button class="ghost p-edit" type="button" hidden title="编辑"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path class="pen" d="M10.5 2.5l3 3-8 8H2.5v-3z"/><path class="tick" d="M3 8.5l3 3 7-7"/></svg><span class="lbl">编辑</span></button>
-      <a class="ghost p-web" target="_blank" rel="noopener" hidden title="在博客上打开这篇文章"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 2.5h4.5V7M13.5 2.5L7 9M11.5 9.5v4h-9v-9h4"/></svg><span class="lbl">网页</span></a>
-      <a class="ghost p-dl" rel="noopener" hidden title="下载"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8.5M4.5 7L8 10.5 11.5 7M2.5 13.5h11"/></svg><span class="lbl">下载</span></a>
-      <button class="ghost icon p-close" type="button" title="关闭这个窗格" aria-label="关闭这个窗格"><svg viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg></button>
+      <div class="p-acts">
+        <button class="ghost icon p-split-r" type="button" title="左右分屏" aria-label="左右分屏"><svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2.5"/><path d="M8 2.5v11"/></svg></button>
+        <button class="ghost icon p-split-d" type="button" title="上下分屏" aria-label="上下分屏"><svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2.5"/><path d="M1.5 8h13"/></svg></button>
+        <button class="ghost icon p-outline" type="button" hidden title="大纲" aria-label="大纲" aria-pressed="false"><svg viewBox="0 0 16 16"><path d="M2.5 4h11M5 8h8.5M7.5 12h6"/></svg></button>
+        <button class="ghost p-edit" type="button" hidden title="编辑"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path class="pen" d="M10.5 2.5l3 3-8 8H2.5v-3z"/><path class="tick" d="M3 8.5l3 3 7-7"/></svg><span class="lbl">编辑</span></button>
+        <button class="ghost icon p-more" type="button" title="更多" aria-label="更多" aria-expanded="false"><svg viewBox="0 0 16 16"><circle cx="3.5" cy="8" r=".9"/><circle cx="8" cy="8" r=".9"/><circle cx="12.5" cy="8" r=".9"/></svg></button>
+        <div class="p-extra">
+          <span class="p-info"></span>
+          <a class="ghost p-web" target="_blank" rel="noopener" hidden title="在博客上打开这篇文章"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 2.5h4.5V7M13.5 2.5L7 9M11.5 9.5v4h-9v-9h4"/></svg><span class="lbl">网页</span></a>
+          <a class="ghost p-dl" rel="noopener" hidden title="下载"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8.5M4.5 7L8 10.5 11.5 7M2.5 13.5h11"/></svg><span class="lbl">下载</span></a>
+        </div>
+        <button class="ghost icon p-close" type="button" title="关闭这个窗格" aria-label="关闭这个窗格"><svg viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg></button>
+      </div>
     </div>
     <div class="placeholder p-ph"><div><b>从左边打开一个文件，或新建一条笔记</b><span>新建的笔记放在「随手记」里，第一行是标题，输入后自动保存。把左边的文件拖到窗格的上下左右边缘，就能分屏打开。</span></div></div>
     <textarea class="p-ta" hidden aria-label="笔记内容" placeholder="第一行是标题…"></textarea>
