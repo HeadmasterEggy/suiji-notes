@@ -72,3 +72,15 @@ begin
     end if;
   end loop;
 end $$;
+
+-- 助手用的 API key：每人一行。key 由服务器端加密（AI_KEY_SECRET），表没有任何访问策略，
+-- 所以只有服务器（service role）能读写，页面只能看到 key 的末四位。
+create table if not exists public.ai_keys (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  base_url text not null,
+  model text not null,
+  key_enc text not null,
+  key_hint text not null default '',
+  updated_at timestamptz not null default now()
+);
+alter table public.ai_keys enable row level security;

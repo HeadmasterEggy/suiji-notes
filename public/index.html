@@ -208,6 +208,28 @@
       </div>
       <ul class="local-list" id="localList"></ul>
     </section>
+    <section id="aiSec">
+      <h3>助手</h3>
+      <div class="set-row">
+        <span><b id="aiState">读取中…</b><small id="aiInfo">用你自己的 API key，支持任何 OpenAI 兼容接口。key 加密保存在你的账号里，换设备也能用。</small></span>
+        <button class="ghost bordered small danger" id="aiRemove" type="button" hidden>删除 key</button>
+      </div>
+      <form class="ai-form" id="aiForm" autocomplete="off">
+        <label><span>服务</span><select id="aiPreset">
+          <option value="deepseek">DeepSeek</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="moonshot">Kimi（月之暗面）</option>
+          <option value="zhipu">智谱 GLM</option>
+          <option value="dashscope">通义千问（阿里云百炼）</option>
+          <option value="openai">OpenAI</option>
+          <option value="custom">自定义</option>
+        </select></label>
+        <label><span>接口地址</span><input id="aiBase" type="url" inputmode="url" spellcheck="false" placeholder="https://…/v1" required></label>
+        <label><span>模型</span><input id="aiModel" spellcheck="false" required></label>
+        <label><span>API key</span><input id="aiKey" type="password" spellcheck="false" placeholder="sk-…"></label>
+        <div class="ai-bar"><small id="aiMsg"></small><button class="btn-primary small" id="aiSave" type="submit">保存</button></div>
+      </form>
+    </section>
     <section>
       <h3>账号</h3>
       <div class="set-row">

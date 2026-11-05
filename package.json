@@ -9,6 +9,7 @@
     "sync": "node agent/suiji-sync.mjs"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "3.0.85",
     "@supabase/supabase-js": "2.45.4",
     "ai": "7.0.163"
   },

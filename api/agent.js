@@ -1,15 +1,11 @@
 // The notes assistant's model calls. The page runs the tools itself (public/agent.js: search, read, propose
-// edits), since it already has the notes and files; this function only streams the model's next step through
-// AI Gateway, for a signed-in Suiji user. Response: one JSON object per line —
-//   {t:"text", d}  {t:"tool", id, name, input}  {t:"error", message}  {t:"done", reason}
+// edits), since it already has the notes and files; this function only streams the model's next step, for a
+// signed-in Suiji user, through the OpenAI-compatible API and key they set in Settings (see _ai.js). Response:
+// one JSON object per line —
+//   {t:"text", d}  {t:"tool", id, name, input}  {t:"error", message, code?}  {t:"done", reason}
 import { streamText, jsonSchema } from "ai";
-import { createClient } from "@supabase/supabase-js";
+import { userOf, modelFor, line, fail } from "./_ai.js";
 
-// Any model id from https://ai-gateway.vercel.sh/v1/models that supports tool use. DeepSeek runs on the
-// owner's own key: DEEPSEEK_API_KEY, passed to the gateway with each request (or AI Gateway → Bring Your Own Key).
-const MODEL = process.env.AI_GATEWAY_MODEL || "deepseek/deepseek-v4.1-flash";
-const PROVIDER = MODEL.split("/")[0];
-const BYOK = PROVIDER === "deepseek" && process.env.DEEPSEEK_API_KEY ? { deepseek: [{ apiKey: process.env.DEEPSEEK_API_KEY }] } : null;
 const MAX_CHARS = 600_000;   // whole conversation, so one request can't run up a huge bill
 
 const tool = (description, properties, required) => ({ description, inputSchema: jsonSchema({ type: "object", properties, required, additionalProperties: false }) });
@@ -43,16 +39,12 @@ const instructions = (ctx) => `You are the assistant inside Suiji (随记), a no
 - Answer in the user's language (${ctx.lang === "en" ? "English" : "简体中文"} unless they write in another), concisely, in Markdown.
 - Today is ${new Date().toISOString().slice(0, 10)}.${ctx.open ? `\n- The user has this document open: "${ctx.open.title}" (id ${ctx.open.id}). "This note" / "这篇" means it.` : ""}`;
 
-const line = (o) => JSON.stringify(o) + "\n";
-const fail = (status, message) => new Response(line({ t: "error", message }), { status, headers: { "content-type": "application/x-ndjson" } });
-
 export async function POST(request) {
-  const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!token || !url || !anon) return fail(401, "not signed in");
-  const { data, error } = await createClient(url, anon, { auth: { persistSession: false } }).auth.getUser(token);
-  if (error || !data?.user) return fail(401, "not signed in");
+  const user = await userOf(request);
+  if (!user) return fail(401, "not signed in");
+  let picked;
+  try { picked = await modelFor(user); } catch (e) { return fail(500, String(e?.message || e)); }
+  if (!picked) return fail(402, "no API key", { code: "no_key" });
 
   let body;
   try { body = await request.json(); } catch { return fail(400, "bad request"); }
@@ -61,12 +53,11 @@ export async function POST(request) {
   if (messages.some((m) => !["user", "assistant", "tool"].includes(m?.role))) return fail(400, "bad message");
 
   const result = streamText({
-    model: MODEL,
+    model: picked.model,
     instructions: instructions(body.context || {}),
     messages,
     tools: TOOLS,
     abortSignal: request.signal,
-    providerOptions: { gateway: { only: [PROVIDER], user: data.user.id, tags: ["suiji-agent"], ...(BYOK && { byok: BYOK }) } },
   });
   const enc = new TextEncoder();
   const stream = new ReadableStream({

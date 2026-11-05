@@ -1150,8 +1150,10 @@ async function saveFile(p) {
 }
 
 // ---------- assistant (public/agent.js) ----------
+let openSettings = () => {};   // set with the settings dialog below; takes the id of a section to scroll to
 // Everything the assistant's tools may use. Its edits arrive here only after the user pressed 应用.
 mountAgent({
+  openSettings: (sec) => openSettings(sec),
   notes: visible, files: () => files, titleOf, isText: isEditable, fileText,
   context() {
     const p = focused, item = p?.kind === "note" ? store.notes[p.itemId] : p?.kind === "file" ? files.find((f) => f.id === p.itemId) : null;
@@ -1587,7 +1589,71 @@ function restyled() {
   }
   $("localSec").hidden = !local.available;
   $("localAdd").onclick = async () => { await local.addFolder(); fillLocal(); };
-  $("setBtn").onclick = () => { fill(); if (local.available) fillLocal(); dlg.showModal(); };
+  // Settings → Assistant: the user's own key for any OpenAI-compatible API, kept encrypted by api/ai-key.js.
+  // The key never comes back to the page; only its last four characters.
+  const AI_PRESETS = {
+    deepseek: { base: "https://api.deepseek.com", model: "deepseek-flash" },
+    openrouter: { base: "https://openrouter.ai/api/v1", hint: "deepseek/deepseek-chat" },
+    moonshot: { base: "https://api.moonshot.cn/v1", hint: "kimi-…" },
+    zhipu: { base: "https://open.bigmodel.cn/api/paas/v4", hint: "glm-…" },
+    dashscope: { base: "https://dashscope.aliyuncs.com/compatible-mode/v1", hint: "qwen-…" },
+    openai: { base: "https://api.openai.com/v1", hint: "gpt-…" },
+    custom: { base: "", hint: "" },
+  };
+  let aiOwn = null;
+  const aiApi = async (method, body) => {
+    const res = await fetch("/api/ai-key", { method, headers: { "content-type": "application/json", authorization: "Bearer " + ((await sb.auth.getSession()).data.session?.access_token || "") }, body: body && JSON.stringify(body) });
+    const out = await res.json().catch(() => ({ error: "HTTP " + res.status }));
+    if (!res.ok) throw new Error(out.error || "HTTP " + res.status);
+    return out;
+  };
+  const aiMsg = (text, bad) => { $("aiMsg").textContent = text; $("aiMsg").classList.toggle("bad", !!bad); };
+  function aiPreset(name, keepModel) {
+    const p = AI_PRESETS[name];
+    $("aiPreset").value = name;
+    $("aiBase").readOnly = name !== "custom";
+    if (name !== "custom") $("aiBase").value = p.base;
+    if (!keepModel) $("aiModel").value = p.model || "";
+    $("aiModel").placeholder = p.model || p.hint || t("模型名称");
+  }
+  function aiShow(st) {
+    aiOwn = st.own;
+    $("aiState").textContent = st.own ? t("使用你的 key（…{h}）", { h: st.own.hint }) : st.fallback ? t("使用默认 key") : t("还没有设置");
+    $("aiInfo").textContent = st.own ? st.own.model + " · " + new URL(st.own.base_url).host
+      : st.fallback ? t("你的账号可以用服务器上的 DeepSeek key（{m}）；也可以填你自己的。", { m: st.fallback.model })
+      : t("用你自己的 API key，支持任何 OpenAI 兼容接口。key 加密保存在你的账号里，换设备也能用。");
+    $("aiRemove").hidden = !st.own;
+    $("aiKey").value = ""; $("aiKey").placeholder = st.own ? t("留空则保留已保存的 key") : "sk-…";
+    $("aiKey").required = !st.own;
+    if (st.own) {
+      const name = Object.keys(AI_PRESETS).find((k) => k !== "custom" && AI_PRESETS[k].base === st.own.base_url) || "custom";
+      aiPreset(name, true); $("aiBase").value = st.own.base_url; $("aiModel").value = st.own.model;
+    } else aiPreset($("aiPreset").value || "deepseek");
+  }
+  async function fillAi() {
+    aiMsg("");
+    try { aiShow(await aiApi("GET")); } catch (e) { $("aiState").textContent = t("读取失败：{msg}", { msg: e.message }); }
+  }
+  $("aiPreset").onchange = () => aiPreset($("aiPreset").value);
+  $("aiForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const key = $("aiKey").value.trim();
+    $("aiSave").disabled = true; aiMsg(t("保存中…"));
+    try {
+      aiShow(await aiApi("PUT", { base_url: $("aiBase").value.trim(), model: $("aiModel").value.trim(), ...(key ? { api_key: key } : {}) }));
+      aiMsg(t("已保存"));
+    } catch (err) { aiMsg(t("保存失败：{msg}", { msg: err.message }), true); }
+    $("aiSave").disabled = false;
+  };
+  $("aiRemove").onclick = async () => {
+    if (!confirm(t("删除保存的 API key？"))) return;
+    try { aiShow(await aiApi("DELETE")); aiMsg(t("已删除")); } catch (err) { aiMsg(t("删除失败：{msg}", { msg: err.message }), true); }
+  };
+  openSettings = (sec) => {
+    fill(); if (local.available) fillLocal(); fillAi(); dlg.showModal();
+    if (sec) requestAnimationFrame(() => $(sec)?.scrollIntoView({ block: "start" }));
+  };
+  $("setBtn").onclick = () => openSettings();
   $("setClose").onclick = () => dlg.close();
   dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });   // a click on the backdrop
   $("styleChoices").onclick = (e) => {

@@ -170,7 +170,7 @@ async function step(bubble, signal) {
   });
   if (!res.body) throw new Error("HTTP " + res.status);
   const reader = res.body.getReader(), dec = new TextDecoder();
-  let buf = "", text = "", calls = [], err = null;
+  let buf = "", text = "", calls = [], err = null, code = null;
   const textEl = el("div", "ag-text"); bubble.append(textEl);
   let paint = 0;
   const draw = () => { paint = 0; app.markdown(text).then((html) => { textEl.innerHTML = html; scroll(); }); };
@@ -185,12 +185,12 @@ async function step(bubble, signal) {
       const m = JSON.parse(ln);
       if (m.t === "text") { text += m.d; if (!paint) paint = setTimeout(draw, 120); }
       else if (m.t === "tool") calls.push(m);
-      else if (m.t === "error") err = m.message;
+      else if (m.t === "error") { err = m.message; code = m.code || null; }
     }
   }
   clearTimeout(paint);
   if (text) draw(); else textEl.remove();
-  if (err && !text && !calls.length) throw new Error(err === "not signed in" ? t("请先登录。") : err);
+  if (err && !text && !calls.length) throw Object.assign(new Error(err === "not signed in" ? t("请先登录。") : err), { code });
   messages.push({ role: "assistant", content: [...(text ? [{ type: "text", text }] : []), ...calls.map((c) => ({ type: "tool-call", toolCallId: c.id, toolName: c.name, input: c.input }))] });
   return calls;
 }
@@ -231,7 +231,12 @@ async function send(text) {
       scroll();
     }
   } catch (e) {
-    if (e.name !== "AbortError") bubble.append(el("p", "ag-err", t("出错了：{msg}", { msg: e.message || e })));
+    if (e.code === "no_key") {
+      // No key of their own yet: point to Settings rather than showing an error.
+      const p = el("p", "ag-err", t("先在「设置 → 助手」里填上你的 API key，就可以开始用了。") + " "), b = el("button", "ghost bordered small", t("去设置"));
+      b.type = "button"; b.onclick = () => app.openSettings("aiSec");
+      p.append(b); bubble.append(p);
+    } else if (e.name !== "AbortError") bubble.append(el("p", "ag-err", t("出错了：{msg}", { msg: e.message || e })));
     // An unanswered tool call would make the next request invalid, so the turn is dropped back to the question.
     while (messages.length && messages.at(-1).role !== "user") messages.pop();
     if (messages.at(-1)?.role === "user") messages.pop();
