@@ -1465,12 +1465,20 @@ function openIn(p, kind, id, fromHist) {
   }
   navState(p);
   commit(p); closeMenu(p);
+  const left = p.kind === "note" && p.itemId;
   p.kind = kind; p.itemId = id; p.shown = null; p.shownId = null; p.fileEdit = false; p.editing = false;
   if (kind === "note") p.ta.value = store.notes[id]?.body || "";
-  saveLayout(); markCurrent(); renderPane(p);
+  saveLayout(); markCurrent(); renderPane(p); dropIfEmpty(left);
   if (kind === "note" && !isPhone.matches) p.ta.focus();
 }
 function openFile(id) { openIn(focused, "file", id); }
+// A note left empty (New, then off to something else) is thrown away rather than kept as 无标题 forever.
+function dropIfEmpty(id) {
+  const n = id && store.notes[id];
+  if (!n || n.deleted || n.body.trim() || [...panes.values()].some((x) => x.kind === "note" && x.itemId === id)) return;
+  Object.assign(n, { deleted: true, updated_at: new Date().toISOString(), dirty: true });
+  persist(); renderList(); scheduleSync();
+}
 // Back and forward, per pane, like a browser's: the documents opened in it, each where it was scrolled to.
 const scroller = (p) => p.kind === "note" || p.fileEdit ? p.ta : p.preview;
 const here = (p) => ({ kind: p.kind, id: p.itemId, top: scroller(p).scrollTop });
@@ -1574,6 +1582,7 @@ function closePane(p) {
   panes.delete(p.id); p.el.remove(); p.graph?.destroy(); paneSizes.unobserve(p.el);
   if (focused === p) focused = firstPane(sibling);
   buildLayout(); saveLayout(); render();
+  if (p.kind === "note") dropIfEmpty(p.itemId);
 }
 
 // ---------- sidebar width ----------
@@ -2072,7 +2081,10 @@ function enter(session) {
     for (const p of panes.values()) if (p.kind === "file") { p.shown = null; renderPane(p); }
   }).catch(() => {});
   local.start(sb, session, { onChange: localChanged, onStatus: localStatus }).catch(console.error);
-  load(); filesLoaded = false; restoreLayout(); render();
+  load(); filesLoaded = false; restoreLayout();
+  // Empty notes left from before (not open anywhere, untouched for an hour, so not one just made elsewhere).
+  for (const n of visible()) if (!n.body.trim() && Date.now() - Date.parse(n.updated_at) > 3600e3) dropIfEmpty(n.id);
+  render();
   if (focused?.kind) app.dataset.view = "edit";
   // Warm up the Markdown renderer in the background so the first document opens without waiting for it.
   (window.requestIdleCallback || ((fn) => setTimeout(fn, 1500)))(() => loadMarkdownLibs().catch(() => {})); sync(); loadFiles(); subscribe();
