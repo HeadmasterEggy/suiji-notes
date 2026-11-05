@@ -1972,7 +1972,12 @@ function restyled() {
   };
   $("setBtn").onclick = () => openSettings();
   $("setClose").onclick = () => dlg.close();
-  dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });   // a click on the backdrop
+  // A click on the backdrop closes it, but only one that also started there: dragging to select text in a
+  // field and letting go outside the panel must not throw away what was typed.
+  const outside = (e) => { const r = dlg.getBoundingClientRect(); return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom; };
+  let downOutside = false;
+  dlg.addEventListener("pointerdown", (e) => { downOutside = e.target === dlg && outside(e); });
+  dlg.addEventListener("click", (e) => { if (downOutside && e.target === dlg && outside(e)) dlg.close(); downOutside = false; });
   $("styleChoices").onclick = (e) => {
     const b = e.target.closest("[data-style]");
     if (!b || b.getAttribute("aria-checked") === "true") return;
