@@ -775,10 +775,12 @@ function itemRow(kind, id, label, depth, metaText, title) {
 function editLabel(p, text, on) {
   p.edit.querySelector(".lbl").textContent = text; p.edit.title = text; p.edit.classList.toggle("on", on);
 }
+// In search results metaText is the file's folder path; the row shows only the nearest folder, where the
+// name differs, and the tooltip gives the whole path.
 function fileRow(f, depth, metaText) {
   const name = baseName(f.name), parent = fullPath(f).slice(-2, -1)[0];
-  return itemRow("file", f.id, metaText ? name : shortName(name, parent), depth, metaText,
-    `${name}\n${fmtSize(f.size)} · ${fmt(f.updated_at || f.created_at)}`);
+  return itemRow("file", f.id, metaText ? name : shortName(name, parent), depth, metaText && metaText.split("/").pop(),
+    `${name}\n${metaText ? metaText + "\n" : ""}${fmtSize(f.size)} · ${fmt(f.updated_at || f.created_at)}`);
 }
 function noteRow(n, depth, metaText) {
   return itemRow("note", n.id, titleOf(n.body), depth, n.dirty ? t("未同步") : metaText, t("修改于 {time}", { time: fmt(n.updated_at) }));
