@@ -649,14 +649,43 @@ function docHead(f, fm, web, body) {
   return head;
 }
 
+// Small blocks, so the place is found to within a line or two (a document may be one big blockquote).
+const ANCHORS = ".md-body :is(h1, h2, h3, h4, h5, h6, p, li, pre, table, tr, img, hr, figure, .katex-display), .p-preview > pre";
+// Where the reader is in a rendered document: the first block at the top of the view, how far into it, and
+// as a fallback the share of the way through.
+function readingPlace(p) {
+  const pv = p.preview, top = pv.getBoundingClientRect().top;
+  const blocks = [...pv.querySelectorAll(ANCHORS)];
+  const i = blocks.findIndex((b) => b.getBoundingClientRect().bottom > top);
+  return { i, off: i < 0 ? 0 : top - blocks[i].getBoundingClientRect().top, share: pv.scrollTop / Math.max(1, pv.scrollHeight) };
+}
+function toPlace(p, at) {
+  const pv = p.preview, b = at.i >= 0 && pv.querySelectorAll(ANCHORS)[at.i];
+  if (b) pv.scrollTop += b.getBoundingClientRect().top - pv.getBoundingClientRect().top + at.off;
+  else pv.scrollTop = at.share * pv.scrollHeight;
+}
+// Redrawing the same document (a new theme for its diagrams, a sync, a file changed on disk) keeps the reader's
+// place, also while its diagrams and images settle, until they scroll themselves.
+function holdPlace(p, at, token) {
+  toPlace(p, at);
+  let moved = false;
+  const stop = () => { moved = true; }, on = ["wheel", "touchstart", "keydown", "pointerdown"];
+  for (const t of on) p.el.addEventListener(t, stop, { passive: true });
+  const ro = new ResizeObserver(() => { if (!moved && token === p.token) toPlace(p, at); });
+  for (const c of p.preview.children) ro.observe(c);
+  setTimeout(() => { ro.disconnect(); for (const t of on) p.el.removeEventListener(t, stop); }, 2500);
+}
+
 async function showFile(f, p) {
-  const token = ++p.token, preview = p.preview;
+  const token = ++p.token, preview = p.preview, again = p.shownId === f.id;
   p.meta.textContent = `${baseName(f.name)} · ${fmtSize(f.size)} · ${fmt(f.updated_at || f.created_at)}`;
   const md = isMarkdown(f) && f.size < 2 * 1024 * 1024;
   preview.classList.toggle("doc", md);
   const show = (el) => {
     if (token !== p.token) return;
+    const at = again && p.shownId === f.id && preview.scrollTop > 0 ? readingPlace(p) : null;
     clearTimeout(wait); preview.replaceChildren(el); preview.scrollTop = 0; p.shownId = f.id;
+    if (at) holdPlace(p, at, token);
     if (staleIds.has(f.id) && !retried.has(versionOf(f))) {
       retried.add(versionOf(f));
       setTimeout(() => { if (token === p.token) { p.shown = null; renderPane(p); } }, 5000);
@@ -664,7 +693,7 @@ async function showFile(f, p) {
   };
   // The skeleton only appears if loading takes a noticeable moment, so cached documents never flash.
   const media = isImage(f) || /^(video|audio)\/|\/pdf$/.test(f.mime);
-  const wait = setTimeout(() => { if (token === p.token) preview.replaceChildren(skeleton(media)); }, 120);
+  const wait = again ? 0 : setTimeout(() => { if (token === p.token) preview.replaceChildren(skeleton(media)); }, 120);   // not over the document being redrawn
   // The download link is not needed to show the file; fetch it alongside.
   p.dl.removeAttribute("href");
   p.web.hidden = true; p.web.removeAttribute("href");
@@ -1433,7 +1462,7 @@ function renderPane(p) {
     p.shown = null;
     p.meta.textContent = t("修改于 {time}", { time: fmt(note.updated_at) });
     // Never overwrite what the user is in the middle of typing.
-    if (!p.editing && p.ta.value !== note.body) p.ta.value = note.body;
+    if (!p.editing && p.ta.value !== note.body) { const top = p.ta.scrollTop; p.ta.value = note.body; p.ta.scrollTop = top; }
     return;
   }
   if (editingFile) { p.meta.textContent = t("{name} · 编辑中，自动保存", { name: baseName(file.name) }); return; }
@@ -1621,7 +1650,7 @@ function buildLayout() {
   // Moving a pane's element to a new place in the page resets its scrolling, so note it first and put it back.
   // As a share of the way through: a pane that gets narrower or wider reflows its text.
   const at = (el) => el.scrollTop / Math.max(1, el.scrollHeight);
-  const kept = [...panes.values()].map((p) => [p, at(p.ta), at(p.preview), p.tocList?.scrollTop || 0]);
+  const kept = [...panes.values()].map((p) => [p, at(p.ta), p.preview.scrollTop > 0 && readingPlace(p), p.tocList?.scrollTop || 0]);
   const mk = (node) => {
     if (node.pane) { node.pane.el.classList.toggle("focused", node.pane === focused); return node.pane.el; }
     const box = document.createElement("div");
@@ -1655,7 +1684,8 @@ function buildLayout() {
   ws.replaceChildren(root);
   ws.dataset.multi = String(panes.size > 1);
   for (const [p, ta, pv, toc] of kept) {
-    p.ta.scrollTop = ta * p.ta.scrollHeight; p.preview.scrollTop = pv * p.preview.scrollHeight;
+    p.ta.scrollTop = ta * p.ta.scrollHeight;
+    if (pv) toPlace(p, pv);
     if (p.tocList) p.tocList.scrollTop = toc;
   }
 }
