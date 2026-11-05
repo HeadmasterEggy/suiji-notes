@@ -1716,6 +1716,20 @@ window.addEventListener("paste", (e) => {
   if (fl && fl.length) { e.preventDefault(); uploadFiles(fl); }
 });
 search.addEventListener("input", renderList);
+// From the keyboard: Enter in the search box opens the first hit, ↓ moves into the list, and ↑ / ↓ step
+// through the rows that are showing (↑ from the top row goes back to the search box).
+const shownRows = () => [...list.querySelectorAll(".tree-row")].filter((r) => !r.closest(".drawer:not(.open)"));
+search.addEventListener("keydown", (e) => {
+  if (e.isComposing) return;
+  if (e.key === "Enter" && search.value.trim()) { e.preventDefault(); list.querySelector(".tree-file")?.click(); }
+  else if (e.key === "ArrowDown") { e.preventDefault(); shownRows()[0]?.focus(); }
+});
+list.addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp" || !e.target.closest(".tree-row")) return;
+  e.preventDefault();
+  const rows = shownRows(), i = rows.indexOf(e.target) + (e.key === "ArrowDown" ? 1 : -1);
+  (i < 0 ? search : rows[Math.min(i, rows.length - 1)])?.focus();
+});
 const sortSel = $("sortSel");
 sortSel.value = sortBy;
 sortSel.onchange = () => {
