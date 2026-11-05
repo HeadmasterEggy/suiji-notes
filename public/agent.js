@@ -89,7 +89,9 @@ async function proposeEdit({ id, summary, replacements, content }, bubble) {
 }
 function proposeNote({ body, summary }, bubble) {
   const card = el("div", "ag-card");
-  card.append(el("div", "ag-card-head", "＋ " + (summary || t("新建随手记"))), diffView("", body));
+  const head = el("div", "ag-card-head");
+  head.append(el("span", "ag-card-name", t("新建随手记")), ...(summary ? [el("span", "ag-sum", summary)] : []));
+  card.append(head, diffView("", body));
   const bar = el("div", "ag-card-bar"), yes = el("button", "btn-primary small", t("创建")), no = el("button", "ghost bordered small", t("不用了"));
   yes.onclick = () => { const id = app.newNote(body); settle(card, t("已创建"), () => app.open("note", id)); };
   no.onclick = () => settle(card, t("已放弃"));
@@ -100,18 +102,19 @@ function proposeNote({ body, summary }, bubble) {
 function diffCard(d, summary, base, next) {
   const card = el("div", "ag-card");
   const head = el("div", "ag-card-head");
-  const name = el("a", null, d.title); name.href = "#"; name.onclick = (e) => { e.preventDefault(); app.open(d.kind, d.id); };
-  head.append(el("span", null, "✎ "), name, el("span", "ag-sum", " · " + summary));
+  const name = el("a", "ag-card-name", d.title.replace(/\.(md|markdown)$/i, "")); name.href = "#"; name.title = d.path;
+  name.onclick = (e) => { e.preventDefault(); app.open(d.kind, d.id); };
+  head.append(name, el("span", "ag-sum", summary));
   const bar = el("div", "ag-card-bar"), yes = el("button", "btn-primary small", t("应用")), no = el("button", "ghost bordered small", t("放弃"));
   yes.onclick = async () => {
-    yes.disabled = no.disabled = true;
+    yes.disabled = no.disabled = true; yes.textContent = t("应用中…");
     try {
       const now = find(d.id);
       if (!now || await textOf(now) !== base) throw new Error(t("文档在这之后改过了，请让助手重新生成修改。"));
       await app.apply(now, next);
       settle(card, t("已应用"), () => app.open(d.kind, d.id));
     } catch (e) {
-      yes.disabled = no.disabled = false;
+      yes.disabled = no.disabled = false; yes.textContent = t("应用");
       card.querySelector(".ag-err")?.remove();
       card.append(el("p", "ag-err", e.message || String(e)));
     }
@@ -121,9 +124,13 @@ function diffCard(d, summary, base, next) {
   card.append(head, diffView(base, next), bar);
   return card;
 }
+// Once decided, the card folds to its head and a line saying what happened; the diff stays a click away.
 function settle(card, label, open) {
   const bar = card.querySelector(".ag-card-bar");
-  bar.replaceChildren(el("span", "ag-done", label));
+  card.classList.add("settled", open ? "ok" : "no");
+  const diff = el("button", "ghost small", t("查看改动")); diff.type = "button";
+  diff.onclick = () => { const on = card.classList.toggle("unfold"); diff.textContent = on ? t("收起") : t("查看改动"); };
+  bar.replaceChildren(el("span", "ag-done", label), diff);
   if (open) { const b = el("button", "ghost bordered small", t("打开")); b.onclick = open; bar.append(b); }
 }
 
@@ -328,7 +335,7 @@ const CHIP = {
   show_in_sidebar: (i) => i.filter != null ? t("在侧边栏筛选「{q}」", { q: i.filter }) : t("在侧边栏中定位"),
 };
 async function runTool(c, bubble) {
-  const chip = el("div", "ag-chip", CHIP[c.name]?.(c.input || {}) || c.name);
+  const chip = el("div", "ag-chip", CHIP[c.name]?.(c.input || {}) || c.name); chip.title = chip.textContent;
   bubble.append(chip);
   try {
     const i = c.input || {};
@@ -398,10 +405,14 @@ function reset() {
 }
 function empty() {
   const box = el("div", "ag-empty"); box.id = "agEmpty";
-  box.append(el("p", null, t("我可以帮你检索、总结和修改笔记。改动会先给你看，你点「应用」才会生效。")));
+  const mark = el("div", "ag-mark");
+  mark.innerHTML = '<svg viewBox="0 0 16 16"><path d="M8 1.8l1.3 3.4 3.4 1.3-3.4 1.3L8 11.2 6.7 7.8 3.3 6.5l3.4-1.3z"/><path d="M12.6 10.4l.6 1.5 1.5.6-1.5.6-.6 1.5-.6-1.5-1.5-.6 1.5-.6z"/></svg>';
+  box.append(mark, el("h3", null, t("问问你的笔记")), el("p", null, t("我可以帮你检索、总结和修改笔记。改动会先给你看，你点「应用」才会生效。")));
+  const list = el("div", "ag-sugs");
   for (const q of [t("总结一下这篇"), t("找出所有提到“反向传播”的笔记"), t("帮我把这篇的错别字改掉")]) {
-    const b = el("button", "ghost bordered small", q); b.type = "button"; b.onclick = () => send(q); box.append(b);
+    const b = el("button", "ag-sug", q); b.type = "button"; b.onclick = () => send(q); list.append(b);
   }
+  box.append(list);
   return box;
 }
 

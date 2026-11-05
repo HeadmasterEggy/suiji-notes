@@ -271,6 +271,9 @@ function buildWindow() {
   win.on("resized", saveBounds); win.on("moved", saveBounds);
   win.on("page-title-updated", (e) => e.preventDefault());
   for (const [ev, on] of [["enter-full-screen", true], ["leave-full-screen", false]]) win.on(ev, () => win.webContents.send("fullscreen", on));
+  // A reload (⌘R, or the page updating itself after a deploy) starts without the class, so each load is told
+  // again; otherwise the 32 px title-bar gap and the drag strip come back in full screen.
+  win.webContents.on("dom-ready", () => win.webContents.send("fullscreen", win.isFullScreen()));
 
   // Closing the window keeps the app (and the sync) running; the Dock icon or the menu bar item brings it back.
   win.on("close", (e) => {

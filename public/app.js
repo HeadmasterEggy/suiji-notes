@@ -665,6 +665,15 @@ function toPlace(p, at) {
   else pv.scrollTop = at.share * pv.scrollHeight;
 }
 
+// What a Markdown drawing was made from: the text and the look (Mermaid's generated ids differ every time,
+// so two drawings of the same text are compared by this, not node by node).
+function drawKey(text) {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  const d = document.documentElement.dataset;
+  return [d.mode, d.style || "", lang, text.length, h >>> 0].join(":");
+}
+const sameDrawing = (a, b) => !!a.dataset?.src && a.dataset.src === b.dataset?.src;
 async function showFile(f, p) {
   const token = ++p.token, preview = p.preview, again = p.shownId === f.id;
   p.meta.textContent = `${baseName(f.name)} · ${fmtSize(f.size)} · ${fmt(f.updated_at || f.created_at)}`;
@@ -672,6 +681,10 @@ async function showFile(f, p) {
   preview.classList.toggle("doc", md);
   const show = (el) => {
     if (token !== p.token) return;
+    // A redraw that comes out the same (the folder watcher and the synced row both redraw after a save)
+    // leaves the page alone: no swap, no jump, nothing reloads.
+    const cur = preview.children.length === 1 && preview.firstElementChild;
+    if (again && cur && (cur === el || cur.isEqualNode(el) || sameDrawing(cur, el))) { clearTimeout(wait); p.shownId = f.id; return cur; }
     const at = again && p.place?.id === f.id ? p.place : null;
     for (const c of preview.children) p.keep.unobserve(c);
     clearTimeout(wait); preview.replaceChildren(el); preview.scrollTop = 0; p.shownId = f.id;
@@ -681,6 +694,7 @@ async function showFile(f, p) {
       retried.add(versionOf(f));
       setTimeout(() => { if (token === p.token) { p.shown = null; renderPane(p); } }, 5000);
     }
+    return el;
   };
   // The skeleton only appears if loading takes a noticeable moment, so cached documents never flash.
   const media = isImage(f) || /^(video|audio)\/|\/pdf$/.test(f.mime);
@@ -688,7 +702,7 @@ async function showFile(f, p) {
   // The download link is not needed to show the file; fetch it alongside.
   p.dl.removeAttribute("href");
   p.web.hidden = true; p.web.removeAttribute("href");
-  setToc(p, null);
+  if (!again) setToc(p, null);   // a redraw keeps the outline until the new one is ready, so the layout holds still
   signedUrls([f.path], f.name).then((m) => { if (token === p.token && m.get(f.path)) p.dl.href = m.get(f.path); }).catch(() => {});
 
   const textish = isTextish(f);
@@ -699,11 +713,12 @@ async function showFile(f, p) {
         const [text] = await Promise.all([fileText(f), loadMarkdownLibs()]);
         if (token !== p.token) return;
         el = await renderMarkdown(text, f);
+        el.dataset.src = drawKey(text);
         if (!staleIds.has(f.id)) keepRender(f, el);
       }
       if (el.dataset.web) { p.web.href = el.dataset.web; p.web.hidden = false; }
-      show(el);
-      if (token === p.token) setToc(p, el);
+      const shown = show(el);
+      if (token === p.token) setToc(p, shown || el);
       return;
     }
     if (textish) {
@@ -1284,7 +1299,7 @@ mountAgent({
       const n = store.notes[d.id];
       n.body = text; n.updated_at = new Date().toISOString(); n.dirty = true;
       persist(); scheduleSync();
-      for (const p of open) p.ta.value = text;
+      for (const p of open) { const top = p.ta.scrollTop; p.ta.value = text; p.ta.scrollTop = top; }
       render();
       return;
     }
