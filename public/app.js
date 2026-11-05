@@ -1442,6 +1442,8 @@ document.addEventListener("keydown", (e) => {
   if (!d || e.altKey !== e.key.startsWith("Arrow")) return;
   e.preventDefault(); goHist(focused, d);
 });
+// WebKit doesn't pass a mouse's side buttons to the page, so the Mac app catches them and calls this.
+window.suijiNav = (d) => { if (focused) goHist(focused, d); };
 addEventListener("mouseup", (e) => {
   if (e.button !== 3 && e.button !== 4) return;
   e.preventDefault();   // otherwise the browser itself goes back, out of the app

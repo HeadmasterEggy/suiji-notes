@@ -57,6 +57,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     buildMainMenu()
     buildWindow()
     watcher.watch(local.folders)
+    // A mouse's back and forward buttons: WebKit doesn't give them to the page, so hand them over (app.js suijiNav).
+    NSEvent.addLocalMonitorForEvents(matching: .otherMouseUp) { [weak self] e in
+      guard let self, e.buttonNumber == 3 || e.buttonNumber == 4, e.window === self.window else { return e }
+      self.web.evaluateJavaScript("window.suijiNav?.(\(e.buttonNumber == 3 ? -1 : 1))")
+      return nil
+    }
     if !testing || ProcessInfo.processInfo.environment["SUIJI_MAGPIE"] != nil { makeMagpieLink() }
     if testing { return }   // a test copy runs unseen: no window, menu bar item or updates, and leaves the agent alone
     retireAgent()
