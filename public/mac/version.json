@@ -1,1 +1,1 @@
-{"version":"2.2","build":12,"url":"https://github.com/HeadmasterEggy/suiji-notes/releases/download/v2.2/Suiji-2.2.zip","notes":"No more menu bar icon: the sync log, open at login and update check are in Settings → Local folders. 去掉了菜单栏图标：同步日志、登录时打开和检查更新都在 设置 → 本地文件夹 里。"}
+{"version":"2.3","build":13,"url":"https://github.com/HeadmasterEggy/suiji-notes/releases/download/v2.3/Suiji-2.3.zip","notes":"Interface size: a slider in Settings → Appearance (75–150 %), the same zoom as ⌘+ / ⌘−, now kept after a restart. 界面大小：设置 → 外观 里的滑块（75%–150%），和 ⌘+ / ⌘− 是同一个缩放，重启后也会保留。"}

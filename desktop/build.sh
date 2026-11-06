@@ -6,10 +6,10 @@
 # Raise BUILD for every release you publish; installed apps only update to a higher BUILD. The Swift app is at 9.
 # Apple silicon only for now.
 set -e
-VERSION=${VERSION:-2.2}
-BUILD=${BUILD:-12}
+VERSION=${VERSION:-2.3}
+BUILD=${BUILD:-13}
 REPO=HeadmasterEggy/suiji-notes
-NOTES="No more menu bar icon: the sync log, open at login and update check are in Settings → Local folders. 去掉了菜单栏图标：同步日志、登录时打开和检查更新都在 设置 → 本地文件夹 里。"
+NOTES="Interface size: a slider in Settings → Appearance (75–150 %), the same zoom as ⌘+ / ⌘−, now kept after a restart. 界面大小：设置 → 外观 里的滑块（75%–150%），和 ⌘+ / ⌘− 是同一个缩放，重启后也会保留。"
 cd "$(dirname "$0")"
 
 [ -d node_modules/electron-builder ] || npm ci
