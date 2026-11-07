@@ -299,7 +299,7 @@ function toOpenAI(msgs) {
 async function step(bubble, signal) {
   await refreshMagpie();
   const cfg = localModel();
-  let text = "", reasoning = "", calls = [], err = null, code = null;
+  let text = "", reasoning = "", calls = [], err = null, code = null, done = null;
   const textEl = el("div", "ag-text"); bubble.append(textEl);
   let paint = 0;
   const draw = () => { paint = 0; app.markdown(text).then((html) => { textEl.innerHTML = html; scroll(); }); };
@@ -308,8 +308,17 @@ async function step(bubble, signal) {
     else if (m.t === "reasoning") reasoning += m.d;
     else if (m.t === "tool") calls.push(m);
     else if (m.t === "error") { err = m.message; code = m.code || null; }
+    else if (m.t === "done") done = m.reason || "stop";
   }
   clearTimeout(paint);
+  // A turn that brings nothing back used to leave an empty bubble with no word of why. Say what happened:
+  // the stream cut off before it finished, or the model finished without a reply (only thinking, a length
+  // or content-filter stop, an empty answer). Local models send no "done", so only their empty answer counts.
+  if (!err && !text && !calls.length) {
+    if (!cfg && !done) err = t("助手的回复中断了，没有收到内容，请再试一次。");
+    else err = reasoning ? t("模型只返回了思考过程，没有给出回答（{reason}），请再试一次或换一个模型。", { reason: done || "stop" })
+      : t("模型没有返回任何内容（{reason}），请再试一次或换一个模型。", { reason: done || "stop" });
+  }
   if (text) draw(); else textEl.remove();
   if (err && !text && !calls.length) throw Object.assign(new Error(err === "not signed in" ? t("请先登录。") : err), { code });
   messages.push({ role: "assistant", content: [...(text ? [{ type: "text", text }] : []), ...calls.map((c) => ({ type: "tool-call", toolCallId: c.id, toolName: c.name, input: c.input }))], ...(reasoning ? { reasoning } : {}) });
