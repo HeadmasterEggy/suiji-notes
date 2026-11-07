@@ -208,9 +208,10 @@ function subscribe() {
 // ---------- files ----------
 // File bytes live in the private "files" bucket at <uid>/<id>.<ext>; the files table keeps the real name.
 const MAX_FILE = 50 * 1024 * 1024;
-let files = [], filesLoaded = false, filesErr = false, filesRetry = null;
+let files = [], allFiles = [], filesLoaded = false, filesErr = false, filesRetry = null;
 const isImage = (f) => f.mime.startsWith("image/");
 const extOf = (name) => { const m = /\.([a-z0-9]{1,6})$/i.exec(name); return m ? m[1].toLowerCase() : ""; };
+const isMarkdown = (f) => ["md", "markdown"].includes(extOf(f.name)) || f.mime === "text/markdown";
 function fmtSize(n) {
   if (n < 1024) return n + " B";
   if (n < 1024 * 1024) return (n / 1024).toFixed(0) + " KB";
@@ -236,7 +237,8 @@ async function loadFiles() {
   if (filesErr) { filesErr = false; showNote(""); }
   const before = new Map(files.map((f) => [f.id, versionOf(f)]));
   for (const f of data) if (before.has(f.id) && before.get(f.id) !== versionOf(f)) forgetUrls(f.path);
-  files = data; filesLoaded = true;
+  // Only Markdown documents are shown; any other file in the account stays in the cloud, untouched and hidden.
+  allFiles = data; files = data.filter(isMarkdown); filesLoaded = true;
   render();
   schedulePrefetch();
 }
@@ -252,7 +254,10 @@ const baseName = (n) => n.split("/").pop();
 let uploading = 0;
 async function uploadFiles(input) {
   if (!uid) return;
-  const all = [...input].filter((f) => !baseName(f.webkitRelativePath || f.name).startsWith("."));
+  const picked = [...input].filter((f) => !baseName(f.webkitRelativePath || f.name).startsWith("."));
+  // Only Markdown documents are uploaded; anything else picked (or inside a picked folder) is left out.
+  const all = picked.filter((f) => isMarkdown({ name: f.name, mime: f.type || "" }));
+  if (picked.length > all.length) showNote(t("只支持 Markdown（.md）文档，跳过了 {n} 个其他文件。", { n: picked.length - all.length }), all.length ? "" : "err");
   const tooBig = all.filter((f) => f.size > MAX_FILE);
   if (tooBig.length) showNote(t("{names} 超过 50 MB，没有上传。", { names: tooBig.map((f) => f.name).join(lang === "en" ? ", " : "、") }), "err");
   const ok = all.filter((f) => f.size <= MAX_FILE);
@@ -427,7 +432,6 @@ function blogUrl(f, fm) {
   if (f.folder !== "_posts" || !/^[\w-]+$/.test(slug) || unpublished.some((d) => f.name.startsWith(d))) return null;
   return `${BLOG}/posts/${encodeURIComponent(slug)}.html`;
 }
-const isMarkdown = (f) => ["md", "markdown"].includes(extOf(f.name)) || f.mime === "text/markdown";
 const CDN = "https://cdn.jsdelivr.net/npm/";
 let mdLibs = null, mermaidLib = null, mermaidSeq = 0;
 const MERMAID_CSS = `
@@ -607,9 +611,10 @@ async function renderMarkdown(src, f) {
   const frag = tpl.content;
   await renderMermaid(frag);
 
-  // Relative images and links point at sibling files in the synced folder.
+  // Relative images and links point at sibling files in the synced folder. Images already in the cloud
+  // still show inside a document even though only Markdown files are listed.
   const dir = fullPath(f).slice(0, -1);
-  const byPath = new Map(files.map((x) => [fullPath(x).join("/"), x]));
+  const byPath = new Map(allFiles.map((x) => [fullPath(x).join("/"), x]));
   const isRel = (u) => u && !/^([a-z]+:|\/\/|#|data:)/i.test(u);
   const imgs = [...frag.querySelectorAll("img")].filter((img) => isRel(img.getAttribute("src")));
   const targets = imgs.map((img) => byPath.get(resolveRel(dir, img.getAttribute("src"))));
@@ -637,8 +642,8 @@ async function renderMarkdown(src, f) {
     if (a.dataset.open) continue;
     const href = a.getAttribute("href");
     const target = isRel(href) && byPath.get(resolveRel(dir, href));
-    if (target) a.dataset.open = target.id;   // handled by the pane's click listener, so cached copies keep working
-    else if (!href.startsWith("#")) { a.target = "_blank"; a.rel = "noopener"; }
+    if (target && isMarkdown(target)) a.dataset.open = target.id;   // handled by the pane's click listener, so cached copies keep working
+    else if (!target && !href.startsWith("#")) { a.target = "_blank"; a.rel = "noopener"; }
   }
   return art;
 }

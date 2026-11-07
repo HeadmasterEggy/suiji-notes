@@ -270,6 +270,7 @@ const EN = {
   "没能同步到云端，改动已保存在本机，联网后会自动重试。": "Couldn't sync to the cloud. Your changes are saved on this device and will retry once online.",
   "未命名": "Untitled",
   "{names} 超过 50 MB，没有上传。": "{names}: over 50 MB, not uploaded.",
+  "只支持 Markdown（.md）文档，跳过了 {n} 个其他文件。": "Only Markdown (.md) documents are supported; skipped {n} other files.",
   "上传中 · 剩 {n} 个": "Uploading · {n} left",
   "「{name}」上传失败：{msg}。": "Couldn't upload “{name}”: {msg}.",
   "网络问题": "network problem",
