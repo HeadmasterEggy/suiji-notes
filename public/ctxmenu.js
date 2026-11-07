@@ -177,7 +177,7 @@ export function mountMenu(a) {
   }, true);
   addEventListener("blur", close);
   addEventListener("resize", close);
-  document.addEventListener("scroll", close, true);
+  document.addEventListener("scroll", () => { if (menu) close(); }, true);   // every scroll event: only when a menu is open
   // ⌘B / ⌘I / ⌘K in the editor.
   document.addEventListener("keydown", (e) => {
     const ta = e.target.closest?.("textarea.p-ta");
