@@ -341,6 +341,9 @@ textarea {
 .preview .big-ext { font: 600 28px var(--font-mono); color: var(--accent); text-transform: uppercase; }
 .preview.doc { display: block; }
 .md-body { width: 100%; min-width: 0; justify-self: stretch; align-self: start; margin: 0; padding: 24px 32px 48px; font-size: var(--doc-size, 16px); line-height: 1.8; overflow-wrap: break-word; }
+/* 文档版式 · 居中: a reading column about 46 characters of body text wide, centred in the pane; the editor's text too. */
+:root[data-width="center"] .md-body { max-width: calc(46 * var(--doc-size, 16px) + 64px); justify-self: center; margin-inline: auto; }
+:root[data-width="center"] .p-ta { padding-inline: max(24px, calc(50% - 23 * var(--doc-size, 16px))); }
 /* Above the text: the title, then the front matter as a card of properties (folds away like a details box). */
 .md-head { margin-bottom: 26px; }
 .md-body .md-title { font-size: 2em; line-height: 1.25; margin: 0 0 14px; overflow-wrap: anywhere; }

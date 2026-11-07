@@ -66,6 +66,14 @@ function applyFont(px, save) {
   for (const b of $("fontChoices").querySelectorAll("[data-size]")) b.setAttribute("aria-checked", String(+b.dataset.size === px));
 }
 applyFont(fontSize());
+// Document layout: "" fills the pane (the default), "center" keeps text in a narrower centred column.
+// data-width on the root, saved as "suiji:width"; the head script sets it before first paint.
+function applyWidth(w, save) {
+  if (w) document.documentElement.dataset.width = w; else delete document.documentElement.dataset.width;
+  if (save) try { w ? localStorage.setItem("suiji:width", w) : localStorage.removeItem("suiji:width"); } catch {}
+  for (const b of $("widthChoices").querySelectorAll("[data-width]")) b.setAttribute("aria-checked", String(b.dataset.width === w));
+}
+applyWidth(document.documentElement.dataset.width || "");
 
 // Interface size, 75–150 %. The Mac app zooms natively (the factor ⌘+ / ⌘− change, so media queries and pointer
 // maths stay exact). A browser gets CSS zoom on the root, saved as "suiji:zoom"; uiZoom() turns pointer and
@@ -2103,6 +2111,7 @@ function restyled() {
     if (b && b.dataset.mode !== modeChoice) { applyMode(b.dataset.mode, true); restyled(); }
   };
   $("fontChoices").onclick = (e) => { const b = e.target.closest("[data-size]"); if (b) applyFont(+b.dataset.size, true); };
+  $("widthChoices").onclick = (e) => { const b = e.target.closest("[data-width]"); if (b) applyWidth(b.dataset.width, true); };
   // Zoom on release: resizing the page under a dragged thumb would move the thumb away from the pointer.
   $("zoomRange").oninput = (e) => { $("zoomVal").textContent = e.target.value + "%"; };
   $("zoomRange").onchange = (e) => applyZoom(+e.target.value / 100, true);

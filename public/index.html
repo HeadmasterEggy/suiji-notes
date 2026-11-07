@@ -15,15 +15,16 @@
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="themes.css">
-<!-- The chosen style, light / dark and text size go on before first paint, so the page never flashes the default. -->
+<!-- The chosen style, light / dark, text size and document width go on before first paint, so the page never flashes the default. -->
 <script>{
   const r = document.documentElement;
   r.dataset.mode = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   try {
-    const s = localStorage.getItem("suiji:style"), f = localStorage.getItem("suiji:font"), m = localStorage.getItem("suiji:mode");
+    const s = localStorage.getItem("suiji:style"), f = localStorage.getItem("suiji:font"), m = localStorage.getItem("suiji:mode"), w = localStorage.getItem("suiji:width");
     if (s) r.dataset.style = s;
     if (m === "light" || m === "dark") r.dataset.mode = m;
     if (f) r.style.setProperty("--doc-size", f + "px");
+    if (w === "center") r.dataset.width = w;
   } catch {}
 }</script>
 </head>
@@ -169,6 +170,13 @@
           <button type="button" role="radio" data-size="15">小</button>
           <button type="button" role="radio" data-size="16">标准</button>
           <button type="button" role="radio" data-size="18">大</button>
+        </div>
+      </div>
+      <div class="set-row">
+        <span>文档版式<small>居中时正文收窄成一栏，宽屏读起来更舒服</small></span>
+        <div class="seg" id="widthChoices" role="radiogroup" aria-label="文档版式">
+          <button type="button" role="radio" data-width="">铺满</button>
+          <button type="button" role="radio" data-width="center">居中</button>
         </div>
       </div>
       <div class="set-row">
