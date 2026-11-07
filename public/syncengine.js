@@ -40,7 +40,9 @@ export function syncEngine({ sb, fs, log }) {
     if (!await fs.stat(root)) { log("文件夹不存在，跳过：", root); return; }
     const seen = new Set();
     let up = 0, del = 0;
-    for (const f of await fs.walk(root)) {
+    // Only Markdown documents are synced. Other files are not read; ones synced earlier keep their cloud
+    // copy (hidden by the app) rather than being deleted as if they were gone from disk.
+    for (const f of (await fs.walk(root)).filter((f) => isMd(f.rel))) {
       const key = keyOf(root, f.rel), abs = root + "/" + f.rel;
       seen.add(key);
       const prev = state[key];
@@ -73,7 +75,7 @@ export function syncEngine({ sb, fs, log }) {
       }
     }
     for (const [key, v] of Object.entries(state)) {
-      if (!key.startsWith(root + "::") || seen.has(key)) continue;
+      if (!key.startsWith(root + "::") || seen.has(key) || !isMd(key.slice(root.length + 2))) continue;
       if (v.path) {
         const r1 = await sb.storage.from("files").remove([v.path]);
         const r2 = await sb.from("files").delete().eq("id", v.id);
@@ -114,7 +116,7 @@ export function syncEngine({ sb, fs, log }) {
     if (!await fs.stat(root)) return retry;
     for (const row of rows) {
       const key = row.local_key, prev = state[key];
-      if (!key.startsWith(root + "::") || !prev?.path) continue;
+      if (!key.startsWith(root + "::") || !prev?.path || !isMd(key)) continue;
       if (!prev.cloudAt) { prev.cloudAt = row.updated_at; continue; }   // first run after upgrading: take the cloud as baseline
       if (Date.parse(row.updated_at) === Date.parse(prev.cloudAt)) continue;
       const rel = key.slice(root.length + 2), abs = root + "/" + rel;
