@@ -60,9 +60,14 @@ body::after { bottom: -25vmax; right: -20vmax; }
   border: 1px solid var(--rim-low); border-radius: 20px;
   box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--rim-low), var(--shadow);
 }
+/* Registered as not inherited, so moving the pointer restyles only the glass itself, not the whole document
+   inside a pane (an inherited custom property changes the style of every element below it). */
+@property --mx { syntax: "<length-percentage>"; inherits: false; initial-value: 50%; }
+@property --my { syntax: "<length-percentage>"; inherits: false; initial-value: -40%; }
 /* A soft highlight that follows the pointer across glass surfaces. */
 .glass::after {
   content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: -1;
+  --mx: inherit; --my: inherit;
   background: radial-gradient(420px circle at var(--mx, 50%) var(--my, -40%), var(--rim), transparent 45%);
   opacity: 0; transition: opacity .4s ease;
 }

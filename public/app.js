@@ -697,14 +697,30 @@ function docHead(f, fm, web, body) {
 const ANCHORS = ".md-body :is(h1, h2, h3, h4, h5, h6, p, li, pre, table, tr, img, hr, figure, .katex-display), .p-preview > pre";
 // Where the reader is in a rendered document: the first block at the top of the view, how far into it, and
 // as a fallback the share of the way through.
+// This runs on every scroll frame, so the blocks are listed once per version of the document (not per frame),
+// and the one at the top is found by halving rather than measuring every block above it: a long document
+// measured block by block held up each frame, and a mouse wheel's animated steps stalled, then jumped.
+function anchorsOf(p) {
+  if (!p.anchors) {
+    p.anchors = [...p.preview.querySelectorAll(ANCHORS)];
+    if (!p.anchorWatch) (p.anchorWatch = new MutationObserver(() => { p.anchors = null; })).observe(p.preview, { childList: true, subtree: true });
+  }
+  return p.anchors;
+}
 function readingPlace(p) {
-  const pv = p.preview, top = pv.getBoundingClientRect().top;
-  const blocks = [...pv.querySelectorAll(ANCHORS)];
-  const i = blocks.findIndex((b) => b.getBoundingClientRect().bottom > top);
+  const pv = p.preview, top = pv.getBoundingClientRect().top, blocks = anchorsOf(p);
+  // Blocks start in document order: k is the last one starting at or above the top of the view.
+  let lo = 0, hi = blocks.length - 1, k = -1;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (blocks[m].getBoundingClientRect().top <= top) { k = m; lo = m + 1; } else hi = m - 1; }
+  // The first block in document order still showing: the outermost listed block around k that reaches below
+  // the top (a table around its row), k itself, or else the one after it.
+  let i = k >= 0 && blocks[k].getBoundingClientRect().bottom > top ? k : k + 1 < blocks.length ? k + 1 : -1;
+  if (k >= 0) for (let a = blocks[k].parentElement; a && a !== pv; a = a.parentElement)
+    if (a.matches(ANCHORS) && a.getBoundingClientRect().bottom > top) { const j = blocks.indexOf(a, 0); if (j >= 0 && j < (i < 0 ? Infinity : i)) i = j; }
   return { i, off: i < 0 ? 0 : top - blocks[i].getBoundingClientRect().top, share: pv.scrollTop / Math.max(1, pv.scrollHeight) };
 }
 function toPlace(p, at) {
-  const pv = p.preview, b = at.i >= 0 && pv.querySelectorAll(ANCHORS)[at.i];
+  const pv = p.preview, b = at.i >= 0 && anchorsOf(p)[at.i];
   if (b) pv.scrollTop += (b.getBoundingClientRect().top - pv.getBoundingClientRect().top + at.off) / uiZoom();
   else pv.scrollTop = at.share * pv.scrollHeight;
 }
@@ -1068,7 +1084,8 @@ function applyToc(p) {
 function markHeading(p) {
   if (p.toc.hidden || !p.tocList) return;
   const pv = p.preview, room = pv.scrollHeight - pv.clientHeight;
-  p.tocBar.style.transform = `scaleX(${room > 0 ? Math.min(1, pv.scrollTop / room) : 1})`;   // reading progress
+  const bar = `scaleX(${room > 0 ? Math.min(1, Math.round(pv.scrollTop / room * 1000) / 1000) : 1})`;   // reading progress
+  if (p.tocBar.style.transform !== bar) p.tocBar.style.transform = bar;
   const top = pv.getBoundingClientRect().top + 80;
   let cur = 0;
   if (p.tocLock != null) cur = p.tocLock;
@@ -2227,11 +2244,20 @@ enter(session);
 
 // Glass highlight follows the pointer (desktop only; CSS keeps it off until hover).
 if (matchMedia("(hover: hover)").matches) {
+  // At most once a frame, and not while a wheel is scrolling: the page under a still pointer moves then, and
+  // each move would restyle and repaint a whole glass pane in the middle of the scroll.
+  let last = null, queued = 0, wheelAt = 0;
+  window.addEventListener("wheel", () => { wheelAt = performance.now(); }, { passive: true });
   window.addEventListener("pointermove", (e) => {
-    const g = e.target.closest?.(".glass");
-    if (!g) return;
-    const r = g.getBoundingClientRect();
-    g.style.setProperty("--mx", (e.clientX - r.left) / uiZoom() + "px");
-    g.style.setProperty("--my", (e.clientY - r.top) / uiZoom() + "px");
+    if (performance.now() - wheelAt < 150) return;
+    last = e;
+    if (!queued) queued = requestAnimationFrame(() => {
+      queued = 0;
+      const g = last.target.closest?.(".glass");
+      if (!g) return;
+      const r = g.getBoundingClientRect();
+      g.style.setProperty("--mx", Math.round((last.clientX - r.left) / uiZoom()) + "px");
+      g.style.setProperty("--my", Math.round((last.clientY - r.top) / uiZoom()) + "px");
+    });
   }, { passive: true });
 }
