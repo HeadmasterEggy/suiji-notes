@@ -525,7 +525,7 @@ function parseFrontMatter(src) {
     // A YAML block scalar (key: > or |) continues on the indented lines after it.
     if (block && /^\s+\S/.test(line)) { const [k, sep] = block; meta[k] += (meta[k] ? sep : "") + line.trim(); continue; }
     block = null;
-    const item = /^\s+-\s+(.*)$/.exec(line);
+    const item = /^\s*-\s+(.*)$/.exec(line);   // YAML allows "- a" flush with the key, as mdMeta reads it
     if (item && listKey) { meta[listKey].push(item[1].replace(/^["']|["']$/g, "")); continue; }
     const kv = /^([A-Za-z_]+):\s*(.*)$/.exec(line);
     if (!kv) continue;
@@ -539,9 +539,12 @@ function parseFrontMatter(src) {
   return { body: src.slice(m[0].length), meta };
 }
 
+// A literal % in a file name ("100%.png") reaches here half-encoded and would make decodeURIComponent throw,
+// which used to fail the whole document; valid %XX runs are decoded, anything else is kept as written.
+const decodePath = (s) => s.replace(/(?:%[0-9a-f]{2})+/gi, (m) => { try { return decodeURIComponent(m); } catch { return m; } });
 function resolveRel(dir, href) {
   const out = [...dir];
-  for (const seg of decodeURIComponent(href.split(/[?#]/)[0]).split("/")) {
+  for (const seg of decodePath(href.split(/[?#]/)[0]).split("/")) {
     if (!seg || seg === ".") continue;
     if (seg === "..") out.pop(); else out.push(seg);
   }
@@ -567,11 +570,20 @@ function linkResolver(md) {
   };
 }
 // Obsidian syntax marked doesn't know: [[target#heading|alias]] becomes a placeholder link, resolved after
-// rendering; ==text== becomes highlighted text.
-const WIKI = /(?<!!)\[\[([^\]\n]+?)\]\]/g;
+// rendering; ![[image.png|300]] a placeholder image, found the way Obsidian finds it (an embedded note shows as a
+// link to it); ==text== becomes highlighted text.
+const WIKI = /(?<!!)\[\[([^\]\n]+?)\]\]/g, EMBED = /!\[\[([^\]\n]+?)\]\]/g;
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|avif|heic)$/i;
 const mdEscape = (t) => t.replace(/[\\`*_[\]<>]/g, "\\$&");
-function obsidianSyntax(part, wiki) {
+function obsidianSyntax(part, wiki, embeds) {
   return part
+    .replace(EMBED, (_, inner) => {
+      const [target, alias = ""] = inner.split(/\\?\|/), file = target.split("#")[0].trim();
+      if (!IMAGE_EXT.test(file)) return `[[${inner}]]`;
+      const size = /^\s*(\d+)(?:x\d+)?\s*$/.exec(alias);   // |300 or |300x200 is a width, anything else the alt text
+      embeds.push({ file, width: size && +size[1] });
+      return `![${mdEscape(size ? baseName(file) : alias.trim() || baseName(file))}](#suiji-embed-${embeds.length - 1})`;
+    })
     .replace(WIKI, (_, inner) => {
       const [target, alias] = inner.split(/\\?\|/);
       const [file, heading] = target.split("#");
@@ -595,12 +607,12 @@ async function renderMarkdown(src, f) {
     math.push(window.katex.renderToString(tex.trim(), { displayMode: display, throwOnError: false, output: "html" }));
     return display ? `\n\nKATEXBLOCK${math.length - 1}END\n\n` : `KATEXINLINE${math.length - 1}END`;
   };
-  const wiki = [];
+  const wiki = [], embeds = [];
   text = text.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]+`)/g).map((part, i) => i % 2 ? part : obsidianSyntax(part
     .replace(/\$\$([\s\S]+?)\$\$/g, (_, t) => keep(t, true))
     .replace(/\\\[([\s\S]+?)\\\]/g, (_, t) => keep(t, true))
     .replace(/\\\(([\s\S]+?)\\\)/g, (_, t) => keep(t, false))
-    .replace(/(?<![\\$\w])\$(?!\s)([^\n$]+?)(?<![\s\\])\$(?!\d)/g, (_, t) => keep(t, false)), wiki)
+    .replace(/(?<![\\$\w])\$(?!\s)([^\n$]+?)(?<![\s\\])\$(?!\d)/g, (_, t) => keep(t, false)), wiki, embeds)
   ).join("");
 
   let html = window.DOMPurify.sanitize(window.marked.parse(text, { gfm: true, breaks: false }));
@@ -612,7 +624,7 @@ async function renderMarkdown(src, f) {
   art.className = "md-body";
   const web = blogUrl(f, fm);
   if (web) art.dataset.web = web;
-  art.append(docHead(f, fm, web, body));
+  art.append(docHead(f, fm, web));
   // Parse inside a <template> so relative images aren't fetched from this site before we resolve them.
   const tpl = document.createElement("template");
   tpl.innerHTML = html;
@@ -624,8 +636,21 @@ async function renderMarkdown(src, f) {
   const dir = fullPath(f).slice(0, -1);
   const byPath = new Map(allFiles.map((x) => [fullPath(x).join("/"), x]));
   const isRel = (u) => u && !/^([a-z]+:|\/\/|#|data:)/i.test(u);
-  const imgs = [...frag.querySelectorAll("img")].filter((img) => isRel(img.getAttribute("src")));
-  const targets = imgs.map((img) => byPath.get(resolveRel(dir, img.getAttribute("src"))));
+  const isEmbed = (u) => u?.startsWith("#suiji-embed-");
+  const imgs = [...frag.querySelectorAll("img")].filter((img) => isRel(img.getAttribute("src")) || isEmbed(img.getAttribute("src")));
+  // Not beside the document: a Hexo post's asset folder (_posts/<post>/, where {% asset_img %} looks) is tried too.
+  const assets = [...dir, stripMd(baseName(f.name))];
+  // ![[embeds]]: beside the document, from the top of its synced folder, then by file name when only one file has it.
+  let byBase = null;
+  const findEmbed = ({ file }) => {
+    if (!byBase) { byBase = new Map(); for (const x of allFiles) { const b = baseName(x.name).toLowerCase(); byBase.set(b, byBase.has(b) ? null : x); } }
+    return byPath.get(resolveRel(dir, file)) ?? byPath.get(resolveRel(fullPath(f).slice(0, 1), file)) ?? byBase.get(baseName(file).toLowerCase()) ?? null;
+  };
+  const targets = imgs.map((img) => {
+    const src = img.getAttribute("src"), e = isEmbed(src) && embeds[+src.slice(13)];
+    if (e) { if (e.width) img.width = e.width; return findEmbed(e); }
+    return byPath.get(resolveRel(dir, src)) ?? byPath.get(resolveRel(assets, src));
+  });
   const paths = [...new Set(targets.filter(Boolean).map((t) => t.path))];
   const urls = paths.length ? await signedUrls(paths) : new Map();
   imgs.forEach((img, i) => {
@@ -639,7 +664,8 @@ async function renderMarkdown(src, f) {
   art.append(content);
   // A document that opens with its own # heading: that heading is the title, above the properties.
   const first = content.firstElementChild;
-  if (first?.tagName === "H1") { first.classList.add("md-title"); art.querySelector(".md-head").prepend(first); }
+  // It replaces the one docHead made, so a heading after a comment, a Hexo tag or in === style isn't shown twice.
+  if (first?.tagName === "H1") { const head = art.querySelector(".md-head"); head.querySelector(".md-title")?.remove(); first.classList.add("md-title"); head.prepend(first); }
   const find = wiki.length ? linkResolver(files.filter(isMarkdown)) : null, wdir = f.name.split("/").slice(0, -1);
   for (const a of content.querySelectorAll('a[href^="#suiji-wiki-"]')) {
     const target = find(wdir, wiki[+a.getAttribute("href").slice(12)] || "");
@@ -667,9 +693,9 @@ const PROP_ICONS = {
 };
 let propsOpen = true;
 try { propsOpen = localStorage.getItem("suiji:props") !== "0"; } catch {}
-function docHead(f, fm, web, body) {
+function docHead(f, fm, web) {
   const head = el$("header", "md-head");
-  if (!/^\s*#\s/.test(body)) head.append(el$("h1", "md-title", fm.title || stripMd(baseName(f.name))));   // else renderMarkdown moves that heading here
+  head.append(el$("h1", "md-title", fm.title || stripMd(baseName(f.name))));   // renderMarkdown swaps in the text's own # heading, if it opens with one
   if (web) head.append(Object.assign(el$("a", "md-web", web.replace(/^https?:\/\//, "")), { href: web, target: "_blank", rel: "noopener" }));
   const keys = Object.keys(fm).filter((k) => [].concat(fm[k]).some((v) => v !== ""));
   if (!keys.length) return head;
@@ -677,7 +703,7 @@ function docHead(f, fm, web, body) {
   box.open = propsOpen;
   box.addEventListener("toggle", () => { propsOpen = box.open; try { localStorage.setItem("suiji:props", propsOpen ? "1" : "0"); } catch {} });
   for (const k of keys) {
-    const v = fm[k], many = Array.isArray(v), tags = k === "tags";
+    const tags = k === "tags", v = tags ? [].concat(fm[k]) : fm[k], many = Array.isArray(v);   // "tags: one" is a single tag, not its letters
     const kind = tags ? "tags" : many ? "list" : /^\d{4}-\d\d-\d\d/.test(v) ? "date" : /^https?:\/\//.test(v) ? "link" : "text";
     const dt = el$("dt"), dd = el$("dd"), row = el$("div", "md-prop");
     dt.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true">${PROP_ICONS[kind]}</svg>`;
@@ -1103,6 +1129,14 @@ function markHeading(p) {
   if (y < 24 || y + next.offsetHeight > list.clientHeight - 24) list.scrollTo({ top: next.offsetTop - list.clientHeight / 3, behavior: "smooth" });
 }
 
+// Scrolls a heading to the top of the pane's text. On phones the pane's buttons float over the text, so the
+// heading lands just below them instead of underneath.
+function scrollToHeading(p, h) {
+  const top = p.preview.getBoundingClientRect().top, bar = p.el.querySelector(".ebar")?.getBoundingClientRect();
+  const clear = bar && bar.height && bar.top <= top && bar.bottom > top ? bar.bottom : top;
+  p.preview.scrollTo({ top: p.preview.scrollTop + (h.getBoundingClientRect().top - clear) / uiZoom() - 12, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+}
+
 function makePane(item) {
   const el = paneTpl.content.firstElementChild.cloneNode(true);
   const q = (c) => el.querySelector("." + c);
@@ -1178,8 +1212,7 @@ function makePane(item) {
     if (e.target.closest("[data-close]")) { if (isNarrow(p)) p.tocNarrow = false; else { p.tocOpen = false; saveLayout(); } applyToc(p); return; }
     const b = e.target.closest("button[data-i]");
     if (!b) return;
-    const h = p.heads[+b.dataset.i], top = p.preview.getBoundingClientRect().top;
-    p.preview.scrollTo({ top: p.preview.scrollTop + (h.getBoundingClientRect().top - top) / uiZoom() - 12, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    scrollToHeading(p, p.heads[+b.dataset.i]);
     if (isNarrow(p)) { p.tocNarrow = false; applyToc(p); }
     p.tocLock = +b.dataset.i; markHeading(p);   // keep the clicked heading marked while the scroll settles
   });
@@ -1398,7 +1431,8 @@ function graphData(withTags) {
 function graphKey(p) {
   let latest = "";
   for (const f of files) if ((f.updated_at || "") > latest) latest = f.updated_at;
-  return ["graph", files.length, latest, visible().length, p.graphTags ? 1 : 0].join("@");
+  const notes = visible();   // newest first: a note edited since (new [[links]], tags) redraws the graph too
+  return ["graph", files.length, latest, notes.length, notes[0]?.updated_at || "", p.graphTags ? 1 : 0].join("@");
 }
 
 function showGraph(p) {
@@ -1467,8 +1501,8 @@ async function uiOpen({ kind, id, heading, beside }) {
   for (let n = 0; n < 60 && !(p.itemId === id && p.heads.length); n++) await sleepMs(100);
   const i = p.heads.findIndex((h) => norm(h.textContent).includes(want));
   if (i < 0) return { opened: true, heading: "not found", headings: p.heads.slice(0, 60).map((h) => h.textContent.trim()) };
-  const h = p.heads[i], top = p.preview.getBoundingClientRect().top;
-  p.preview.scrollTo({ top: p.preview.scrollTop + (h.getBoundingClientRect().top - top) / uiZoom() - 12, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  const h = p.heads[i];
+  scrollToHeading(p, h);
   h.classList.remove("ag-flash"); void h.offsetWidth; h.classList.add("ag-flash");
   return { opened: true, heading: h.textContent.trim() };
 }
@@ -1817,7 +1851,7 @@ $("newBtn").onclick = () => {
   const id = crypto.randomUUID();
   store.notes[id] = { id, body: "", created_at: now, updated_at: now, deleted: false, dirty: true };
   persist(); search.value = "";
-  expanded.add(NOTES_KEY); saveExpanded();
+  expanded.add(NOTES_KEY); saveExpanded(); renderList();   // the cleared search and the new note show at once
   openIn(focused, "note", id); focused.ta.focus();
   scheduleSync();
 };
