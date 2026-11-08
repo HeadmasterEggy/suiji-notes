@@ -5,6 +5,8 @@
 //
 // `fs` is the caller's file access, all async, paths absolute with "/":
 //   walk(root) -> [{ rel, size, mtimeMs }]   regular files only; skips hidden names, node_modules, .git, *~
+//                                            a folder it could not read is listed as { rel, unreadable: true }
+//                                            (rel "" for the root), so its files are not taken as deleted
 //   stat(path) -> { size, mtimeMs } | null    mtimeMs rounded to whole milliseconds
 //   read(path) -> Uint8Array
 //   readText(path) -> string | null
@@ -38,11 +40,19 @@ export function syncEngine({ sb, fs, log }) {
   async function syncFolder(uid, root, state, changed) {
     const folder = baseName(root);
     if (!await fs.stat(root)) { log("文件夹不存在，跳过：", root); return; }
-    const seen = new Set();
+    const seen = new Set(), listing = await fs.walk(root);
     let up = 0, del = 0;
+    // A folder macOS would not let us read lists nothing, which looks the same as every file in it being
+    // deleted. Its cloud copies stay until it can be read again. A whole synced folder that lists no file at
+    // all is taken the same way: emptying it on purpose is rare, and 设置 → 本地文件夹 can remove it instead.
+    const unreadable = listing.filter((f) => f.unreadable).map((f) => f.rel);
+    for (const rel of unreadable) log("读不了这个文件夹，先不动它的云端文件：", rel ? folder + "/" + rel : root);
+    const synced = Object.keys(state).filter((k) => k.startsWith(root + "::") && state[k].path).length;
+    if (!listing.length && synced) { log(`「${folder}」里一个文件都没读到，为了安全没有删除云端的 ${synced} 个文件`); unreadable.push(""); }
+    const keep = (rel) => unreadable.some((u) => u === "" || rel.startsWith(u + "/"));
     // Only Markdown documents are synced. Other files are not read; ones synced earlier keep their cloud
     // copy (hidden by the app) rather than being deleted as if they were gone from disk.
-    for (const f of (await fs.walk(root)).filter((f) => isMd(f.rel))) {
+    for (const f of listing.filter((f) => !f.unreadable && isMd(f.rel))) {
       const key = keyOf(root, f.rel), abs = root + "/" + f.rel;
       seen.add(key);
       const prev = state[key];
@@ -75,7 +85,7 @@ export function syncEngine({ sb, fs, log }) {
       }
     }
     for (const [key, v] of Object.entries(state)) {
-      if (!key.startsWith(root + "::") || seen.has(key) || !isMd(key.slice(root.length + 2))) continue;
+      if (!key.startsWith(root + "::") || seen.has(key) || !isMd(key.slice(root.length + 2)) || keep(key.slice(root.length + 2))) continue;
       if (v.path) {
         const r1 = await sb.storage.from("files").remove([v.path]);
         const r2 = await sb.from("files").delete().eq("id", v.id);
@@ -128,12 +138,13 @@ export function syncEngine({ sb, fs, log }) {
         // Changed on both sides: keep the local file (the scan uploads it) and save the cloud version beside it.
         const dot = abs.lastIndexOf("."), ext = dot > abs.lastIndexOf("/") ? abs.slice(dot) : "";
         const copy = abs.slice(0, abs.length - ext.length) + "（随记副本）" + ext;
-        await fs.write(copy, buf);
+        try { await fs.write(copy, buf); } catch (e) { log("写不进磁盘", folder + "/" + copy.slice(root.length + 1), e.message || e); continue; }
         prev.cloudAt = row.updated_at;
         log("两边都改了，云端版本另存为", folder + "/" + copy.slice(root.length + 1));
         continue;
       }
-      await fs.write(abs, buf);
+      // One file that cannot be written (no permission, a full disk) is skipped, not the whole pass.
+      try { await fs.write(abs, buf); } catch (e) { log("写不进磁盘", folder + "/" + rel, e.message || e); continue; }
       const now = await fs.stat(abs);
       state[key] = { ...prev, size: now.size, mtimeMs: now.mtimeMs, cloudAt: row.updated_at };
       changed.add(key);

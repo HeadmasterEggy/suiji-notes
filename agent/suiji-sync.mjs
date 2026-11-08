@@ -87,7 +87,12 @@ function walk(root) {
   const out = [];
   const visit = (dir) => {
     let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { log("读不了", dir, e.code); return; }
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) {
+      log("读不了", dir, e.code);
+      // so the sync does not take its files as deleted (public/syncengine.js)
+      if (dir === root || e.code !== "ENOENT") out.push({ rel: path.relative(root, dir).split(path.sep).join("/"), unreadable: true });
+      return;
+    }
     for (const e of entries) {
       if (e.name.startsWith(".") || SKIP.has(e.name) || e.name.endsWith("~")) continue;
       const abs = path.join(dir, e.name);

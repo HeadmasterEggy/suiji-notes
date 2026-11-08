@@ -61,7 +61,12 @@ function walk(root) {
   const out = [];
   (function visit(dir) {
     let names;
-    try { names = fs.readdirSync(dir); } catch { return; }
+    try { names = fs.readdirSync(dir); } catch (e) {
+      // Gone since it was listed: its files really are gone. Anything else (no permission, a drive that
+      // dropped out): say so, so the sync does not take its files as deleted.
+      if (dir === root || e.code !== "ENOENT") out.push({ rel: dir.slice(root.length + 1), unreadable: true });
+      return;
+    }
     for (const name of names.sort()) {
       if (name.startsWith(".") || SKIP.has(name) || name.endsWith("~")) continue;
       const abs = dir + "/" + name;
@@ -137,7 +142,11 @@ function watcher(onChange) {
     watches.forEach((w) => w.close());
     watches = [];
     for (const f of list) {
-      try { watches.push(fs.watch(f, { recursive: true }, fire)); } catch {}   // a folder that is gone is watched again once re-added
+      try {
+        // An error event with no listener would be thrown in the main process (an error dialog); the sync's
+        // 5-minute rescan still covers a folder whose watch stopped.
+        watches.push(fs.watch(f, { recursive: true }, fire).on("error", () => {}));
+      } catch {}   // a folder that is gone is watched again once re-added
     }
   };
 }
