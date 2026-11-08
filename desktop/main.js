@@ -213,6 +213,7 @@ async function bridge(body) {
       return { enabled: j.enabled === true, model: str(j.model), url: str(g.url), key: str(g.key) };
     }
     case "localHttp": return localHttp(body);
+    case "localHttpAbort": localHttpRuns.get(body.id)?.abort(new Error("stopped")); return undefined;
     default: {
       const v = local.handle(body);
       if (body.op === "removeFolder") watch(local.folders());
@@ -224,13 +225,16 @@ async function bridge(body) {
 // The assistant's model on this computer (Magpie, Ollama…): the page's https origin can't call http://127.0.0.1
 // in WebKit, and the Swift app makes the request; this does the same here. Only loopback addresses; the answer
 // comes back whole. Gives up after ten minutes without a byte from the server.
+// Requests still running, by the id the page gave them, so its Stop button can end them (op localHttpAbort).
+const localHttpRuns = new Map();
 async function localHttp(body) {
   let u;
   try { u = new URL(body.url); } catch { u = null; }
   if (!u || !["http:", "https:"].includes(u.protocol) || !["127.0.0.1", "localhost", "[::1]"].includes(u.hostname.toLowerCase())) {
     throw new Error("only addresses on this computer");
   }
-  const ctl = new AbortController();
+  const ctl = new AbortController(), id = typeof body.id === "string" ? body.id : null;
+  if (id) localHttpRuns.set(id, ctl);
   let idle;
   const touch = () => { clearTimeout(idle); idle = setTimeout(() => ctl.abort(new Error("timed out")), 600_000); };
   const headers = { "user-agent": `Suiji/${version}` };   // how Magpie tells 随记's requests apart
@@ -244,7 +248,7 @@ async function localHttp(body) {
     const chunks = [];
     if (res.body) for await (const c of res.body) { chunks.push(c); touch(); }
     return { status: res.status, body: Buffer.concat(chunks).toString("utf8") };
-  } finally { clearTimeout(idle); }
+  } finally { clearTimeout(idle); if (id) localHttpRuns.delete(id); }
 }
 
 // Magpie lists 随记 on its Agents page once this file exists; it fills it in when 随记 is connected there.

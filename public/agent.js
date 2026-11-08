@@ -194,9 +194,16 @@ export async function refreshMagpie() {
   return magpie;
 }
 const viaApp = (url) => !!appBridge && /^http:\/\//i.test(url);
-export async function localHttp(url, { method = "GET", headers = {}, body } = {}) {
-  if (viaApp(url)) { const r = await appBridge.postMessage({ op: "localHttp", url, method, headers, body }); return { status: r.status, text: r.body }; }
-  const res = await fetch(url, { method, headers, body });
+export async function localHttp(url, { method = "GET", headers = {}, body, signal } = {}) {
+  if (viaApp(url)) {
+    // Stop has to reach the app, or the model goes on writing the answer nobody will read, and a server that
+    // answers one request at a time (Ollama) makes the next question wait for it. Older apps ignore the id.
+    const id = crypto.randomUUID(), abort = () => appBridge.postMessage({ op: "localHttpAbort", id }).catch(() => {});
+    signal?.addEventListener("abort", abort, { once: true });
+    try { const r = await appBridge.postMessage({ op: "localHttp", url, method, headers, body, id }); return { status: r.status, text: r.body }; }
+    finally { signal?.removeEventListener("abort", abort); }
+  }
+  const res = await fetch(url, { method, headers, body, signal });
   return { status: res.status, text: await res.text() };
 }
 
@@ -230,7 +237,7 @@ async function* localStream(cfg, signal) {
     return { t: "error", message: `HTTP ${status}: ${String(msg).slice(0, 300)}` };
   };
   if (whole) {
-    const r = await localHttp(url, { method: "POST", headers, body }).catch((e) => { throw unreachable(e); });
+    const r = await localHttp(url, { method: "POST", headers, body, signal }).catch((e) => { throw signal.aborted ? new DOMException("aborted", "AbortError") : unreachable(e); });
     if (signal.aborted) throw new DOMException("aborted", "AbortError");
     if (r.status < 200 || r.status >= 300) { yield failed(r.status, r.text); return; }
     const m = JSON.parse(r.text).choices?.[0]?.message || {};

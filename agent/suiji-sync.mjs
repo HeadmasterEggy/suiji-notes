@@ -96,9 +96,13 @@ function walk(root) {
     for (const e of entries) {
       if (e.name.startsWith(".") || SKIP.has(e.name) || e.name.endsWith("~")) continue;
       const abs = path.join(dir, e.name);
-      if (e.isDirectory()) visit(abs);
-      else if (e.isFile()) {
-        const st = fs.statSync(abs);
+      // Some network and cloud drives don't say an entry's type; lstat does (a file would otherwise be
+      // skipped, and then taken as deleted).
+      let st = e;
+      if (!e.isDirectory() && !e.isFile() && !e.isSymbolicLink()) { try { st = fs.lstatSync(abs); } catch { continue; } }
+      if (st.isDirectory()) visit(abs);
+      else if (st.isFile()) {
+        st = fs.statSync(abs);
         out.push({ rel: path.relative(root, abs).split(path.sep).join("/"), size: st.size, mtimeMs: Math.round(st.mtimeMs) });
       }
     }
@@ -190,7 +194,12 @@ if (cmd === "login") {
     const { folders = [] } = readJson(CONFIG, {});
     for (const f of folders) {
       if (watchers.has(f) || !fs.existsSync(f)) continue;
-      try { watchers.set(f, fs.watch(f, { recursive: true }, () => kick())); } catch (e) { log("无法监听", f, e.code); }
+      try {
+        // A watch that errors (its folder removed or unmounted) is dropped and set up again by the next rewatch,
+        // instead of an unhandled error event ending the program.
+        const w = fs.watch(f, { recursive: true }, () => kick()).on("error", (e) => { log("监听中断", f, e.code); w.close(); watchers.delete(f); });
+        watchers.set(f, w);
+      } catch (e) { log("无法监听", f, e.code); }
     }
   };
   rewatch();
