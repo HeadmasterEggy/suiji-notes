@@ -570,11 +570,20 @@ function linkResolver(md) {
   };
 }
 // Obsidian syntax marked doesn't know: [[target#heading|alias]] becomes a placeholder link, resolved after
-// rendering; ==text== becomes highlighted text.
-const WIKI = /(?<!!)\[\[([^\]\n]+?)\]\]/g;
+// rendering; ![[image.png|300]] a placeholder image, found the way Obsidian finds it (an embedded note shows as a
+// link to it); ==text== becomes highlighted text.
+const WIKI = /(?<!!)\[\[([^\]\n]+?)\]\]/g, EMBED = /!\[\[([^\]\n]+?)\]\]/g;
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|avif|heic)$/i;
 const mdEscape = (t) => t.replace(/[\\`*_[\]<>]/g, "\\$&");
-function obsidianSyntax(part, wiki) {
+function obsidianSyntax(part, wiki, embeds) {
   return part
+    .replace(EMBED, (_, inner) => {
+      const [target, alias = ""] = inner.split(/\\?\|/), file = target.split("#")[0].trim();
+      if (!IMAGE_EXT.test(file)) return `[[${inner}]]`;
+      const size = /^\s*(\d+)(?:x\d+)?\s*$/.exec(alias);   // |300 or |300x200 is a width, anything else the alt text
+      embeds.push({ file, width: size && +size[1] });
+      return `![${mdEscape(size ? baseName(file) : alias.trim() || baseName(file))}](#suiji-embed-${embeds.length - 1})`;
+    })
     .replace(WIKI, (_, inner) => {
       const [target, alias] = inner.split(/\\?\|/);
       const [file, heading] = target.split("#");
@@ -598,12 +607,12 @@ async function renderMarkdown(src, f) {
     math.push(window.katex.renderToString(tex.trim(), { displayMode: display, throwOnError: false, output: "html" }));
     return display ? `\n\nKATEXBLOCK${math.length - 1}END\n\n` : `KATEXINLINE${math.length - 1}END`;
   };
-  const wiki = [];
+  const wiki = [], embeds = [];
   text = text.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]+`)/g).map((part, i) => i % 2 ? part : obsidianSyntax(part
     .replace(/\$\$([\s\S]+?)\$\$/g, (_, t) => keep(t, true))
     .replace(/\\\[([\s\S]+?)\\\]/g, (_, t) => keep(t, true))
     .replace(/\\\(([\s\S]+?)\\\)/g, (_, t) => keep(t, false))
-    .replace(/(?<![\\$\w])\$(?!\s)([^\n$]+?)(?<![\s\\])\$(?!\d)/g, (_, t) => keep(t, false)), wiki)
+    .replace(/(?<![\\$\w])\$(?!\s)([^\n$]+?)(?<![\s\\])\$(?!\d)/g, (_, t) => keep(t, false)), wiki, embeds)
   ).join("");
 
   let html = window.DOMPurify.sanitize(window.marked.parse(text, { gfm: true, breaks: false }));
@@ -627,10 +636,21 @@ async function renderMarkdown(src, f) {
   const dir = fullPath(f).slice(0, -1);
   const byPath = new Map(allFiles.map((x) => [fullPath(x).join("/"), x]));
   const isRel = (u) => u && !/^([a-z]+:|\/\/|#|data:)/i.test(u);
-  const imgs = [...frag.querySelectorAll("img")].filter((img) => isRel(img.getAttribute("src")));
+  const isEmbed = (u) => u?.startsWith("#suiji-embed-");
+  const imgs = [...frag.querySelectorAll("img")].filter((img) => isRel(img.getAttribute("src")) || isEmbed(img.getAttribute("src")));
   // Not beside the document: a Hexo post's asset folder (_posts/<post>/, where {% asset_img %} looks) is tried too.
   const assets = [...dir, stripMd(baseName(f.name))];
-  const targets = imgs.map((img) => byPath.get(resolveRel(dir, img.getAttribute("src"))) ?? byPath.get(resolveRel(assets, img.getAttribute("src"))));
+  // ![[embeds]]: beside the document, from the top of its synced folder, then by file name when only one file has it.
+  let byBase = null;
+  const findEmbed = ({ file }) => {
+    if (!byBase) { byBase = new Map(); for (const x of allFiles) { const b = baseName(x.name).toLowerCase(); byBase.set(b, byBase.has(b) ? null : x); } }
+    return byPath.get(resolveRel(dir, file)) ?? byPath.get(resolveRel(fullPath(f).slice(0, 1), file)) ?? byBase.get(baseName(file).toLowerCase()) ?? null;
+  };
+  const targets = imgs.map((img) => {
+    const src = img.getAttribute("src"), e = isEmbed(src) && embeds[+src.slice(13)];
+    if (e) { if (e.width) img.width = e.width; return findEmbed(e); }
+    return byPath.get(resolveRel(dir, src)) ?? byPath.get(resolveRel(assets, src));
+  });
   const paths = [...new Set(targets.filter(Boolean).map((t) => t.path))];
   const urls = paths.length ? await signedUrls(paths) : new Map();
   imgs.forEach((img, i) => {
@@ -1109,6 +1129,14 @@ function markHeading(p) {
   if (y < 24 || y + next.offsetHeight > list.clientHeight - 24) list.scrollTo({ top: next.offsetTop - list.clientHeight / 3, behavior: "smooth" });
 }
 
+// Scrolls a heading to the top of the pane's text. On phones the pane's buttons float over the text, so the
+// heading lands just below them instead of underneath.
+function scrollToHeading(p, h) {
+  const top = p.preview.getBoundingClientRect().top, bar = p.el.querySelector(".ebar")?.getBoundingClientRect();
+  const clear = bar && bar.height && bar.top <= top && bar.bottom > top ? bar.bottom : top;
+  p.preview.scrollTo({ top: p.preview.scrollTop + (h.getBoundingClientRect().top - clear) / uiZoom() - 12, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+}
+
 function makePane(item) {
   const el = paneTpl.content.firstElementChild.cloneNode(true);
   const q = (c) => el.querySelector("." + c);
@@ -1184,8 +1212,7 @@ function makePane(item) {
     if (e.target.closest("[data-close]")) { if (isNarrow(p)) p.tocNarrow = false; else { p.tocOpen = false; saveLayout(); } applyToc(p); return; }
     const b = e.target.closest("button[data-i]");
     if (!b) return;
-    const h = p.heads[+b.dataset.i], top = p.preview.getBoundingClientRect().top;
-    p.preview.scrollTo({ top: p.preview.scrollTop + (h.getBoundingClientRect().top - top) / uiZoom() - 12, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    scrollToHeading(p, p.heads[+b.dataset.i]);
     if (isNarrow(p)) { p.tocNarrow = false; applyToc(p); }
     p.tocLock = +b.dataset.i; markHeading(p);   // keep the clicked heading marked while the scroll settles
   });
@@ -1474,8 +1501,8 @@ async function uiOpen({ kind, id, heading, beside }) {
   for (let n = 0; n < 60 && !(p.itemId === id && p.heads.length); n++) await sleepMs(100);
   const i = p.heads.findIndex((h) => norm(h.textContent).includes(want));
   if (i < 0) return { opened: true, heading: "not found", headings: p.heads.slice(0, 60).map((h) => h.textContent.trim()) };
-  const h = p.heads[i], top = p.preview.getBoundingClientRect().top;
-  p.preview.scrollTo({ top: p.preview.scrollTop + (h.getBoundingClientRect().top - top) / uiZoom() - 12, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  const h = p.heads[i];
+  scrollToHeading(p, h);
   h.classList.remove("ag-flash"); void h.offsetWidth; h.classList.add("ag-flash");
   return { opened: true, heading: h.textContent.trim() };
 }
