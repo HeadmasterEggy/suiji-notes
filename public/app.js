@@ -525,7 +525,7 @@ function parseFrontMatter(src) {
     // A YAML block scalar (key: > or |) continues on the indented lines after it.
     if (block && /^\s+\S/.test(line)) { const [k, sep] = block; meta[k] += (meta[k] ? sep : "") + line.trim(); continue; }
     block = null;
-    const item = /^\s+-\s+(.*)$/.exec(line);
+    const item = /^\s*-\s+(.*)$/.exec(line);   // YAML allows "- a" flush with the key, as mdMeta reads it
     if (item && listKey) { meta[listKey].push(item[1].replace(/^["']|["']$/g, "")); continue; }
     const kv = /^([A-Za-z_]+):\s*(.*)$/.exec(line);
     if (!kv) continue;
@@ -539,9 +539,12 @@ function parseFrontMatter(src) {
   return { body: src.slice(m[0].length), meta };
 }
 
+// A literal % in a file name ("100%.png") reaches here half-encoded and would make decodeURIComponent throw,
+// which used to fail the whole document; valid %XX runs are decoded, anything else is kept as written.
+const decodePath = (s) => s.replace(/(?:%[0-9a-f]{2})+/gi, (m) => { try { return decodeURIComponent(m); } catch { return m; } });
 function resolveRel(dir, href) {
   const out = [...dir];
-  for (const seg of decodeURIComponent(href.split(/[?#]/)[0]).split("/")) {
+  for (const seg of decodePath(href.split(/[?#]/)[0]).split("/")) {
     if (!seg || seg === ".") continue;
     if (seg === "..") out.pop(); else out.push(seg);
   }
@@ -677,7 +680,7 @@ function docHead(f, fm, web, body) {
   box.open = propsOpen;
   box.addEventListener("toggle", () => { propsOpen = box.open; try { localStorage.setItem("suiji:props", propsOpen ? "1" : "0"); } catch {} });
   for (const k of keys) {
-    const v = fm[k], many = Array.isArray(v), tags = k === "tags";
+    const tags = k === "tags", v = tags ? [].concat(fm[k]) : fm[k], many = Array.isArray(v);   // "tags: one" is a single tag, not its letters
     const kind = tags ? "tags" : many ? "list" : /^\d{4}-\d\d-\d\d/.test(v) ? "date" : /^https?:\/\//.test(v) ? "link" : "text";
     const dt = el$("dt"), dd = el$("dd"), row = el$("div", "md-prop");
     dt.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true">${PROP_ICONS[kind]}</svg>`;
@@ -1398,7 +1401,8 @@ function graphData(withTags) {
 function graphKey(p) {
   let latest = "";
   for (const f of files) if ((f.updated_at || "") > latest) latest = f.updated_at;
-  return ["graph", files.length, latest, visible().length, p.graphTags ? 1 : 0].join("@");
+  const notes = visible();   // newest first: a note edited since (new [[links]], tags) redraws the graph too
+  return ["graph", files.length, latest, notes.length, notes[0]?.updated_at || "", p.graphTags ? 1 : 0].join("@");
 }
 
 function showGraph(p) {
@@ -1817,7 +1821,7 @@ $("newBtn").onclick = () => {
   const id = crypto.randomUUID();
   store.notes[id] = { id, body: "", created_at: now, updated_at: now, deleted: false, dirty: true };
   persist(); search.value = "";
-  expanded.add(NOTES_KEY); saveExpanded();
+  expanded.add(NOTES_KEY); saveExpanded(); renderList();   // the cleared search and the new note show at once
   openIn(focused, "note", id); focused.ta.focus();
   scheduleSync();
 };
