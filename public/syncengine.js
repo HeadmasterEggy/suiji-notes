@@ -27,6 +27,7 @@ const isMd = (n) => ["md", "markdown"].includes(extOf(n));
 const metaOf = (rel, bytes) => isMd(rel) ? mdMeta(new TextDecoder().decode(bytes)) : { links: [], tags: [] };
 const baseName = (p) => p.slice(p.lastIndexOf("/") + 1);
 export const keyOf = (root, rel) => root + "::" + rel;
+const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
 
 // Stable ids so a re-upload replaces the same cloud file instead of adding a copy.
 async function idFor(uid, key) {
@@ -134,6 +135,12 @@ export function syncEngine({ sb, fs, log }) {
       try { buf = await fetchObject(row.path); } catch (e) { log("下载失败", rel, e.message || e); retry = true; continue; }
       if (buf.length !== row.size) { retry = true; continue; }   // still the old copy; try again in a moment
       const st = await fs.stat(abs);
+      // Already on disk: a pass that wrote it was cut short (the app quit or the page reloaded) before its
+      // state was saved. The same bytes are not a conflict and need no 「随记副本」.
+      if (st && st.size === buf.length && (st.size !== prev.size || st.mtimeMs !== prev.mtimeMs) && same(await fs.read(abs), buf)) {
+        state[key] = { ...prev, size: st.size, mtimeMs: st.mtimeMs, cloudAt: row.updated_at };
+        continue;
+      }
       if (st && (st.size !== prev.size || st.mtimeMs !== prev.mtimeMs)) {
         // Changed on both sides: keep the local file (the scan uploads it) and save the cloud version beside it.
         const dot = abs.lastIndexOf("."), ext = dot > abs.lastIndexOf("/") ? abs.slice(dot) : "";
@@ -179,6 +186,17 @@ export function syncEngine({ sb, fs, log }) {
 
   // One full pass over every folder; updates state in place. Returns { retry, changed }.
   async function syncAll(user, folders, state) {
+    // The state is this computer's, whoever signs in. Entries another account synced say nothing about this
+    // one's cloud (its files would never be uploaded here), so they are dropped and this account starts fresh.
+    // A state from before this mark is checked by its ids, which depend on the account.
+    if (state["#account"] !== user.id) {
+      const known = Object.entries(state).find(([k, v]) => k.includes("::") && v.id);
+      if (state["#account"] || (known && await idFor(user.id, known[0]) !== known[1].id)) {
+        for (const k of Object.keys(state)) delete state[k];
+        log("换了账号：本机文件夹会重新上传到这个账号");
+      }
+      state["#account"] = user.id;
+    }
     await shareUnpublished(user, folders);
     const rows = await cloudRows();
     const changed = new Set();
