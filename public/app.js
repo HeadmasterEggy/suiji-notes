@@ -1843,7 +1843,10 @@ function restoreLayout() {
 // Scrolling is saved a moment after it stops, and once more when the page goes away (window closed, app quit).
 let saveSoon = 0;
 const saveLater = () => { clearTimeout(saveSoon); saveSoon = setTimeout(saveLayout, 500); };
-addEventListener("pagehide", () => layout && saveLayout());
+// Quitting the Mac app unloads the page at once: an edit still waiting for its save timer is saved now (notes to
+// this device, a synced file through the app's file bridge). The app keeps the page "visible" while its window
+// is closed, so the visibilitychange save below never runs there.
+addEventListener("pagehide", () => { commitAll(); if (layout) saveLayout(); });
 document.addEventListener("visibilitychange", () => { if (document.hidden && layout) saveLayout(); });
 
 $("newBtn").onclick = () => {

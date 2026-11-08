@@ -5,6 +5,8 @@
 //
 // `fs` is the caller's file access, all async, paths absolute with "/":
 //   walk(root) -> [{ rel, size, mtimeMs }]   regular files only; skips hidden names, node_modules, .git, *~
+//                                            a folder it could not read is listed as { rel, unreadable: true }
+//                                            (rel "" for the root), so its files are not taken as deleted
 //   stat(path) -> { size, mtimeMs } | null    mtimeMs rounded to whole milliseconds
 //   read(path) -> Uint8Array
 //   readText(path) -> string | null
@@ -25,6 +27,7 @@ const isMd = (n) => ["md", "markdown"].includes(extOf(n));
 const metaOf = (rel, bytes) => isMd(rel) ? mdMeta(new TextDecoder().decode(bytes)) : { links: [], tags: [] };
 const baseName = (p) => p.slice(p.lastIndexOf("/") + 1);
 export const keyOf = (root, rel) => root + "::" + rel;
+const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
 
 // Stable ids so a re-upload replaces the same cloud file instead of adding a copy.
 async function idFor(uid, key) {
@@ -38,11 +41,19 @@ export function syncEngine({ sb, fs, log }) {
   async function syncFolder(uid, root, state, changed) {
     const folder = baseName(root);
     if (!await fs.stat(root)) { log("文件夹不存在，跳过：", root); return; }
-    const seen = new Set();
+    const seen = new Set(), listing = await fs.walk(root);
     let up = 0, del = 0;
+    // A folder macOS would not let us read lists nothing, which looks the same as every file in it being
+    // deleted. Its cloud copies stay until it can be read again. A whole synced folder that lists no file at
+    // all is taken the same way: emptying it on purpose is rare, and 设置 → 本地文件夹 can remove it instead.
+    const unreadable = listing.filter((f) => f.unreadable).map((f) => f.rel);
+    for (const rel of unreadable) log("读不了这个文件夹，先不动它的云端文件：", rel ? folder + "/" + rel : root);
+    const synced = Object.keys(state).filter((k) => k.startsWith(root + "::") && state[k].path).length;
+    if (!listing.length && synced) { log(`「${folder}」里一个文件都没读到，为了安全没有删除云端的 ${synced} 个文件`); unreadable.push(""); }
+    const keep = (rel) => unreadable.some((u) => u === "" || rel.startsWith(u + "/"));
     // Only Markdown documents are synced. Other files are not read; ones synced earlier keep their cloud
     // copy (hidden by the app) rather than being deleted as if they were gone from disk.
-    for (const f of (await fs.walk(root)).filter((f) => isMd(f.rel))) {
+    for (const f of listing.filter((f) => !f.unreadable && isMd(f.rel))) {
       const key = keyOf(root, f.rel), abs = root + "/" + f.rel;
       seen.add(key);
       const prev = state[key];
@@ -75,7 +86,7 @@ export function syncEngine({ sb, fs, log }) {
       }
     }
     for (const [key, v] of Object.entries(state)) {
-      if (!key.startsWith(root + "::") || seen.has(key) || !isMd(key.slice(root.length + 2))) continue;
+      if (!key.startsWith(root + "::") || seen.has(key) || !isMd(key.slice(root.length + 2)) || keep(key.slice(root.length + 2))) continue;
       if (v.path) {
         const r1 = await sb.storage.from("files").remove([v.path]);
         const r2 = await sb.from("files").delete().eq("id", v.id);
@@ -124,16 +135,23 @@ export function syncEngine({ sb, fs, log }) {
       try { buf = await fetchObject(row.path); } catch (e) { log("下载失败", rel, e.message || e); retry = true; continue; }
       if (buf.length !== row.size) { retry = true; continue; }   // still the old copy; try again in a moment
       const st = await fs.stat(abs);
+      // Already on disk: a pass that wrote it was cut short (the app quit or the page reloaded) before its
+      // state was saved. The same bytes are not a conflict and need no 「随记副本」.
+      if (st && st.size === buf.length && (st.size !== prev.size || st.mtimeMs !== prev.mtimeMs) && same(await fs.read(abs), buf)) {
+        state[key] = { ...prev, size: st.size, mtimeMs: st.mtimeMs, cloudAt: row.updated_at };
+        continue;
+      }
       if (st && (st.size !== prev.size || st.mtimeMs !== prev.mtimeMs)) {
         // Changed on both sides: keep the local file (the scan uploads it) and save the cloud version beside it.
         const dot = abs.lastIndexOf("."), ext = dot > abs.lastIndexOf("/") ? abs.slice(dot) : "";
         const copy = abs.slice(0, abs.length - ext.length) + "（随记副本）" + ext;
-        await fs.write(copy, buf);
+        try { await fs.write(copy, buf); } catch (e) { log("写不进磁盘", folder + "/" + copy.slice(root.length + 1), e.message || e); continue; }
         prev.cloudAt = row.updated_at;
         log("两边都改了，云端版本另存为", folder + "/" + copy.slice(root.length + 1));
         continue;
       }
-      await fs.write(abs, buf);
+      // One file that cannot be written (no permission, a full disk) is skipped, not the whole pass.
+      try { await fs.write(abs, buf); } catch (e) { log("写不进磁盘", folder + "/" + rel, e.message || e); continue; }
       const now = await fs.stat(abs);
       state[key] = { ...prev, size: now.size, mtimeMs: now.mtimeMs, cloudAt: row.updated_at };
       changed.add(key);
@@ -168,6 +186,17 @@ export function syncEngine({ sb, fs, log }) {
 
   // One full pass over every folder; updates state in place. Returns { retry, changed }.
   async function syncAll(user, folders, state) {
+    // The state is this computer's, whoever signs in. Entries another account synced say nothing about this
+    // one's cloud (its files would never be uploaded here), so they are dropped and this account starts fresh.
+    // A state from before this mark is checked by its ids, which depend on the account.
+    if (state["#account"] !== user.id) {
+      const known = Object.entries(state).find(([k, v]) => k.includes("::") && v.id);
+      if (state["#account"] || (known && await idFor(user.id, known[0]) !== known[1].id)) {
+        for (const k of Object.keys(state)) delete state[k];
+        log("换了账号：本机文件夹会重新上传到这个账号");
+      }
+      state["#account"] = user.id;
+    }
     await shareUnpublished(user, folders);
     const rows = await cloudRows();
     const changed = new Set();
