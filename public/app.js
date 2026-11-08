@@ -615,7 +615,7 @@ async function renderMarkdown(src, f) {
   art.className = "md-body";
   const web = blogUrl(f, fm);
   if (web) art.dataset.web = web;
-  art.append(docHead(f, fm, web, body));
+  art.append(docHead(f, fm, web));
   // Parse inside a <template> so relative images aren't fetched from this site before we resolve them.
   const tpl = document.createElement("template");
   tpl.innerHTML = html;
@@ -628,7 +628,9 @@ async function renderMarkdown(src, f) {
   const byPath = new Map(allFiles.map((x) => [fullPath(x).join("/"), x]));
   const isRel = (u) => u && !/^([a-z]+:|\/\/|#|data:)/i.test(u);
   const imgs = [...frag.querySelectorAll("img")].filter((img) => isRel(img.getAttribute("src")));
-  const targets = imgs.map((img) => byPath.get(resolveRel(dir, img.getAttribute("src"))));
+  // Not beside the document: a Hexo post's asset folder (_posts/<post>/, where {% asset_img %} looks) is tried too.
+  const assets = [...dir, stripMd(baseName(f.name))];
+  const targets = imgs.map((img) => byPath.get(resolveRel(dir, img.getAttribute("src"))) ?? byPath.get(resolveRel(assets, img.getAttribute("src"))));
   const paths = [...new Set(targets.filter(Boolean).map((t) => t.path))];
   const urls = paths.length ? await signedUrls(paths) : new Map();
   imgs.forEach((img, i) => {
@@ -642,7 +644,8 @@ async function renderMarkdown(src, f) {
   art.append(content);
   // A document that opens with its own # heading: that heading is the title, above the properties.
   const first = content.firstElementChild;
-  if (first?.tagName === "H1") { first.classList.add("md-title"); art.querySelector(".md-head").prepend(first); }
+  // It replaces the one docHead made, so a heading after a comment, a Hexo tag or in === style isn't shown twice.
+  if (first?.tagName === "H1") { const head = art.querySelector(".md-head"); head.querySelector(".md-title")?.remove(); first.classList.add("md-title"); head.prepend(first); }
   const find = wiki.length ? linkResolver(files.filter(isMarkdown)) : null, wdir = f.name.split("/").slice(0, -1);
   for (const a of content.querySelectorAll('a[href^="#suiji-wiki-"]')) {
     const target = find(wdir, wiki[+a.getAttribute("href").slice(12)] || "");
@@ -670,9 +673,9 @@ const PROP_ICONS = {
 };
 let propsOpen = true;
 try { propsOpen = localStorage.getItem("suiji:props") !== "0"; } catch {}
-function docHead(f, fm, web, body) {
+function docHead(f, fm, web) {
   const head = el$("header", "md-head");
-  if (!/^\s*#\s/.test(body)) head.append(el$("h1", "md-title", fm.title || stripMd(baseName(f.name))));   // else renderMarkdown moves that heading here
+  head.append(el$("h1", "md-title", fm.title || stripMd(baseName(f.name))));   // renderMarkdown swaps in the text's own # heading, if it opens with one
   if (web) head.append(Object.assign(el$("a", "md-web", web.replace(/^https?:\/\//, "")), { href: web, target: "_blank", rel: "noopener" }));
   const keys = Object.keys(fm).filter((k) => [].concat(fm[k]).some((v) => v !== ""));
   if (!keys.length) return head;
