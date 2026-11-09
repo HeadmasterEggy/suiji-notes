@@ -929,3 +929,79 @@ a.ag-card-name:hover { text-decoration: underline; }
   border-radius: 8px; background: var(--accent-soft); }
 .ag-quote blockquote { flex: 1; margin: 0; max-height: 84px; overflow: hidden; font-size: 12.5px; line-height: 1.5; color: var(--muted); white-space: pre-wrap; }
 .ag-cite { margin: 0 0 6px; padding-left: 8px; border-left: 2px solid currentColor; opacity: .75; font-size: 12.5px; white-space: pre-wrap; }
+
+/* Settings → Assistant → thinking effort: a liquid-glass switch (the other styles restyle it in themes.css). A glass lens slides to the chosen level; each
+   level shows how hard the model thinks as four bars, and the lens glows warmer the higher it goes. The switch
+   pops in again with each service or model, its levels following one by one. */
+.ai-effort { display: grid; grid-template-columns: 76px 1fr; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+.effort-seg {
+  --level: 0;
+  position: relative; display: flex; gap: 2px; padding: 4px; min-width: 0; border-radius: 16px;
+  background: var(--glass); border: 1px solid var(--rim-low);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6);
+  box-shadow: inset 0 1px 0 var(--rim), inset 0 -1px 2px rgba(0, 0, 0, .04), 0 6px 18px rgba(0, 0, 0, .06);
+}
+.effort-seg button {
+  position: relative; z-index: 1; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 6px 4px 5px; border: 0; border-radius: 12px; background: none; color: var(--muted);
+  font: 12px var(--font-body); cursor: pointer; white-space: nowrap; transition: color .25s;
+}
+.effort-seg button > span:last-child { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.effort-seg button:hover { color: var(--ink); }
+.effort-seg button[aria-checked=true] { color: var(--eff-on, var(--ink)); font-weight: 600; }
+.effort-seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.effort-bars { display: flex; align-items: flex-end; gap: 2px; height: 12px; }
+.effort-bars i { width: 3px; border-radius: 1.5px; background: currentColor; opacity: .2; transition: opacity .3s, background .3s, transform .4s var(--spring); }
+.effort-bars i:nth-child(1) { height: 5px; } .effort-bars i:nth-child(2) { height: 6.5px; } .effort-bars i:nth-child(3) { height: 9px; } .effort-bars i:nth-child(4) { height: 12px; }
+.effort-bars i.on { opacity: .55; }
+.effort-bars.auto i { opacity: .45; background: none; box-shadow: inset 0 0 0 1px currentColor; }
+[aria-checked=true] .effort-bars i.on { opacity: 1; background: var(--eff-bar, var(--accent)); transform: scaleY(1.08); transform-origin: bottom; }
+/* The lens: brighter glass with a rim highlight, refracting a tint of the accent that deepens with the level. */
+.effort-thumb {
+  position: absolute; top: 4px; bottom: 4px; left: 0; width: 0; border-radius: 12px; pointer-events: none;
+  background:
+    radial-gradient(120% 90% at 30% 0%, var(--rim), transparent 60%),
+    linear-gradient(180deg, var(--glass-strong), color-mix(in srgb, var(--accent) calc(6% + var(--level) * 16%), var(--glass-strong)));
+  -webkit-backdrop-filter: blur(8px) saturate(2); backdrop-filter: blur(8px) saturate(2);
+  border: 1px solid var(--rim);
+  box-shadow: inset 0 1px 1px var(--rim), inset 0 -2px 4px rgba(0, 0, 0, .05),
+    0 4px 14px color-mix(in srgb, var(--accent) calc(10% + var(--level) * 30%), transparent);
+  transition: transform .45s var(--spring), width .45s var(--spring), box-shadow .4s, background .4s;
+}
+/* Squash and settle like a drop of liquid as the lens moves. */
+.effort-thumb.wobble { animation: effort-wobble .55s var(--spring); }
+@keyframes effort-wobble { 0% { scale: 1 1; } 30% { scale: 1.12 .86; } 60% { scale: .96 1.05; } 100% { scale: 1 1; } }
+.ai-effort.pop .effort-seg { animation: effort-pop .5s var(--spring) both; transform-origin: left center; }
+.ai-effort.pop .effort-seg button { animation: effort-in .4s var(--spring) both; animation-delay: calc(80ms + var(--i, 0) * 50ms); }
+@keyframes effort-pop { from { opacity: 0; transform: scale(.9) translateY(-6px); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes effort-in { from { opacity: 0; transform: translateY(8px) scale(.8); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .effort-thumb { transition: none; }
+  .effort-thumb.wobble, .ai-effort.pop :is(.effort-seg, .effort-seg button) { animation: none; }
+}
+
+/* Settings → Assistant → model: suggestions as you type, in a panel that drops from the field. It takes the
+   style's own surface, line and accent, so it follows whichever style is on. */
+.combo { position: relative; display: block; min-width: 0; }
+.combo > input { width: 100%; box-sizing: border-box; }
+.suggest {
+  position: absolute; z-index: 5; left: 0; right: 0; top: calc(100% + 6px); max-height: 264px; overflow-y: auto; overscroll-behavior: contain;
+  display: block; padding: 5px; border-radius: 14px; border: 1px solid var(--rim-low);
+  background: var(--panel);   /* solid: nested glass does not blur the rows under it */
+  box-shadow: inset 0 1px 0 var(--rim), 0 12px 30px rgba(0, 0, 0, .14);
+  transform-origin: top center;
+}
+.suggest[hidden] { display: none; }
+.suggest.pop { animation: sug-drop .32s var(--spring) both; }
+.suggest.pop .sug { animation: sug-in .28s var(--spring) both; animation-delay: calc(var(--i, 0) * 22ms); }
+@keyframes sug-drop { from { opacity: 0; transform: translateY(-6px) scaleY(.92); } to { opacity: 1; transform: none; } }
+@keyframes sug-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.sug { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 9px; cursor: pointer; color: var(--ink); font-size: 13px; }
+.sug b { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sug mark { background: none; color: var(--accent); font-weight: 700; }
+.sug small { flex: none; font-size: 11px; color: var(--muted); padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); }
+.sug[aria-selected=true] { background: var(--accent); color: var(--on-accent); }
+.sug[aria-selected=true] :is(mark, small) { color: inherit; }
+.sug[aria-selected=true] small { background: color-mix(in srgb, var(--on-accent) 18%, transparent); }
+@media (prefers-reduced-motion: reduce) { .suggest.pop, .suggest.pop .sug { animation: none; } }
+.ai-form label:has(.combo) { position: relative; z-index: 6; }   /* the suggestions lie over the rows below */

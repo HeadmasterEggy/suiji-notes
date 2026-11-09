@@ -2,7 +2,7 @@
 // here, on the notes and files this page already has. Edits are only proposed: each one shows as a diff,
 // and nothing changes until the user presses 应用 (Apply).
 import { t, lang } from "./i18n.js";
-import { TOOLS, instructions } from "./agentspec.js";
+import { TOOLS, instructions, effortBody } from "./agentspec.js";
 
 const MAX_STEPS = 10, READ_CHUNK = 30000, SEARCH_TEXT_FILES = 400;
 let app = null;            // what app.js hands over in mountAgent()
@@ -176,6 +176,9 @@ export function localModel() {
   if (magpie) return magpie;
   try { const c = JSON.parse(localStorage.getItem("suiji:local-ai")); return c?.base && c?.model ? c : null; } catch { return null; }
 }
+// Thinking effort (Settings → Assistant), on this device: "" for the model's default, else a level from effortFamily.
+export function aiEffort() { try { return localStorage.getItem("suiji:ai-effort") || ""; } catch { return ""; } }
+export function setAiEffort(e) { try { e ? localStorage.setItem("suiji:ai-effort", e) : localStorage.removeItem("suiji:ai-effort"); } catch {} }
 export function setLocalModel(c) { try { c ? localStorage.setItem("suiji:local-ai", JSON.stringify(c)) : localStorage.removeItem("suiji:local-ai"); } catch {} }
 
 // In the Mac app, WebKit won't let the https page call http://127.0.0.1, so the app makes those requests
@@ -214,7 +217,7 @@ async function* serverStream(signal) {
   const res = await fetch("/api/agent", {
     method: "POST", signal,
     headers: { "content-type": "application/json", authorization: "Bearer " + await app.token() },
-    body: JSON.stringify({ messages: messages.map(({ reasoning, ...m }) => m), context: { lang, open: app.context() } }),
+    body: JSON.stringify({ messages: messages.map(({ reasoning, ...m }) => m), context: { lang, open: app.context() }, effort: aiEffort() }),
   }).catch((e) => { throw e.name === "AbortError" ? e : new Error(t("连不上助手服务，检查一下网络。")); });
   const down = () => new Error(t("助手服务没有正常回应（HTTP {status}），稍后再试。", { status: res.status }));
   if (!res.body || !/ndjson/.test(res.headers.get("content-type") || "")) throw down();
@@ -227,7 +230,7 @@ async function* localStream(cfg, signal) {
   const url = cfg.base.replace(/\/+$/, "") + "/chat/completions", whole = viaApp(url);
   const headers = { "content-type": "application/json", ...(cfg.key ? { authorization: "Bearer " + cfg.key } : {}) };
   const body = JSON.stringify({
-    model: cfg.model, stream: !whole,
+    model: cfg.model, stream: !whole, ...effortBody(cfg.base, aiEffort()),
     messages: [{ role: "system", content: instructions({ lang, open: app.context() }) }, ...toOpenAI(messages)],
     tools: Object.entries(TOOLS).map(([name, x]) => ({ type: "function", function: { name, description: x.description, parameters: x.parameters } })),
   });
