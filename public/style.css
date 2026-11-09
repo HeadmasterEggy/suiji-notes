@@ -378,11 +378,16 @@ textarea {
 .md-body h1 { font-size: 1.7em; } .md-body h2 { font-size: 1.4em; } .md-body h3 { font-size: 1.18em; }
 .md-head h1:first-child, .md-body > div > :first-child { margin-top: 0; }
 .md-body p, .md-body ul, .md-body ol, .md-body blockquote, .md-body table, .md-body pre { margin: 0 0 1em; }
-.md-body ul, .md-body ol { padding-left: 1.4em; }
+.md-body ul { padding-left: 1.4em; }
+.md-body ol { padding-left: 2em; }   /* room for "10." without the number hanging out of the column */
+/* GitHub task lists: the checkbox is the marker, so no bullet in front of it. */
+.md-body li:has(> input[type="checkbox"]:first-child) { list-style: none; }
+.md-body li > input[type="checkbox"]:first-child { margin: 0 .45em 0 -1.3em; vertical-align: -.1em; }
 .md-body li + li { margin-top: .25em; }
 .md-body a { color: var(--accent); }
 .md-body img { display: block; max-width: 100%; height: auto; margin: 1em auto; border-radius: 6px; }
 .md-body blockquote { padding: .2em 1em; border-left: 3px solid var(--accent); color: var(--muted); background: var(--bg); border-radius: 0 6px 6px 0; }
+.md-body blockquote > :last-child, .md-body li > :last-child:not(ul, ol) { margin-bottom: 0; }   /* no empty strip at the bottom of a quote */
 .md-body code { font: .88em var(--font-mono); background: var(--bg); padding: .12em .35em; border-radius: 4px; }
 .md-body pre { background: var(--bg); padding: 14px 16px; border-radius: 8px; overflow-x: auto; white-space: pre; }
 .md-body pre code { background: none; padding: 0; font-size: 13px; line-height: 1.6; }
@@ -529,6 +534,14 @@ textarea {
 :root[data-style="terminal"] .md-body h1::before { content: "# "; color: var(--muted); }
 :root[data-style="terminal"] .md-body h2::before { content: "## "; color: var(--muted); }
 :root[data-style="terminal"] .md-body h3::before { content: "### "; color: var(--muted); }
+:root[data-style="terminal"] .md-body h4::before { content: "#### "; color: var(--muted); }
+/* Monospace list numbers are wide: "10. " needs about 4ch, or the numbers stick out past the text (off the screen on a phone). */
+:root[data-style="terminal"] .md-body ol { padding-left: 4ch; }
+/* Code, quotes and table headers took --bg, which is the same near-black as the page, so they didn't show as blocks. */
+:root[data-style="terminal"] .md-body :is(pre, code, blockquote, th) { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+:root[data-style="terminal"] .md-body pre { border: 1px solid var(--line); border-radius: 4px; }
+:root[data-style="terminal"] .md-body pre code { background: none; }
+:root[data-style="terminal"] .md-body blockquote { border-radius: 0 4px 4px 0; }
 
 /* ---- 方块: a blocky, pixel-art world — sky, grass and dirt, stone panels, chunky bevels ---- */
 :root[data-style="blocks"] {

@@ -101,8 +101,8 @@
 :root[data-style="notebook"] .brand { color: var(--accent); }
 :root[data-style="notebook"] .md-body :is(h1, h2, h3) { font-weight: 600; }
 /* headings get a highlighter stroke under the lower half */
-:root[data-style="notebook"] .md-body :is(h1, h2) { background: linear-gradient(transparent 58%, rgba(255, 214, 90, .55) 58% 92%, transparent 92%); width: fit-content; padding: 0 .15em; }
-:root[data-style="notebook"] .md-title { background: linear-gradient(transparent 58%, rgba(255, 214, 90, .55) 58% 92%, transparent 92%); width: fit-content; }
+:root[data-style="notebook"] .md-body :is(h1, h2) { background: linear-gradient(transparent 58%, rgba(255, 214, 90, .55) 58% 92%, transparent 92%) 0 0 / 100% 1.35em; width: fit-content; padding: 0 .15em; }   /* repeats every line, so a heading that wraps is marked on each line, not only the last */
+:root[data-style="notebook"] .md-title { background: linear-gradient(transparent 58%, rgba(255, 214, 90, .55) 58% 92%, transparent 92%) 0 0 / 100% 1.25em; width: fit-content; }
 :root[data-style="notebook"] .md-body mark { background: rgba(255, 214, 90, .6); }
 :root[data-style="notebook"] .md-body blockquote { background: #fff6d8; border-left: 0; border-radius: 4px; box-shadow: 0 6px 12px -6px rgba(45, 42, 38, .25); color: var(--ink); }
 :root[data-style="notebook"] .md-body hr { border: 0; border-top: 2px dashed var(--line); }
@@ -116,7 +116,8 @@
   color-scheme: dark;
 }
 :root[data-style="notebook"][data-mode="dark"] body { background: radial-gradient(rgba(239, 233, 220, .12) 1.1px, transparent 1.3px) 0 0 / 22px 22px, var(--bg); }
-:root[data-style="notebook"][data-mode="dark"] :is(.md-body h1, .md-body h2, .md-title) { background: linear-gradient(transparent 58%, rgba(242, 139, 160, .3) 58% 92%, transparent 92%); }
+:root[data-style="notebook"][data-mode="dark"] :is(.md-body h1, .md-body h2, .md-title) { background: linear-gradient(transparent 58%, rgba(242, 139, 160, .3) 58% 92%, transparent 92%) 0 0 / 100% 1.35em; }
+:root[data-style="notebook"][data-mode="dark"] .md-body .md-title { background-size: 100% 1.25em; }
 :root[data-style="notebook"][data-mode="dark"] .md-body mark { background: rgba(255, 214, 90, .3); }
 :root[data-style="notebook"][data-mode="dark"] .md-body blockquote { background: #3a352b; }
 :root[data-style="notebook"][data-mode="dark"] .tree-file[aria-current="true"] { background: #5a4a26; color: var(--ink); }
