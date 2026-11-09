@@ -6,7 +6,8 @@ import { mdMeta } from "./mdmeta.js";
 import { mountGraph } from "./graph.js";
 import { t, lang, langChoice, translatePage } from "./i18n.js";
 import * as local from "./localsync.js";
-import { mountAgent, toggleAgent, resetAgent, localModel, setLocalModel, localHttp, refreshMagpie, askAgent } from "./agent.js";
+import { mountAgent, toggleAgent, resetAgent, localModel, setLocalModel, localHttp, refreshMagpie, askAgent, aiEffort, setAiEffort } from "./agent.js";
+import { effortFamily, effortFor } from "./agentspec.js";
 import { mountMenu } from "./ctxmenu.js";
 
 translatePage();
@@ -2041,8 +2042,57 @@ function restyled() {
     $("aiFetch").hidden = !p.local;
     if (!keepModel) $("aiModel").value = p.model || "";
     $("aiModel").placeholder = p.model || p.hint || t("模型名称");
+    showEffort();
   }
-  function aiShow(st) {
+  // Thinking effort: the levels the service in the form offers. A new service or model pops the row in again
+  // with its own levels, so it is plain which model the setting is for; picking a level slides the thumb.
+  const EFFORT_NAMES = { "": "默认", off: "不思考", low: "低", medium: "中", high: "高", max: "最高", on: "开启" };
+  const EFFORT_HINTS = {
+    deepseek: "DeepSeek：「不思考」回答最快，「最高」想得最久。",
+    toggle: "这个服务只能打开或关闭思考。",
+    qwen: "通义千问按思考长度给预算：低 2k、中 8k、高 32k tokens。",
+    openrouter: "OpenRouter 会把强度转给所选模型；不会思考的模型会忽略它。",
+    openai: "发送 reasoning_effort。不支持它的模型会报错，那时改回「默认」。",
+  };
+  let effortShown = "";
+  const effortBase = () => { const lc = localModel(); return lc?.magpie ? lc.base : $("aiBase").value.trim(); };
+  const effortModel = () => { const lc = localModel(); return lc?.magpie ? lc.model : $("aiModel").value.trim(); };
+  function placeThumb() {
+    const seg = $("aiEffort"), on = seg.querySelector("[aria-checked=true]"), thumb = seg.querySelector(".effort-thumb");
+    if (!on || !on.offsetWidth) return;
+    thumb.style.width = on.offsetWidth + "px";
+    thumb.style.transform = `translateX(${on.offsetLeft}px)`;
+  }
+  function showEffort(force) {
+    const base = effortBase(), fam = effortFamily(base), model = effortModel();
+    const key = fam.id + "|" + model, cur = effortFor(base, aiEffort());
+    const seg = $("aiEffort"), row = $("aiEffortRow"), form = $("aiForm");
+    // With the form, just above its Save bar; when Magpie hides the form (it picks the model), on its own.
+    if (form.hidden) { if (row.parentNode === form) form.after(row); }
+    else if (row.nextElementSibling !== form.querySelector(".ai-bar")) form.insertBefore(row, form.querySelector(".ai-bar"));
+    $("aiEffortHint").textContent = (model ? model + " · " : "") + t(EFFORT_HINTS[fam.id]);
+    if (key !== effortShown || force) {
+      effortShown = key;
+      seg.querySelectorAll("button").forEach((b) => b.remove());
+      ["", ...fam.levels].forEach((lv, i) => {
+        const b = Object.assign(document.createElement("button"), { type: "button", textContent: t(EFFORT_NAMES[lv]) });
+        b.dataset.level = lv; b.setAttribute("role", "radio"); b.style.setProperty("--i", i);
+        b.onclick = () => {
+          setAiEffort(lv); showEffort();
+          aiMsg(t("思考强度：{l}（只在这台设备上）", { l: t(EFFORT_NAMES[lv]) }));
+        };
+        seg.append(b);
+      });
+      row.classList.remove("pop"); void row.offsetWidth; row.classList.add("pop");
+    }
+    seg.querySelectorAll("button").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.level === cur)));
+    requestAnimationFrame(placeThumb);
+  }
+  addEventListener("resize", () => { if (dlg.open) placeThumb(); });
+  $("aiModel").addEventListener("change", () => showEffort());
+  $("aiBase").addEventListener("change", () => showEffort());
+  function aiShow(st) { aiFill(st); showEffort(); }
+  function aiFill(st) {
     aiLast = st; aiOwn = st.own;
     const lc = localModel();
     $("aiForm").hidden = !!lc?.magpie;
@@ -2131,7 +2181,7 @@ function restyled() {
     try { aiShow(await aiApi("DELETE")); aiMsg(t("已删除")); } catch (err) { aiMsg(t("删除失败：{msg}", { msg: err.message }), true); }
   };
   openSettings = (sec) => {
-    fill(); if (local.available) fillLocal(); fillAi(); dlg.showModal();
+    fill(); if (local.available) fillLocal(); effortShown = ""; fillAi(); dlg.showModal();
     if (nativeZoom) local.macOp("zoom").then(showZoom, () => {});   // ⌘+ / ⌘− may have changed it
     if (sec) requestAnimationFrame(() => $(sec)?.scrollIntoView({ block: "start" }));
   };

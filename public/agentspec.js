@@ -44,3 +44,41 @@ export const instructions = (ctx) => `You are the assistant inside Suiji (随记
 - When you mention a document, link it as [its title](suiji:ID) so the user can open it.
 - Answer in the user's language (${ctx.lang === "en" ? "English" : "简体中文"} unless they write in another), concisely, in Markdown.
 - Today is ${new Date().toISOString().slice(0, 10)}.${ctx.open ? `\n- The user has this document open: "${ctx.open.title}" (id ${ctx.open.id}). "This note" / "这篇" means it.` : ""}`;
+
+// Thinking effort (Settings → Assistant → 思考强度), kept on each device ("suiji:ai-effort") and sent with
+// every request. Each service turns thinking up or down with its own request fields, so the levels on offer
+// and what they send depend on the API's address. "" sends nothing: the model's own default.
+const FAMILIES = [
+  // DeepSeek: thinking on/off; with it on, reasoning_effort "high" or "max" (lower levels count as high).
+  { id: "deepseek", test: /(^|\.)deepseek\.com$/, levels: ["off", "high", "max"],
+    body: (e) => e === "off" ? { thinking: { type: "disabled" } } : { thinking: { type: "enabled" }, reasoning_effort: e } },
+  // Zhipu GLM and Kimi: thinking only switches on or off.
+  { id: "toggle", test: /(^|\.)(bigmodel\.cn|z\.ai|moonshot\.cn|moonshot\.ai)$/, levels: ["off", "on"],
+    body: (e) => ({ thinking: { type: e === "off" ? "disabled" : "enabled" } }) },
+  // Qwen on DashScope: enable_thinking, with a token budget for how long it may think.
+  { id: "qwen", test: /(^|\.)aliyuncs\.com$/, levels: ["off", "low", "medium", "high"],
+    body: (e) => e === "off" ? { enable_thinking: false } : { enable_thinking: true, thinking_budget: { low: 2048, medium: 8192, high: 32768 }[e] } },
+  // OpenRouter passes one reasoning setting on to whichever model it routes to.
+  { id: "openrouter", test: /(^|\.)openrouter\.ai$/, levels: ["off", "low", "medium", "high"],
+    body: (e) => ({ reasoning: e === "off" ? { enabled: false } : { effort: e } }) },
+  // OpenAI and everything else that follows it (Ollama, LM Studio, Magpie): reasoning_effort.
+  { id: "openai", test: /./, levels: ["off", "low", "medium", "high"],
+    body: (e) => ({ reasoning_effort: e === "off" ? "none" : e }) },
+];
+const hostOf = (base) => { try { return new URL(base).hostname.toLowerCase(); } catch { return ""; } };
+export const effortFamily = (base) => FAMILIES.find((f) => f.test.test(hostOf(base))) || FAMILIES.at(-1);
+// The saved level as this service offers it, so switching services keeps roughly the same intent:
+// "high" on a service that only switches thinking on becomes "on", "max" elsewhere becomes "high".
+export function effortFor(base, effort) {
+  const { levels } = effortFamily(base);
+  if (!effort || levels.includes(effort)) return effort || "";
+  if (effort === "off") return "";
+  if (levels.includes("on")) return "on";
+  if (levels.includes("max")) return "high";
+  return effort === "max" ? "high" : effort === "on" ? "medium" : "";
+}
+// The extra request fields for this address and saved level.
+export function effortBody(base, effort) {
+  const e = effortFor(base, effort);
+  return e ? effortFamily(base).body(e) : {};
+}
