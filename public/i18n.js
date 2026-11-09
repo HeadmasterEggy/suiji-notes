@@ -185,7 +185,7 @@ const EN = {
   "高": "High",
   "最高": "Max",
   "开启": "On",
-  "思考强度：{l}（只在这台设备上）": "Thinking effort: {l} (on this device only)",
+  "只保存在这台设备上。": "Saved on this device only.",
   "DeepSeek：「不思考」回答最快，「最高」想得最久。": "DeepSeek: Off answers fastest; Max thinks the longest.",
   "这个服务只能打开或关闭思考。": "This service can only turn thinking on or off.",
   "通义千问按思考长度给预算：低 2k、中 8k、高 32k tokens。": "Qwen gets a thinking budget: Low 2k, Medium 8k, High 32k tokens.",

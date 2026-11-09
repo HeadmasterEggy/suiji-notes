@@ -2044,9 +2044,11 @@ function restyled() {
     $("aiModel").placeholder = p.model || p.hint || t("模型名称");
     showEffort();
   }
-  // Thinking effort: the levels the service in the form offers. A new service or model pops the row in again
-  // with its own levels, so it is plain which model the setting is for; picking a level slides the thumb.
+  // Thinking effort: a liquid-glass switch with the levels the service in the form offers. Each level shows
+  // how hard the model thinks as a row of bars instead of words; the details live in the tooltip. A new
+  // service or model pops the switch in again with its own levels; picking one slides the glass lens over.
   const EFFORT_NAMES = { "": "默认", off: "不思考", low: "低", medium: "中", high: "高", max: "最高", on: "开启" };
+  const EFFORT_BARS = { "": -1, off: 0, low: 1, medium: 2, on: 2, high: 3, max: 4 };   // -1: the model decides
   const EFFORT_HINTS = {
     deepseek: "DeepSeek：「不思考」回答最快，「最高」想得最久。",
     toggle: "这个服务只能打开或关闭思考。",
@@ -2057,36 +2059,41 @@ function restyled() {
   let effortShown = "";
   const effortBase = () => { const lc = localModel(); return lc?.magpie ? lc.base : $("aiBase").value.trim(); };
   const effortModel = () => { const lc = localModel(); return lc?.magpie ? lc.model : $("aiModel").value.trim(); };
-  function placeThumb() {
+  function placeThumb(moved) {
     const seg = $("aiEffort"), on = seg.querySelector("[aria-checked=true]"), thumb = seg.querySelector(".effort-thumb");
     if (!on || !on.offsetWidth) return;
     thumb.style.width = on.offsetWidth + "px";
     thumb.style.transform = `translateX(${on.offsetLeft}px)`;
+    seg.style.setProperty("--level", Math.max(0, EFFORT_BARS[on.dataset.level]) / 4);
+    if (moved) { thumb.classList.remove("wobble"); void thumb.offsetWidth; thumb.classList.add("wobble"); }
   }
-  function showEffort(force) {
+  function effortButton(lv, i) {
+    const b = document.createElement("button");
+    b.type = "button"; b.dataset.level = lv; b.setAttribute("role", "radio"); b.style.setProperty("--i", i);
+    const bars = document.createElement("span"); bars.className = "effort-bars"; bars.setAttribute("aria-hidden", "true");
+    const n = EFFORT_BARS[lv];
+    if (n < 0) bars.classList.add("auto");
+    for (let k = 0; k < 4; k++) { const bar = document.createElement("i"); if (k < n) bar.className = "on"; bars.append(bar); }
+    b.append(bars, Object.assign(document.createElement("span"), { textContent: t(EFFORT_NAMES[lv]) }));
+    b.onclick = () => { if (b.getAttribute("aria-checked") !== "true") { setAiEffort(lv); showEffort(false, true); } };
+    return b;
+  }
+  function showEffort(force, moved) {
     const base = effortBase(), fam = effortFamily(base), model = effortModel();
     const key = fam.id + "|" + model, cur = effortFor(base, aiEffort());
     const seg = $("aiEffort"), row = $("aiEffortRow"), form = $("aiForm");
     // With the form, just above its Save bar; when Magpie hides the form (it picks the model), on its own.
     if (form.hidden) { if (row.parentNode === form) form.after(row); }
     else if (row.nextElementSibling !== form.querySelector(".ai-bar")) form.insertBefore(row, form.querySelector(".ai-bar"));
-    $("aiEffortHint").textContent = (model ? model + " · " : "") + t(EFFORT_HINTS[fam.id]);
+    seg.title = (model ? model + "\n" : "") + t(EFFORT_HINTS[fam.id]) + "\n" + t("只保存在这台设备上。");
     if (key !== effortShown || force) {
       effortShown = key;
       seg.querySelectorAll("button").forEach((b) => b.remove());
-      ["", ...fam.levels].forEach((lv, i) => {
-        const b = Object.assign(document.createElement("button"), { type: "button", textContent: t(EFFORT_NAMES[lv]) });
-        b.dataset.level = lv; b.setAttribute("role", "radio"); b.style.setProperty("--i", i);
-        b.onclick = () => {
-          setAiEffort(lv); showEffort();
-          aiMsg(t("思考强度：{l}（只在这台设备上）", { l: t(EFFORT_NAMES[lv]) }));
-        };
-        seg.append(b);
-      });
+      ["", ...fam.levels].forEach((lv, i) => seg.append(effortButton(lv, i)));
       row.classList.remove("pop"); void row.offsetWidth; row.classList.add("pop");
     }
     seg.querySelectorAll("button").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.level === cur)));
-    requestAnimationFrame(placeThumb);
+    requestAnimationFrame(() => placeThumb(moved));
   }
   addEventListener("resize", () => { if (dlg.open) placeThumb(); });
   $("aiModel").addEventListener("change", () => showEffort());

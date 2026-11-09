@@ -930,23 +930,52 @@ a.ag-card-name:hover { text-decoration: underline; }
 .ag-quote blockquote { flex: 1; margin: 0; max-height: 84px; overflow: hidden; font-size: 12.5px; line-height: 1.5; color: var(--muted); white-space: pre-wrap; }
 .ag-cite { margin: 0 0 6px; padding-left: 8px; border-left: 2px solid currentColor; opacity: .75; font-size: 12.5px; white-space: pre-wrap; }
 
-/* Settings → Assistant → thinking effort: a segmented control whose thumb slides to the chosen level. Its row
-   pops in again with each service or model, the levels following one by one. */
-.ai-effort { display: grid; grid-template-columns: 76px 1fr; align-items: center; gap: 6px 10px; padding: 0 0 2px; font-size: 13px; color: var(--muted); }
-.ai-effort > small { grid-column: 2; font-size: 12px; overflow-wrap: anywhere; }
-.effort-seg { position: relative; display: flex; gap: 2px; padding: 3px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); min-width: 0; overflow: hidden; }
-.effort-seg button { position: relative; z-index: 1; flex: 1 1 0; min-width: 0; height: 28px; padding: 0 6px; border: 0; border-radius: 9px; background: none; color: var(--muted); font: 13px var(--font-body); cursor: pointer; white-space: nowrap; transition: color .2s; }
+/* Settings → Assistant → thinking effort: a liquid-glass switch. A glass lens slides to the chosen level; each
+   level shows how hard the model thinks as four bars, and the lens glows warmer the higher it goes. The switch
+   pops in again with each service or model, its levels following one by one. */
+.ai-effort { display: grid; grid-template-columns: 76px 1fr; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+.effort-seg {
+  --level: 0;
+  position: relative; display: flex; gap: 2px; padding: 4px; min-width: 0; border-radius: 16px;
+  background: var(--glass); border: 1px solid var(--rim-low);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6);
+  box-shadow: inset 0 1px 0 var(--rim), inset 0 -1px 2px rgba(0, 0, 0, .04), 0 6px 18px rgba(0, 0, 0, .06);
+}
+.effort-seg button {
+  position: relative; z-index: 1; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 6px 4px 5px; border: 0; border-radius: 12px; background: none; color: var(--muted);
+  font: 12px var(--font-body); cursor: pointer; white-space: nowrap; transition: color .25s;
+}
+.effort-seg button > span:last-child { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .effort-seg button:hover { color: var(--ink); }
-.effort-seg button[aria-checked=true] { color: var(--on-accent, #fff); font-weight: 600; }
+.effort-seg button[aria-checked=true] { color: var(--ink); font-weight: 600; }
 .effort-seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.effort-thumb { position: absolute; top: 3px; bottom: 3px; left: 0; width: 0; border-radius: 9px; background: var(--accent); box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 35%, transparent); transition: transform .32s cubic-bezier(.34, 1.4, .64, 1), width .32s cubic-bezier(.34, 1.4, .64, 1); }
-.ai-effort.pop .effort-seg { animation: effort-pop .42s cubic-bezier(.34, 1.56, .64, 1) both; transform-origin: left center; }
-.ai-effort.pop .effort-seg button { animation: effort-in .34s cubic-bezier(.34, 1.56, .64, 1) both; animation-delay: calc(60ms + var(--i, 0) * 45ms); }
-.ai-effort.pop > small { animation: effort-fade .4s ease .12s both; }
-@keyframes effort-pop { from { opacity: 0; transform: scale(.92) translateY(-4px); } to { opacity: 1; transform: none; } }
-@keyframes effort-in { from { opacity: 0; transform: translateY(6px) scale(.85); } to { opacity: 1; transform: none; } }
-@keyframes effort-fade { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+.effort-bars { display: flex; align-items: flex-end; gap: 2px; height: 12px; }
+.effort-bars i { width: 3px; border-radius: 1.5px; background: currentColor; opacity: .2; transition: opacity .3s, background .3s, transform .4s var(--spring); }
+.effort-bars i:nth-child(1) { height: 5px; } .effort-bars i:nth-child(2) { height: 6.5px; } .effort-bars i:nth-child(3) { height: 9px; } .effort-bars i:nth-child(4) { height: 12px; }
+.effort-bars i.on { opacity: .55; }
+.effort-bars.auto i { opacity: .45; background: none; box-shadow: inset 0 0 0 1px currentColor; }
+[aria-checked=true] .effort-bars i.on { opacity: 1; background: var(--accent); transform: scaleY(1.08); transform-origin: bottom; }
+/* The lens: brighter glass with a rim highlight, refracting a tint of the accent that deepens with the level. */
+.effort-thumb {
+  position: absolute; top: 4px; bottom: 4px; left: 0; width: 0; border-radius: 12px; pointer-events: none;
+  background:
+    radial-gradient(120% 90% at 30% 0%, var(--rim), transparent 60%),
+    linear-gradient(180deg, var(--glass-strong), color-mix(in srgb, var(--accent) calc(6% + var(--level) * 16%), var(--glass-strong)));
+  -webkit-backdrop-filter: blur(8px) saturate(2); backdrop-filter: blur(8px) saturate(2);
+  border: 1px solid var(--rim);
+  box-shadow: inset 0 1px 1px var(--rim), inset 0 -2px 4px rgba(0, 0, 0, .05),
+    0 4px 14px color-mix(in srgb, var(--accent) calc(10% + var(--level) * 30%), transparent);
+  transition: transform .45s var(--spring), width .45s var(--spring), box-shadow .4s, background .4s;
+}
+/* Squash and settle like a drop of liquid as the lens moves. */
+.effort-thumb.wobble { animation: effort-wobble .55s var(--spring); }
+@keyframes effort-wobble { 0% { scale: 1 1; } 30% { scale: 1.12 .86; } 60% { scale: .96 1.05; } 100% { scale: 1 1; } }
+.ai-effort.pop .effort-seg { animation: effort-pop .5s var(--spring) both; transform-origin: left center; }
+.ai-effort.pop .effort-seg button { animation: effort-in .4s var(--spring) both; animation-delay: calc(80ms + var(--i, 0) * 50ms); }
+@keyframes effort-pop { from { opacity: 0; transform: scale(.9) translateY(-6px); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes effort-in { from { opacity: 0; transform: translateY(8px) scale(.8); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
   .effort-thumb { transition: none; }
-  .ai-effort.pop :is(.effort-seg, .effort-seg button, small) { animation: none; }
+  .effort-thumb.wobble, .ai-effort.pop :is(.effort-seg, .effort-seg button) { animation: none; }
 }
