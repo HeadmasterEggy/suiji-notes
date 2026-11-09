@@ -263,9 +263,9 @@
           </optgroup>
         </select></label>
         <label><span>接口地址</span><input id="aiBase" type="url" inputmode="url" spellcheck="false" placeholder="https://…/v1" required></label>
-        <label><span>模型</span><input id="aiModel" spellcheck="false" list="aiModels" required><datalist id="aiModels"></datalist></label>
+        <label><span>模型</span><span class="combo"><input id="aiModel" spellcheck="false" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="aiSuggest" required><span class="suggest" id="aiSuggest" role="listbox" aria-label="模型" hidden></span></span></label>
         <label><span>API key</span><input id="aiKey" type="password" spellcheck="false" placeholder="sk-…"></label>
-        <div class="ai-bar"><small id="aiMsg"></small><button class="ghost bordered small" id="aiFetch" type="button" hidden>读取模型列表</button><button class="btn-primary small" id="aiSave" type="submit">保存</button></div>
+        <div class="ai-bar"><small id="aiMsg"></small><button class="ghost bordered small" id="aiFetch" type="button">读取模型列表</button><button class="btn-primary small" id="aiSave" type="submit">保存</button></div>
       </form>
       <div class="ai-effort" id="aiEffortRow">
         <span id="aiEffortLabel">思考强度</span>

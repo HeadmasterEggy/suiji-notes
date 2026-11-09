@@ -2039,7 +2039,6 @@ function restyled() {
     $("aiPreset").value = name;
     $("aiBase").readOnly = !(name === "custom" || p.local);
     if (name !== "custom") $("aiBase").value = p.base;
-    $("aiFetch").hidden = !p.local;
     if (!keepModel) $("aiModel").value = p.model || "";
     $("aiModel").placeholder = p.model || p.hint || t("模型名称");
     showEffort();
@@ -2144,20 +2143,111 @@ function restyled() {
     $("aiKey").required = !local && !aiOwn;
     if (local) $("aiKey").placeholder = localModel()?.key ? t("留空则保留已保存的 key") : t("网关 key（没有可留空）");
   };
-  // The models a local server offers, as suggestions for the model field.
-  $("aiFetch").onclick = async () => {
-    const base = $("aiBase").value.trim().replace(/\/+$/, ""), key = $("aiKey").value.trim() || localModel()?.key || "";
-    aiMsg(t("读取中…"));
-    try {
-      const res = await localHttp(base + "/models", { headers: key ? { authorization: "Bearer " + key } : {} });
-      let body = {}; try { body = JSON.parse(res.text); } catch {}
-      if (res.status < 200 || res.status >= 300) throw new Error(body.error?.message || "HTTP " + res.status);
-      const ids = (body.data || []).map((m) => m.id).filter(Boolean).sort();
-      $("aiModels").replaceChildren(...ids.map((id) => Object.assign(document.createElement("option"), { value: id })));
-      aiMsg(t("找到 {n} 个模型，在「模型」里选一个。", { n: ids.length }));
-      $("aiModel").focus();
-    } catch (err) { aiMsg(localHelp(err), true); }
+  // The model field predicts as you type: the models the service lists (read once per address, from the
+  // server for a cloud API with the saved or typed key, straight from a local server), matched anywhere in the
+  // name or by maker, so "de" brings up DeepSeek and "son" Claude Sonnet. Arrow keys and Enter pick one.
+  const MAKERS = [
+    [/deepseek/, "DeepSeek"], [/claude|anthropic/, "Anthropic"], [/(^|\/)(gpt|o\d|chatgpt|openai)/, "OpenAI"], [/gemini|gemma|google/, "Google"],
+    [/qwen|qwq|alibaba/, "通义千问"], [/glm|zhipu|z-ai/, "智谱"], [/kimi|moonshot/, "Kimi"], [/llama|meta-/, "Meta"],
+    [/mistral|mixtral|codestral/, "Mistral"], [/grok|x-ai/, "xAI"], [/minimax|abab/, "MiniMax"], [/doubao|bytedance|seed/, "豆包"],
+  ];
+  const makerOf = (id) => MAKERS.find(([re]) => re.test(id.toLowerCase()))?.[1] || "";
+  const modelLists = new Map();   // address → [ids]
+  const modelBase = () => $("aiBase").value.trim().replace(/\/+$/, "");
+  const listFor = () => {
+    const p = AI_PRESETS[$("aiPreset").value] || {};
+    return [...new Set([...(modelLists.get(modelBase()) || []), ...[p.model, aiOwn?.base_url === modelBase() && aiOwn.model].filter(Boolean)])];
   };
+  async function loadModels(loud) {
+    const base = modelBase(), key = $("aiKey").value.trim();
+    if (!base || (!loud && modelLists.has(base))) return;
+    if (loud) aiMsg(t("读取中…"));
+    try {
+      let ids;
+      if (isLocalPreset($("aiPreset").value)) {
+        const k = key || localModel()?.key || "";
+        const res = await localHttp(base + "/models", { headers: k ? { authorization: "Bearer " + k } : {} });
+        let body = {}; try { body = JSON.parse(res.text); } catch {}
+        if (res.status < 200 || res.status >= 300) throw new Error(body.error?.message || "HTTP " + res.status);
+        ids = (body.data || []).map((m) => m.id).filter(Boolean).sort();
+      } else ids = (await aiApi("POST", { base_url: base, ...(key ? { api_key: key } : {}) })).models;
+      modelLists.set(base, ids);
+      if (loud) aiMsg(t("找到 {n} 个模型，在「模型」里输入几个字就能找到。", { n: ids.length }));
+      if (document.activeElement === $("aiModel")) suggest();
+    } catch (err) {
+      if (!loud) return;   // quietly: suggestions just stay fewer until a key is there
+      aiMsg(isLocalPreset($("aiPreset").value) ? localHelp(err) : t("读取模型列表失败：{msg}", { msg: err.message }), true);
+    }
+  }
+  $("aiFetch").onclick = () => loadModels(true).then(() => $("aiModel").focus());
+  // Best first: the whole name starts with it, then a part of the name (after / - . :) or the maker does, then
+  // it appears anywhere, then its letters appear in order.
+  function rankModels(q) {
+    q = q.trim().toLowerCase();
+    const out = [];
+    for (const id of listFor()) {
+      const s = id.toLowerCase(), maker = makerOf(id), mk = maker.toLowerCase();
+      let rank = -1, at = -1;
+      if (!q) rank = 0;
+      else if (s.startsWith(q)) { rank = 0; at = 0; }
+      else if ((at = s.split("").findIndex((c, i) => /[\/\-.:_ ]/.test(s[i - 1] || "") && s.startsWith(q, i))) >= 0) rank = 1;
+      else if (mk.startsWith(q)) rank = 1;
+      else if ((at = s.indexOf(q)) >= 0) rank = 2;
+      else if (q.length >= 3) { let j = 0; for (const c of s) if (c === q[j]) j++; if (j === q.length) rank = 3; }
+      if (rank >= 0) out.push({ id, maker, rank, at: rank < 3 ? at : -1, len: q.length });
+    }
+    return out.sort((a, b) => a.rank - b.rank || a.id.length - b.id.length || a.id.localeCompare(b.id)).slice(0, 40);
+  }
+  let sugItems = [], sugAt = -1;
+  function suggest() {
+    const box = $("aiSuggest"), input = $("aiModel");
+    sugItems = rankModels(input.value);
+    if (sugItems.length === 1 && sugItems[0].id === input.value.trim()) sugItems = [];
+    const wasHidden = box.hidden;
+    sugAt = sugItems.length && input.value.trim() ? 0 : -1;
+    box.replaceChildren(...sugItems.map((m, i) => {
+      const row = document.createElement("span");
+      row.className = "sug"; row.id = "aiSug" + i; row.setAttribute("role", "option"); row.style.setProperty("--i", Math.min(i, 8));
+      const name = document.createElement("b");
+      if (m.at >= 0 && m.len) name.append(m.id.slice(0, m.at), Object.assign(document.createElement("mark"), { textContent: m.id.slice(m.at, m.at + m.len) }), m.id.slice(m.at + m.len));
+      else name.textContent = m.id;
+      row.append(name);
+      if (m.maker) row.append(Object.assign(document.createElement("small"), { textContent: m.maker }));
+      row.onmousedown = (e) => { e.preventDefault(); pickModel(m.id); };
+      row.onmousemove = () => { if (sugAt !== i) { sugAt = i; markSug(); } };
+      return row;
+    }));
+    box.hidden = !sugItems.length;
+    input.setAttribute("aria-expanded", String(!box.hidden));
+    if (wasHidden && !box.hidden) { box.classList.remove("pop"); void box.offsetWidth; box.classList.add("pop"); }
+    markSug();
+  }
+  function markSug() {
+    [...$("aiSuggest").children].forEach((r, i) => r.setAttribute("aria-selected", String(i === sugAt)));
+    const on = $("aiSuggest").children[sugAt];
+    $("aiModel").setAttribute("aria-activedescendant", on ? on.id : "");
+    on?.scrollIntoView({ block: "nearest" });
+  }
+  function closeSuggest() { $("aiSuggest").hidden = true; $("aiModel").setAttribute("aria-expanded", "false"); sugAt = -1; }
+  function pickModel(id) {
+    $("aiModel").value = id; closeSuggest();
+    $("aiModel").dispatchEvent(new Event("change"));
+  }
+  $("aiModel").addEventListener("focus", () => { suggest(); loadModels(false); });
+  $("aiModel").addEventListener("input", suggest);
+  $("aiModel").addEventListener("blur", () => setTimeout(closeSuggest, 0));
+  $("aiModel").addEventListener("keydown", (e) => {
+    const open = !$("aiSuggest").hidden;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!open) { suggest(); return; }
+      sugAt = (sugAt + (e.key === "ArrowDown" ? 1 : -1) + sugItems.length) % sugItems.length; markSug();
+    } else if (e.key === "Enter" && open && sugAt >= 0) { e.preventDefault(); pickModel(sugItems[sugAt].id); }
+    else if (e.key === "Tab" && open && sugAt >= 0 && $("aiModel").value.trim()) pickModel(sugItems[sugAt].id);
+    else if (e.key === "Escape" && open) { e.preventDefault(); e.stopPropagation(); closeSuggest(); }
+  });
+  // Another address means another list.
+  $("aiBase").addEventListener("change", () => { if (document.activeElement === $("aiModel")) suggest(); });
   // A page can only reach Magpie once Magpie lists it; say so instead of a bare network error.
   const localHelp = (err) => $("aiPreset").value === "magpie" && local.available
     ? t("连不上 Magpie：{msg}。确认 Magpie 正在运行，再用 magpie gateway-key add suiji 生成一个 key 填进来。", { msg: err.message })

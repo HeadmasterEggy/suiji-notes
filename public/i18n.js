@@ -154,6 +154,8 @@ const EN = {
   "只在这台设备上：直接连接 {host}，不经过服务器。": "This device only: connects straight to {host}, not through the server.",
   "网关 key（没有可留空）": "Gateway key (leave empty if none)",
   "找到 {n} 个模型，在「模型」里选一个。": "Found {n} models; pick one under Model.",
+  "找到 {n} 个模型，在「模型」里输入几个字就能找到。": "Found {n} models; type a few letters under Model to find one.",
+  "读取模型列表失败：{msg}": "Couldn't read the model list: {msg}",
   "连不上 Magpie：{msg}。先在 Magpie 的 Settings → Network and sharing → Web pages 里加上 {origin}，再用 magpie gateway-key add suiji 生成一个 key 填进来。": "Can't reach Magpie: {msg}. In Magpie, add {origin} under Settings → Network and sharing → Web pages, then make a key with magpie gateway-key add suiji and enter it here.",
   "连不上 {base}：{msg}": "Can't reach {base}: {msg}",
   "接口地址要以 http:// 或 https:// 开头": "The address must start with http:// or https://",

@@ -444,3 +444,17 @@
 
 /* 护眼: a calm solid green, no glow */
 :root[data-style="eyecare"] .effort-thumb { border-radius: 10px; }
+
+/* Model suggestions, per style: no blur where the style has no glass, and its own corners. */
+:where(:root[data-style]:not([data-style="neon"], [data-style="sunset"])) .suggest { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--panel); border-color: var(--line); }
+:root:is([data-style="swiss"], [data-style="eink"], [data-style="blocks"]) :is(.suggest, .sug) { border-radius: 0; }
+:root:is([data-style="terminal"], [data-style="blueprint"], [data-style="ink"]) :is(.suggest, .sug) { border-radius: 3px; }
+:root[data-style="blocks"] .suggest { box-shadow: var(--bevel), 0 0 0 var(--px) #1e1e1e; font-family: var(--font-pixel); }
+:root[data-style="eink"] .suggest { border-color: #000; box-shadow: none; }
+:root[data-style="eink"] :is(.suggest.pop, .suggest.pop .sug) { animation: none; }
+:root[data-style="notebook"] .sug[aria-selected=true] { background: #ffe9a8; color: var(--ink); }
+:root[data-style="notebook"][data-mode="dark"] .sug[aria-selected=true] { background: #5a4a26; }
+:root[data-style="sunset"] .sug[aria-selected=true] { background: linear-gradient(90deg, #ff8a4c, #e0458c); color: #fff; }
+:root[data-style="neon"] .sug[aria-selected=true] { box-shadow: 0 0 14px rgba(255, 62, 200, .5); }
+:root[data-style="clay"] .suggest { border-radius: 20px; }
+:root[data-style="clay"] .sug { border-radius: 999px; }

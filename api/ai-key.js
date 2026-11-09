@@ -3,7 +3,9 @@
 //   GET    → { own: {base_url, model, hint, updated_at} | null, fallback: bool }
 //   PUT    { base_url, model, api_key? } (api_key may be left out to keep the saved one)
 //   DELETE → removes it
-import { admin, userOf, isOwner, seal, checkBaseUrl, DEFAULT } from "./_ai.js";
+//   POST   { base_url, api_key? } → { models: [id, …] }: the models that API offers, for suggestions in the model
+//          field; with no api_key it uses the saved key, but only when it was saved for that same address.
+import { admin, userOf, isOwner, seal, open, checkBaseUrl, DEFAULT } from "./_ai.js";
 
 const json = (o, status = 200) => Response.json(o, { status, headers: { "cache-control": "no-store" } });
 
@@ -52,4 +54,31 @@ export async function DELETE(request) {
   const { error } = await admin().from("ai_keys").delete().eq("user_id", user.id);
   if (error) return json({ error: error.message }, 500);
   return json(await state(user));
+}
+
+export async function POST(request) {
+  const user = await userOf(request);
+  if (!user) return json({ error: "not signed in" }, 401);
+  let b;
+  try { b = await request.json(); } catch { return json({ error: "bad request" }, 400); }
+  const base_url = String(b?.base_url || "").trim().replace(/\/+$/, "");
+  const bad = checkBaseUrl(base_url);
+  if (bad) return json({ error: bad }, 400);
+  let key = b?.api_key == null ? "" : String(b.api_key).trim();
+  if (key.length > 1000 || /\s/.test(key)) return json({ error: "that doesn't look like an API key" }, 400);
+  if (!key) {
+    const { data } = await admin().from("ai_keys").select("base_url,key_enc").eq("user_id", user.id).maybeSingle();
+    if (data && data.base_url.replace(/\/+$/, "") === base_url) key = open(data.key_enc);
+    else if (isOwner(user) && process.env.DEEPSEEK_API_KEY && base_url === DEFAULT.base_url) key = process.env.DEEPSEEK_API_KEY;
+  }
+  if (!key) return json({ error: "enter your API key" }, 400);
+  try {
+    const res = await fetch(base_url + "/models", { headers: { authorization: "Bearer " + key }, signal: AbortSignal.timeout(8000), redirect: "error" });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) return json({ error: out.error?.message || "HTTP " + res.status }, 502);
+    const models = [...new Set((out.data || out.models || []).map((m) => typeof m === "string" ? m : m?.id).filter((id) => typeof id === "string" && id.length < 200))].sort();
+    return json({ models: models.slice(0, 2000) });
+  } catch (e) {
+    return json({ error: String(e?.message || e) }, 502);
+  }
 }
