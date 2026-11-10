@@ -420,7 +420,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     const bg = v("--bg") || "#fff";
     const node = v("--g-node") || muted, edge = v("--g-edge") || muted, ew = +v("--g-edge-w") || 1;
     const pal = v("--g-palette");
-    palette = pal ? pal.split(",").map((c) => c.trim()).filter(Boolean) : PALETTE;
+    palette = pal && pal.includes(",") ? pal.split(",").map((c) => c.trim()).filter(Boolean) : PALETTE;   // "initial" (terminal, light) means the usual colours
     const colour = (p) => p.slot >= 0 && palette.length ? palette[p.slot % palette.length] : node;
     for (const r of rows) r.el.querySelector("i").style.background = r.g === null ? node : palette[slot.get(r.g) % palette.length];
     const glow = +v("--g-glow") || 0, square = v("--g-shape") === "square", outline = v("--g-outline");
@@ -433,30 +433,54 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     const focus = hover || chosen, lit = focus ? focus.nb : null;
     const sel = !focus && picked;
 
-    // A floor under the graph, seen in perspective, with each note's shadow on it: the strongest depth cue
-    // a flat canvas can give. Only while looking down at it in 3D.
-    const sp = Math.sin(cam.pitch);
+    // A box around the graph, seen in perspective: of its six sides, the three behind the graph are drawn
+    // (a floor and two walls, like the corner of a room), each faintly tinted with its axis colour, and every
+    // note casts a shadow on the floor. Turning the graph swaps in whichever sides are behind it.
     let floorY = null;
-    if (!flat && sp > 0.05 && shown.length > 1) {
-      let lo = Infinity, hi = -Infinity, x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
-      for (const p of shown) { lo = Math.min(lo, p.y); hi = Math.max(hi, p.y); x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); }
-      const fy = floorY = hi + Math.max(30, (hi - lo) * 0.25), cxw = (x0 + x1) / 2, czw = (z0 + z1) / 2;
-      const half = Math.max(x1 - x0, z1 - z0) / 2 + 60, step = half / 4;
-      const fade = Math.min(1, (sp - 0.05) / 0.25);
-      ctx.strokeStyle = ink; ctx.lineWidth = 1;
-      for (let i = -4; i <= 4; i++) {
-        ctx.globalAlpha = 0.07 * fade * (1 - Math.abs(i) / 5.5);
-        for (const [ax, az, bx, bz] of [[cxw + i * step, czw - half, cxw + i * step, czw + half], [cxw - half, czw + i * step, cxw + half, czw + i * step]]) {
-          const a = proj(ax, fy, az), b = proj(bx, fy, bz);
-          ctx.beginPath(); ctx.moveTo(a[0] * k, a[1] * k); ctx.lineTo(b[0] * k, b[1] * k); ctx.stroke();
-        }
+    if (!flat && shown.length > 1) {
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+      for (const p of shown) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); }
+      const c = [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2], half = Math.max(x1 - x0, y1 - y0, z1 - z0) / 2 + 40, step = half / 4;
+      const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw), cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+      // How squarely each axis points at the viewer (1: straight on, 0: edge-on).
+      const facing = [Math.abs(-sy * cp), Math.abs(sp), Math.abs(cy * cp)];
+      const at = (a, v, u, w) => { const q = [0, 0, 0], o = [(a + 1) % 3, (a + 2) % 3]; q[a] = v; q[o[0]] = u; q[o[1]] = w; return proj(q[0], q[1], q[2]); };
+      const walls = [];
+      for (let a = 0; a < 3; a++) {
+        const o = [(a + 1) % 3, (a + 2) % 3];
+        const near = at(a, c[a] - half, c[o[0]], c[o[1]])[2], far = at(a, c[a] + half, c[o[0]], c[o[1]])[2];
+        walls.push({ a, v: c[a] + (far > near ? half : -half), o, fade: Math.min(1, Math.max(0, (facing[a] - 0.06) / 0.3)) });
       }
-      ctx.fillStyle = ink;
-      for (const p of shown) {
-        if (p.kind === "tag") continue;
-        const [sx, sy2, , ss] = proj(p.x, fy, p.z), r = radius(p) * k * ss * 1.1;
-        ctx.globalAlpha = 0.09 * fade * ((focus || sel) && !(p === focus || lit?.has(p.i) || sel?.near?.has(p.i)) ? 0.3 : 1);
-        ctx.beginPath(); ctx.ellipse(sx * k, sy2 * k, r, r * Math.max(0.2, sp), 0, 0, Math.PI * 2); ctx.fill();
+      const AX = [AXIS.x, AXIS.y, AXIS.z];
+      for (const wl of walls) {
+        if (!wl.fade) continue;
+        const { a, v, o } = wl, u0 = c[o[0]] - half, u1 = c[o[0]] + half, w0 = c[o[1]] - half, w1 = c[o[1]] + half;
+        const corner = [[u0, w0], [u1, w0], [u1, w1], [u0, w1]].map(([u, w]) => at(a, v, u, w));
+        ctx.globalAlpha = 0.035 * wl.fade; ctx.fillStyle = AX[a];
+        ctx.beginPath(); corner.forEach((q, i) => (i ? ctx.lineTo : ctx.moveTo).call(ctx, q[0] * k, q[1] * k)); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = ink; ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.14 * wl.fade; ctx.stroke();
+        ctx.globalAlpha = 0.06 * wl.fade;
+        ctx.beginPath();
+        for (let i = -3; i <= 3; i++) {
+          let q = at(a, v, c[o[0]] + i * step, w0), r = at(a, v, c[o[0]] + i * step, w1);
+          ctx.moveTo(q[0] * k, q[1] * k); ctx.lineTo(r[0] * k, r[1] * k);
+          q = at(a, v, u0, c[o[1]] + i * step); r = at(a, v, u1, c[o[1]] + i * step);
+          ctx.moveTo(q[0] * k, q[1] * k); ctx.lineTo(r[0] * k, r[1] * k);
+        }
+        ctx.stroke();
+      }
+      // Shadows on the floor (or the ceiling, seen from below).
+      const fl = walls[1];
+      floorY = fl.v;
+      if (fl.fade) {
+        ctx.fillStyle = ink;
+        for (const p of shown) {
+          if (p.kind === "tag") continue;
+          const [sx, sy2, , ss] = proj(p.x, fl.v, p.z), r = radius(p) * k * ss * 1.1;
+          ctx.globalAlpha = 0.09 * fl.fade * ((focus || sel) && !(p === focus || lit?.has(p.i) || sel?.near?.has(p.i)) ? 0.3 : 1);
+          ctx.beginPath(); ctx.ellipse(sx * k, sy2 * k, r, r * Math.max(0.2, Math.abs(sp)), 0, 0, Math.PI * 2); ctx.fill();
+        }
       }
     }
 

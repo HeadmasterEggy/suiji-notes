@@ -1415,9 +1415,11 @@ function graphData(withTags) {
   // folder still splits by its subfolders. Files sitting above that level, and quick notes, get their own.
   const dirs = md.map((f) => fullPath(f).slice(0, -1));
   let depth = 0;
-  while (dirs.length && dirs.every((d) => d.length > depth + 1 && d[depth] === dirs[0][depth])) depth++;
+  // A file sitting right in that shared folder (say a README beside the course folders) must not stop the
+  // split, or every note ends up in one category: it is named after the shared folder instead.
+  while (dirs.length && dirs.every((d) => d.length > depth && d[depth] === dirs[0][depth])) depth++;
   // len: rough length in characters for "node size by length" (UTF-8 bytes; CJK text is about 3 a character).
-  md.forEach((f, k) => add("file:" + f.id, { label: stripMd(baseName(f.name)), kind: "file", ref: f.id, group: dirs[k][depth] || t("未分类"), len: (f.size || 0) / 2 }));
+  md.forEach((f, k) => add("file:" + f.id, { label: stripMd(baseName(f.name)), kind: "file", ref: f.id, group: dirs[k][depth] || dirs[k][depth - 1] || t("未分类"), len: (f.size || 0) / 2 }));
   const find = linkResolver(md);
   const resolve = (dir, target) => { const f = find(dir, target); return f ? idx.get("file:" + f.id) : undefined; };
   const link = (a, b) => { if (b !== undefined && a !== b) edges.add(a < b ? a + "," + b : b + "," + a); };
