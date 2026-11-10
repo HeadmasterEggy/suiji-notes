@@ -299,6 +299,7 @@ const EN = {
   "没有找到这篇笔记": "Note not found",
   "没有找到这个文件": "File not found",
   "点击关闭": "Click to dismiss",
+  "换了服务，请填上这个服务的 API key。": "This is a different service: enter its API key.",
   "文件": "file",
   "读取失败": "Couldn't read it",
   "离线，这个文件还没缓存过": "Offline, and this file isn't cached yet",
