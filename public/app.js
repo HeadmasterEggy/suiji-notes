@@ -1448,12 +1448,20 @@ function showGraph(p) {
   tagBtn.onclick = () => { p.graphTags = !p.graphTags; p.shown = null; saveLayout(); renderPane(p); };
   const fitBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: t("居中") });
   fitBtn.onclick = () => { p.graphFocus = null; p.graph?.fit(); };
-  tools.append(tagBtn, fitBtn);
+  // 3D by default; the flat graph is one click away and each pane remembers its choice.
+  const dimBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: p.graphFlat ? "3D" : "2D", title: p.graphFlat ? t("切换到立体视图") : t("切换到平面视图") });
+  dimBtn.onclick = () => {
+    p.graphFlat = !p.graphFlat; saveLayout();
+    dimBtn.textContent = p.graphFlat ? "3D" : "2D"; dimBtn.title = p.graphFlat ? t("切换到立体视图") : t("切换到平面视图");
+    p.graph?.setFlat(p.graphFlat);
+  };
+  tools.append(dimBtn, tagBtn, fitBtn);
   wrap.append(tools);
   if (!data.nodes.length) wrap.append(Object.assign(document.createElement("p"), { className: "graph-empty", textContent: t("还没有 Markdown 文件或笔记。") }));
   p.preview.classList.remove("doc");
   p.preview.replaceChildren(wrap);
   p.graph = mountGraph(wrap, data, {
+    flat: !!p.graphFlat,
     isActive: (n) => n.kind !== "tag" && [...panes.values()].some((x) => x !== p && x.kind === n.kind && x.itemId === n.ref),
     onOpen: (n) => {
       if (n.kind === "tag") { searchTag(n.ref); return; }
@@ -1814,7 +1822,7 @@ function saveLayout() {
     const top = p.restoreTop || (p.kind ? Math.round(scroller(p).scrollTop) : 0);   // still waiting to scroll back: keep that
     if (p.kind && p.hi >= 0) p.hist[p.hi] = { kind: p.kind, id: p.itemId, top };
     const from = Math.max(0, p.hi - 20), h = p.hist.slice(from, from + 30);
-    return { kind: p.kind, id: p.itemId, f: p === focused ? 1 : 0, t: p.graphTags ? 1 : 0, o: p.tocOpen ? 1 : 0, top, h, hi: p.hi - from };
+    return { kind: p.kind, id: p.itemId, f: p === focused ? 1 : 0, t: p.graphTags ? 1 : 0, g: p.graphFlat ? 1 : 0, o: p.tocOpen ? 1 : 0, top, h, hi: p.hi - from };
   };
   const ser = (n) => n.pane ? pane(n.pane) : { dir: n.dir, ratio: n.ratio, a: ser(n.a), b: ser(n.b) };
   try { localStorage.setItem(layoutKey(), JSON.stringify(ser(layout))); } catch {}
@@ -1829,6 +1837,7 @@ function restoreLayout() {
       const p = makePane(s && s.kind ? { kind: s.kind, id: s.id } : null);
       if (s && s.f) focused = p;
       p.graphTags = !!(s && s.t);
+      p.graphFlat = !!(s && s.g);
       p.tocOpen = s && "o" in s ? s.o !== 0 : tocAuto;   // each pane keeps its own outline open or closed
       if (Array.isArray(s?.h) && s.h[s.hi]?.id === s.id) { p.hist = s.h.filter((x) => x && x.kind); p.hi = Math.min(s.hi, p.hist.length - 1); navState(p); }
       if (s?.top) p.restoreTop = s.top;
