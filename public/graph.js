@@ -11,13 +11,23 @@
 //   const g = mountGraph(host, { nodes: [{label, kind, ref, group}], edges: [[i, j]] }, { onOpen(node), isActive(node), flat })
 //   g.redraw()       after the active set changes
 //   g.setFlat(bool)  switch between 3D and flat, animated
+//   g.toggleForces() open or close the forces panel (sliders like Obsidian's), returns whether it is open
 //   g.destroy()      before the host is thrown away
 import { t } from "./i18n.js";
 
 // Categorical colours, readable on light and dark backgrounds. A style can swap them with --g-palette.
 const PALETTE = ["#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#b07aa1", "#76b7b2", "#edc948", "#ff9da7", "#9c755f", "#5fa8d3"];
 
-export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden = [], onHide }) {
+// Force settings: multipliers on the defaults (centre, repel, link) and the link length in px.
+export const FORCE_DEFAULTS = { center: 1, repel: 1, link: 1, dist: 60 };
+const FORCE_SLIDERS = [
+  ["center", "向心力", 0, 3, 0.05],
+  ["repel", "排斥力", 0, 3, 0.05],
+  ["link", "连线力", 0, 3, 0.05],
+  ["dist", "连线距离", 20, 250, 1],
+];
+
+export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden = [], onHide, forces = {}, onForces }) {
   const canvas = document.createElement("canvas");
   canvas.className = "graph-canvas";
   host.prepend(canvas);
@@ -113,6 +123,42 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   let picked = null;   // { core: Set of node indices, near: core plus neighbours }
   applyHidden(); syncLegend();
 
+  // ---------- forces panel ----------
+  const F = { ...FORCE_DEFAULTS };
+  for (const k in F) if (Number.isFinite(forces[k])) F[k] = forces[k];
+  const panel = document.createElement("div");
+  panel.className = "graph-forces";
+  panel.hidden = true;
+  const head = document.createElement("div");
+  head.className = "graph-forces-head";
+  head.innerHTML = `<b></b><button type="button" class="ghost small"></button>`;
+  head.querySelector("b").textContent = t("力度");
+  const reset = head.querySelector("button");
+  reset.textContent = t("重置");
+  panel.append(head);
+  const inputs = {};
+  for (const [key, label, min, max, step] of FORCE_SLIDERS) {
+    const row = document.createElement("label");
+    row.innerHTML = `<span></span><output></output><input type="range">`;
+    row.querySelector("span").textContent = t(label);
+    const input = Object.assign(row.querySelector("input"), { min, max, step, value: F[key] });
+    const out = row.querySelector("output");
+    const show = () => { out.textContent = key === "dist" ? Math.round(F[key]) : F[key].toFixed(2); };
+    show();
+    input.oninput = () => { F[key] = +input.value; show(); reheat(); };
+    input.onchange = () => onForces?.({ ...F });
+    inputs[key] = { input, show };
+    panel.append(row);
+  }
+  reset.onclick = () => {
+    Object.assign(F, FORCE_DEFAULTS);
+    for (const k in inputs) { inputs[k].input.value = F[k]; inputs[k].show(); }
+    onForces?.({ ...F }); reheat();
+  };
+  host.append(panel);
+  // Settle again after a slider moves, and let the view re-frame the new shape.
+  const reheat = () => { alpha = Math.max(alpha, 0.5); userMoved = false; kick(); };
+
   // ---------- simulation ----------
   function tick() {
     const V = shown, n = V.length;
@@ -123,7 +169,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
         let dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z, d2 = dx * dx + dy * dy + dz * dz;
         if (d2 > 160000) continue;
         if (d2 < 1) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; dz = flat ? 0 : Math.random() - 0.5; d2 = 1; }
-        const f = (130 * alpha) / d2;
+        const f = (130 * F.repel * alpha) / d2;
         a.vx += dx * f; a.vy += dy * f; a.vz += dz * f; b.vx -= dx * f; b.vy -= dy * f; b.vz -= dz * f;
       }
     }
@@ -131,12 +177,13 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       const a = N[ia], b = N[ib];
       // Clamp the distance: two linked nodes almost on top of each other would otherwise get a huge kick.
       const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, d = Math.max(Math.hypot(dx, dy, dz), 4);
-      const s = ((d - 60) / d) * alpha * 0.5 / Math.min(a.deg, b.deg);
+      const s = ((d - F.dist) / d) * alpha * 0.5 * F.link / Math.min(a.deg, b.deg);
       a.vx += dx * s; a.vy += dy * s; a.vz += dz * s; b.vx -= dx * s; b.vy -= dy * s; b.vz -= dz * s;
     }
     let far = 0;
     for (const p of shown) {
-      p.vx -= p.x * 0.012 * alpha; p.vy -= p.y * 0.012 * alpha; p.vz -= p.z * 0.012 * alpha;
+      const c = 0.012 * F.center * alpha;
+      p.vx -= p.x * c; p.vy -= p.y * c; p.vz -= p.z * c;
       if (flat) { p.vz = 0; p.z *= 0.8; if (Math.abs(p.z) < 0.05) p.z = 0; }
       if (p.fixed) { p.vx = p.vy = p.vz = 0; continue; }
       p.vx *= 0.6; p.vy *= 0.6; p.vz *= 0.6;
@@ -447,6 +494,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   const api = {
     redraw: kick,
     fit() { picked = null; userMoved = false; legendPick = null; syncLegend(); kick(); },
+    toggleForces() { panel.hidden = !panel.hidden; return !panel.hidden; },
     setFlat(on) {
       if (flat === !!on) return;
       flat = !!on;

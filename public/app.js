@@ -1460,7 +1460,9 @@ function showGraph(p) {
     dimBtn.textContent = p.graphFlat ? "3D" : "2D"; dimBtn.title = p.graphFlat ? t("切换到立体视图") : t("切换到平面视图");
     p.graph?.setFlat(p.graphFlat);
   };
-  tools.append(dimBtn, tagBtn, fitBtn);
+  const forceBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: t("力度"), title: t("调节向心力、排斥力和连线") });
+  forceBtn.onclick = () => forceBtn.classList.toggle("on", p.graph?.toggleForces());
+  tools.append(dimBtn, forceBtn, tagBtn, fitBtn);
   wrap.append(tools);
   if (!data.nodes.length) wrap.append(Object.assign(document.createElement("p"), { className: "graph-empty", textContent: t("还没有 Markdown 文件或笔记。") }));
   p.preview.classList.remove("doc");
@@ -1469,6 +1471,9 @@ function showGraph(p) {
     flat: !!p.graphFlat,
     hidden: p.graphHidden || [],
     onHide: (h) => { p.graphHidden = h; saveLayout(); },
+    // Forces are one setting for the device, like a preference, not per pane.
+    forces: (() => { try { return JSON.parse(localStorage.getItem("suiji:graphForces")) || {}; } catch { return {}; } })(),
+    onForces: (f) => { try { localStorage.setItem("suiji:graphForces", JSON.stringify(f)); } catch {} },
     isActive: (n) => n.kind !== "tag" && [...panes.values()].some((x) => x !== p && x.kind === n.kind && x.itemId === n.ref),
     onOpen: (n) => {
       if (n.kind === "tag") { searchTag(n.ref); return; }
