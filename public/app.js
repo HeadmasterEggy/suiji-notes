@@ -122,11 +122,7 @@ async function checkUpdate() {
   if (document.hidden && !busy) return location.reload();
   $("updateToast").hidden = false;
 }
-$("updateToast").onclick = async () => {
-  commitAll();
-  await Promise.all([...panes.values()].map((p) => p.saving));
-  location.reload();
-};
+$("updateToast").onclick = async () => { await saveAll(); location.reload(); };
 setInterval(checkUpdate, 10 * 60 * 1000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) checkUpdate(); });
 
@@ -589,11 +585,21 @@ function obsidianSyntax(part, wiki, embeds) {
       const [target, alias] = inner.split(/\\?\|/);
       const [file, heading] = target.split("#");
       const label = (alias || (file ? baseName(stripMd(file.trim())) + (heading ? " › " + heading : "") : heading || "")).trim();
-      wiki.push(file.trim());
+      wiki.push({ file: file.trim(), heading: (heading || "").trim() });
       return `[${mdEscape(label || inner)}](#suiji-wiki-${wiki.length - 1})`;
     })
     .replace(/==(?=\S)([^=\n]+?)(?<=\S)==/g, "<mark>$1</mark>");
 }
+
+// Formulas are pulled out before Markdown sees them (so _ and * inside stay intact), outside code only; the
+// documents and the assistant's replies share this.
+const MATH = [[/\$\$([\s\S]+?)\$\$/g, true], [/\\\[([\s\S]+?)\\\]/g, true], [/\\\(([\s\S]+?)\\\)/g, false],
+  [/(?<![\\$\w])\$(?!\s)([^\n$]+?)(?<![\s\\])\$(?!\d)/g, false]];
+const outsideCode = (text, fn) => text.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]+`)/g).map((part, i) => i % 2 ? part : fn(part)).join("");
+function pullMath(part, put) { for (const [re, display] of MATH) part = part.replace(re, (_, tex) => put(tex, display)); return part; }
+const katexHtml = (tex, display) => window.katex.renderToString(tex.trim(), { displayMode: display, throwOnError: false, output: "html" });
+// GitHub-style heading anchors ("#my-heading") and Obsidian's ("#My Heading") both compare equal under this.
+const slug = (s) => String(s).trim().toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, "").replace(/\s+/g, "-");
 
 async function renderMarkdown(src, f) {
   await loadMarkdownLibs();
@@ -602,19 +608,13 @@ async function renderMarkdown(src, f) {
     .replace(/\{%\s*asset_img\s+(\S+)\s*(.*?)%\}/g, (_, file, alt) => `![${alt.trim()}](${file})`)
     .replace(/^\s*\{%[^%]*%\}\s*$/gm, "");
 
-  // Pull math out before Markdown sees it (so _ and * inside formulas stay intact), skipping code.
   const math = [];
   const keep = (tex, display) => {
-    math.push(window.katex.renderToString(tex.trim(), { displayMode: display, throwOnError: false, output: "html" }));
+    math.push(katexHtml(tex, display));
     return display ? `\n\nKATEXBLOCK${math.length - 1}END\n\n` : `KATEXINLINE${math.length - 1}END`;
   };
   const wiki = [], embeds = [];
-  text = text.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]+`)/g).map((part, i) => i % 2 ? part : obsidianSyntax(part
-    .replace(/\$\$([\s\S]+?)\$\$/g, (_, t) => keep(t, true))
-    .replace(/\\\[([\s\S]+?)\\\]/g, (_, t) => keep(t, true))
-    .replace(/\\\(([\s\S]+?)\\\)/g, (_, t) => keep(t, false))
-    .replace(/(?<![\\$\w])\$(?!\s)([^\n$]+?)(?<![\s\\])\$(?!\d)/g, (_, t) => keep(t, false)), wiki, embeds)
-  ).join("");
+  text = outsideCode(text, (part) => obsidianSyntax(pullMath(part, keep), wiki, embeds));
 
   let html = window.DOMPurify.sanitize(window.marked.parse(text, { gfm: true, breaks: false }));
   html = html
@@ -668,17 +668,31 @@ async function renderMarkdown(src, f) {
   // It replaces the one docHead made, so a heading after a comment, a Hexo tag or in === style isn't shown twice.
   if (first?.tagName === "H1") { const head = art.querySelector(".md-head"); head.querySelector(".md-title")?.remove(); first.classList.add("md-title"); head.prepend(first); }
   const find = wiki.length ? linkResolver(files.filter(isMarkdown)) : null, wdir = f.name.split("/").slice(0, -1);
+  // Links inside the app carry what to open in data-open / data-heading, handled by the pane's click listener
+  // (so cached copies keep working). [[#Heading]] and (#heading) go to a heading of this document.
+  const missing = (a, title) => a.replaceWith(Object.assign(document.createElement("span"), { className: "wikilink missing", textContent: a.textContent, title }));
   for (const a of content.querySelectorAll('a[href^="#suiji-wiki-"]')) {
-    const target = find(wdir, wiki[+a.getAttribute("href").slice(12)] || "");
-    if (target) { a.dataset.open = target.id; a.href = "#"; a.title = target.name; a.classList.add("wikilink"); }
-    else a.replaceWith(Object.assign(document.createElement("span"), { className: "wikilink missing", textContent: a.textContent, title: t("没有找到这篇笔记") }));
+    const w = wiki[+a.getAttribute("href").slice(12)] || { file: "", heading: "" };
+    const target = w.file ? find(wdir, w.file) : w.heading ? f : null;
+    if (!target) { missing(a, t("没有找到这篇笔记")); continue; }
+    a.dataset.open = target.id; a.href = "#"; a.title = w.file ? target.name : w.heading; a.classList.add("wikilink");
+    if (w.heading) a.dataset.heading = w.heading;
   }
+  const attach = [];
   for (const a of content.querySelectorAll("a[href]")) {
     if (a.dataset.open) continue;
-    const href = a.getAttribute("href");
-    const target = isRel(href) && byPath.get(resolveRel(dir, href));
-    if (target && isMarkdown(target)) a.dataset.open = target.id;   // handled by the pane's click listener, so cached copies keep working
-    else if (!target && !href.startsWith("#")) { a.target = "_blank"; a.rel = "noopener"; }
+    const href = a.getAttribute("href"), hash = decodePath(href.split("#").slice(1).join("#"));
+    if (href.startsWith("#")) { if (hash) { a.dataset.open = f.id; a.dataset.heading = hash; } continue; }
+    if (!isRel(href)) { a.target = "_blank"; a.rel = "noopener"; continue; }
+    // A relative link is never followed as written: it would load a page of this site in place of the app.
+    const target = byPath.get(resolveRel(dir, href));
+    if (!target) missing(a, t("没有找到这个文件"));
+    else if (isMarkdown(target)) { a.dataset.open = target.id; if (hash) a.dataset.heading = hash; }
+    else attach.push([a, target]);   // a PDF or picture beside the document opens in a new tab
+  }
+  if (attach.length) {
+    const urls = await signedUrls([...new Set(attach.map(([, x]) => x.path))]).catch(() => new Map());
+    for (const [a, x] of attach) { const u = urls.get(x.path); if (u) Object.assign(a, { href: u, target: "_blank", rel: "noopener" }); else missing(a, t("没有找到这个文件")); }
   }
   return art;
 }
@@ -1166,7 +1180,11 @@ function makePane(item) {
   p.ta.addEventListener("blur", () => commit(p));
   p.preview.addEventListener("click", (e) => {
     const a = e.target.closest("a[data-open]");
-    if (a) { e.preventDefault(); openIn(p, "file", a.dataset.open); }
+    if (a) {
+      e.preventDefault();
+      if (a.dataset.open !== p.itemId) openIn(p, "file", a.dataset.open);
+      if (a.dataset.heading) goHeading(p, a.dataset.open, a.dataset.heading);
+    }
     const tag = e.target.closest("[data-tag]");
     if (tag) searchTag(tag.dataset.tag);
   });
@@ -1308,6 +1326,8 @@ function commit(p) {
   persist(); render(); scheduleSync();
 }
 const commitAll = () => panes.forEach(commit);
+// Saves every pane now and waits for the file saves (notes save to this device at once).
+async function saveAll() { commitAll(); await Promise.all([...panes.values()].map((p) => p.saving)); }
 
 const TEXT_EXT = ["md", "markdown", "txt", "csv", "log", "json", "yml", "yaml", "toml", "tex", "py", "js", "ts", "html", "css", "sh"];
 const isEditable = (f) => f.size < 2 * 1024 * 1024 && (f.mime.startsWith("text/") || /json|xml/.test(f.mime) || TEXT_EXT.includes(extOf(f.name)));
@@ -1367,15 +1387,8 @@ mountAgent({
   async markdown(text) {
     await loadMarkdownLibs();
     // Formulas as in documents: pulled out before Markdown sees them, code spans left alone.
-    const math = [], keep = (tex, display) => {
-      math.push(window.katex.renderToString(tex.trim(), { displayMode: display, throwOnError: false, output: "html" }));
-      return `KATEXMATH${math.length - 1}END`;
-    };
-    text = text.replace(/\]\(suiji:/g, "](#suiji:").split(/(```[\s\S]*?```|`[^`\n]+`)/g).map((part, i) => i % 2 ? part : part
-      .replace(/\$\$([\s\S]+?)\$\$/g, (_, t) => keep(t, true))
-      .replace(/\\\[([\s\S]+?)\\\]/g, (_, t) => keep(t, true))
-      .replace(/\\\(([\s\S]+?)\\\)/g, (_, t) => keep(t, false))
-      .replace(/(?<![\\$\w])\$(?!\s)([^\n$]+?)(?<![\s\\])\$(?!\d)/g, (_, t) => keep(t, false))).join("");
+    const math = [], keep = (tex, display) => { math.push(katexHtml(tex, display)); return `KATEXMATH${math.length - 1}END`; };
+    text = outsideCode(text.replace(/\]\(suiji:/g, "](#suiji:"), (part) => pullMath(part, keep));
     return window.DOMPurify.sanitize(window.marked.parse(text, { gfm: true, breaks: true }))
       .replace(/KATEXMATH(\d+)END/g, (_, i) => math[i]);
   },
@@ -1484,6 +1497,18 @@ function showItem(kind, id, beside) {
   openIn(focused, kind, id); return focused;
 }
 const norm = (x) => String(x || "").replace(/^#+\s*/, "").replace(/\s+/g, " ").trim().toLowerCase();
+// A heading of the document in pane p, once it has rendered (up to 6 s): the same text or anchor, else the first
+// that contains it. Scrolled to and flashed; null when there is none.
+async function goHeading(p, id, text) {
+  for (let n = 0; n < 60 && !(p.itemId === id && p.shownId === id && p.preview.querySelector(".md-body")); n++) await sleepMs(100);
+  if (p.itemId !== id) return null;
+  const all = [...p.preview.querySelectorAll(".md-body :is(h1, h2, h3, h4, h5, h6)")], want = norm(text), s = slug(text);
+  const h = all.find((x) => norm(x.textContent) === want || slug(x.textContent) === s) || (want && all.find((x) => norm(x.textContent).includes(want)));
+  if (!h) return null;
+  scrollToHeading(p, h);
+  h.classList.remove("ag-flash"); void h.offsetWidth; h.classList.add("ag-flash");
+  return h;
+}
 async function uiOpen({ kind, id, heading, beside }) {
   if (isPhone.matches) toggleAgent(false);
   const p = showItem(kind, id, beside);
@@ -1498,13 +1523,9 @@ async function uiOpen({ kind, id, heading, beside }) {
     ta.scrollTop = Math.max(0, (i / lines.length) * ta.scrollHeight - 40);
     return { opened: true, heading: lines[i] };
   }
-  // A file renders asynchronously; wait for its headings.
-  for (let n = 0; n < 60 && !(p.itemId === id && p.heads.length); n++) await sleepMs(100);
-  const i = p.heads.findIndex((h) => norm(h.textContent).includes(want));
-  if (i < 0) return { opened: true, heading: "not found", headings: p.heads.slice(0, 60).map((h) => h.textContent.trim()) };
-  const h = p.heads[i];
-  scrollToHeading(p, h);
-  h.classList.remove("ag-flash"); void h.offsetWidth; h.classList.add("ag-flash");
+  // A file renders asynchronously; goHeading waits for it.
+  const h = await goHeading(p, id, heading);
+  if (!h) return { opened: true, heading: "not found", headings: [...p.preview.querySelectorAll(".md-body :is(h1, h2, h3, h4)")].slice(0, 60).map((x) => x.textContent.trim()) };
   return { opened: true, heading: h.textContent.trim() };
 }
 async function uiGraph({ ids, query, tag }) {
@@ -2323,8 +2344,7 @@ function restyled() {
     if (!b || b.dataset.lang === langChoice) return;
     try { b.dataset.lang ? localStorage.setItem("suiji:lang", b.dataset.lang) : localStorage.removeItem("suiji:lang"); } catch {}
     // Text drawn by the app follows the language from the start, so a reload is simplest; edits are saved first.
-    commitAll();
-    await Promise.all([...panes.values()].map((p) => p.saving));
+    await saveAll();
     location.reload();
   };
   $("tocAuto").onchange = (e) => {
@@ -2356,7 +2376,7 @@ function restyled() {
 }
 $("outBtn").onclick = async () => {
   $("settings").close();
-  commitAll();
+  await saveAll();   // a document being edited is written before the session that may write it goes away
   if (Object.values(store.notes).some((n) => n.dirty)) await sync();
   // Only this device: the default (global) would also sign out the Mac agent and every other device.
   await sb.auth.signOut({ scope: "local" });

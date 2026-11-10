@@ -5,7 +5,7 @@
 //   tags:  front matter `tags:` as a YAML list or [a, b].
 export function mdMeta(src) {
   const tags = [], links = new Set();
-  const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(src);
+  const fm = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(src);   // as the preview reads it: a BOM is fine, "----" is not the end
   if (fm) {
     const lines = fm[1].split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
