@@ -4,10 +4,18 @@
 // to zoom, drag a node to move it, hover to light up its neighbours, click to open it. Flat mode squashes the
 // z axis and turns the camera face-on, which gives the old 2D graph back.
 //
-//   const g = mountGraph(host, { nodes: [{label, kind, ref}], edges: [[i, j]] }, { onOpen(node), isActive(node), flat })
+// Each note node has a group (its category); every group gets its own colour, listed in a legend in the
+// corner, and clicking a legend entry lights up that group.
+//
+//   const g = mountGraph(host, { nodes: [{label, kind, ref, group}], edges: [[i, j]] }, { onOpen(node), isActive(node), flat })
 //   g.redraw()       after the active set changes
 //   g.setFlat(bool)  switch between 3D and flat, animated
 //   g.destroy()      before the host is thrown away
+import { t } from "./i18n.js";
+
+// Categorical colours, readable on light and dark backgrounds. A style can swap them with --g-palette.
+const PALETTE = ["#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#b07aa1", "#76b7b2", "#edc948", "#ff9da7", "#9c755f", "#5fa8d3"];
+
 export function mountGraph(host, data, { onOpen, isActive, flat = false }) {
   const canvas = document.createElement("canvas");
   canvas.className = "graph-canvas";
@@ -27,6 +35,38 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false }) {
   // Size grows with links but is capped, so one hub note does not cover its neighbours.
   const radius = (n) => n.kind === "tag" ? 2.5 + Math.min(Math.sqrt(n.deg), 6) * 0.6 : 2.5 + Math.min(Math.sqrt(n.deg), 9) * 0.9;
   const edgeAlpha = E.length > 400 ? 0.16 : 0.35;
+
+  // Groups, biggest first: each of the first ten gets a palette colour, the rest share the plain node colour.
+  const sizes = new Map();
+  for (const n of N) if (n.kind !== "tag" && n.group) sizes.set(n.group, (sizes.get(n.group) || 0) + 1);
+  const groups = [...sizes].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "zh"));
+  const slot = new Map(groups.slice(0, PALETTE.length).map(([g], i) => [g, i]));
+  for (const n of N) n.slot = slot.has(n.group) ? slot.get(n.group) : -1;
+  let palette = PALETTE;
+
+  // Legend: one row per coloured group (plus "other"), click to light that group up, click again to clear.
+  let legendPick = null;
+  const legend = document.createElement("div");
+  legend.className = "graph-legend";
+  const rows = groups.slice(0, PALETTE.length).map(([g, c]) => ({ g, c }));
+  const rest = groups.slice(PALETTE.length).reduce((a, [, c]) => a + c, 0);
+  if (rest) rows.push({ g: null, c: rest });
+  for (const r of rows) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.innerHTML = `<i></i><span></span><em></em>`;
+    b.querySelector("span").textContent = r.g ?? t("其他");
+    b.querySelector("em").textContent = r.c;
+    b.title = r.g ?? t("其他");
+    r.el = b;
+    b.onclick = () => {
+      if (legendPick === r) { legendPick = null; api.fit(); }
+      else { api.focus(r.g === null ? (n) => n.kind !== "tag" && n.slot < 0 : (n) => n.group === r.g); legendPick = r; }
+      for (const x of rows) x.el.classList.toggle("on", x === legendPick);
+    };
+    legend.append(b);
+  }
+  if (rows.length > 1) host.append(legend);
 
   let W = 0, H = 0, dpr = 1, raf = 0, alpha = 1;
   // view: screen pan (x, y) and zoom (k). cam: orbit angles; spread: how far out the layout reaches (for perspective and fog).
@@ -129,6 +169,10 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false }) {
     const ink = v("--ink") || "#111", muted = v("--muted") || "#888";
     const bg = v("--bg") || "#fff";
     const node = v("--g-node") || muted, edge = v("--g-edge") || muted, ew = +v("--g-edge-w") || 1;
+    const pal = v("--g-palette");
+    palette = pal ? pal.split(",").map((c) => c.trim()).filter(Boolean) : PALETTE;
+    const colour = (p) => p.slot >= 0 && palette.length ? palette[p.slot % palette.length] : node;
+    for (const r of rows) r.el.querySelector("i").style.background = r.g === null ? node : palette[slot.get(r.g) % palette.length];
     const glow = +v("--g-glow") || 0, square = v("--g-shape") === "square", outline = v("--g-outline");
     const dot = (x, y, r) => { ctx.beginPath(); if (square) ctx.rect(x - r, y - r, r * 2, r * 2); else ctx.arc(x, y, r, 0, Math.PI * 2); };
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -182,7 +226,9 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false }) {
       dot(x, y, r);
       if (p.kind === "tag") { ctx.lineWidth = 1.2; ctx.strokeStyle = on ? ink : node; ctx.fillStyle = bg; ctx.fill(); ctx.stroke(); }
       else {
-        ctx.fillStyle = on || active ? ink : node; ctx.fill();
+        const c = colour(p);
+        if (glow) ctx.shadowColor = c;
+        ctx.fillStyle = p === focus ? ink : c; ctx.fill();
         if (outline) { ctx.lineWidth = 2; ctx.strokeStyle = outline; ctx.stroke(); }
       }
       if (active) { ctx.lineWidth = 2; ctx.strokeStyle = ink; dot(x, y, r + 3); ctx.stroke(); }
@@ -361,9 +407,9 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false }) {
   scheme.addEventListener("change", kick);
   kick();
 
-  return {
+  const api = {
     redraw: kick,
-    fit() { picked = null; userMoved = false; kick(); },
+    fit() { picked = null; userMoved = false; legendPick = null; for (const x of rows) x.el.classList.remove("on"); kick(); },
     setFlat(on) {
       if (flat === !!on) return;
       flat = !!on;
@@ -376,10 +422,12 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false }) {
     // Lights up the nodes for which match(node) is true, with their neighbours, and frames them; returns their labels.
     focus(match) {
       const core = new Set(N.filter((n) => match(n)).map((n) => n.i));
+      legendPick = null; for (const x of rows) x.el.classList.remove("on");
       picked = core.size ? { core, near: new Set([...core].flatMap((i) => [i, ...N[i].nb])) } : null;
       userMoved = false; kick();
       return [...core].map((i) => N[i].label);
     },
     destroy() { cancelAnimationFrame(raf); raf = -1; ro.disconnect(); scheme.removeEventListener("change", kick); },
   };
+  return api;
 }

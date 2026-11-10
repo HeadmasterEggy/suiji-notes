@@ -444,10 +444,17 @@ textarea {
 .graph-canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
 .graph-tools { position: absolute; top: 10px; right: 10px; z-index: 1; display: flex; gap: 6px; }
 .graph-tools .ghost.bordered.small { padding: 4px 10px; font-size: 12px; }
+.graph-legend { position: absolute; right: 10px; bottom: 10px; z-index: 1; display: flex; flex-direction: column; align-items: stretch; gap: 1px; max-width: 46%; max-height: calc(100% - 64px); overflow-y: auto; padding: 4px; border-radius: 8px; background: color-mix(in srgb, var(--bg) 82%, transparent); }
+.graph-legend button { display: flex; align-items: center; gap: 7px; padding: 3px 8px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.graph-legend button:hover, .graph-legend button.on { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink); }
+.graph-legend i { flex: none; width: 9px; height: 9px; border-radius: 50%; }
+.graph-legend span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.graph-legend em { font-style: normal; opacity: .6; font-variant-numeric: tabular-nums; }
+:root[data-style="blocks"] .graph-legend i { border-radius: 0; }
 .graph-empty { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: var(--muted); pointer-events: none; }
 /* How each style draws the graph (read by graph.js). */
 :root[data-style="paper"] .graph { --g-node: #8b5e34; --g-edge: rgba(139, 94, 52, .35); --g-edge-w: 1.2; }
-:root[data-style="terminal"] .graph { --g-node: #4ade80; --g-edge: rgba(74, 222, 128, .35); --g-glow: 8; }
+:root[data-style="terminal"] .graph { --g-node: #4ade80; --g-edge: rgba(74, 222, 128, .35); --g-glow: 8; --g-palette: #4ade80, #22d3ee, #facc15, #f472b6, #a78bfa, #fb923c, #f87171, #38bdf8, #a3e635, #e879f9; }
 :root[data-style="blocks"] .graph { --g-node: #5b9e32; --g-edge: #4f4f4f; --g-edge-w: 3; --g-shape: square; --g-outline: #1e1e1e; }
 
 /* Loading skeleton: shimmering lines shaped like a document (title, paragraph, short line…). */
@@ -630,7 +637,7 @@ textarea {
 }
 :root[data-style="terminal"][data-mode="light"] body { text-shadow: none; }
 :root[data-style="terminal"][data-mode="light"] body::after { background: repeating-linear-gradient(transparent 0 2px, rgba(21, 90, 40, .05) 2px 3px); }
-:root[data-style="terminal"][data-mode="light"] .graph { --g-node: #15803d; --g-edge: rgba(21, 128, 61, .3); --g-glow: 0; }
+:root[data-style="terminal"][data-mode="light"] .graph { --g-node: #15803d; --g-edge: rgba(21, 128, 61, .3); --g-glow: 0; --g-palette: initial; }
 
 :root[data-style="blocks"][data-mode="dark"] {
   --bg: #0d1733; --panel: #4a4a52; --ink: #ececec; --muted: #cacad1; --line: #6a6a72;

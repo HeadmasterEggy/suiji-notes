@@ -319,6 +319,8 @@ const EN = {
   "居中": "Center",
   "切换到平面视图": "Switch to the flat view",
   "切换到立体视图": "Switch to the 3D view",
+  "未分类": "Uncategorized",
+  "其他": "Other",
   "还没有 Markdown 文件或笔记。": "No Markdown files or notes yet.",
   "载入中…": "Loading…",
   "没能载入文件列表，几秒后会自动重试。": "Couldn't load the file list. Trying again in a few seconds.",

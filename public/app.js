@@ -1411,7 +1411,12 @@ function graphData(withTags) {
   const nodes = [], edges = new Set(), idx = new Map();
   const add = (key, node) => { if (!idx.has(key)) { idx.set(key, nodes.length); nodes.push(node); } return idx.get(key); };
   const md = files.filter(isMarkdown);
-  for (const f of md) add("file:" + f.id, { label: stripMd(baseName(f.name)), kind: "file", ref: f.id });
+  // Category (the node's colour): the first folder level where files part ways, so a single synced vault
+  // folder still splits by its subfolders. Files sitting above that level, and quick notes, get their own.
+  const dirs = md.map((f) => fullPath(f).slice(0, -1));
+  let depth = 0;
+  while (dirs.length && dirs.every((d) => d.length > depth + 1 && d[depth] === dirs[0][depth])) depth++;
+  md.forEach((f, k) => add("file:" + f.id, { label: stripMd(baseName(f.name)), kind: "file", ref: f.id, group: dirs[k][depth] || t("未分类") }));
   const find = linkResolver(md);
   const resolve = (dir, target) => { const f = find(dir, target); return f ? idx.get("file:" + f.id) : undefined; };
   const link = (a, b) => { if (b !== undefined && a !== b) edges.add(a < b ? a + "," + b : b + "," + a); };
@@ -1421,7 +1426,7 @@ function graphData(withTags) {
     if (withTags) for (const t of f.tags || []) link(i, add("tag:" + t, { label: "#" + t, kind: "tag", ref: t }));
   }
   for (const n of visible()) {
-    const i = add("note:" + n.id, { label: titleOf(n.body), kind: "note", ref: n.id });
+    const i = add("note:" + n.id, { label: titleOf(n.body), kind: "note", ref: n.id, group: t("随手记") });
     const meta = mdMeta(n.body);
     for (const l of meta.links) link(i, resolve([], l));
     if (withTags) for (const t of meta.tags) link(i, add("tag:" + t, { label: "#" + t, kind: "tag", ref: t }));
