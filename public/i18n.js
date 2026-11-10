@@ -338,6 +338,7 @@ const EN = {
   "标签节点（#标签）": "Tag nodes (#tags)",
   "分类": "Categories",
   "{n} 条链接": "{n} links",
+  "再点一次打开": "click again to open",
   "搜索节点": "Find a note",
   "局部图谱": "Local graph",
   "只显示其他窗格里打开的笔记，以及离它几步之内的笔记": "Show only the notes open in other panes and those a few links away",

@@ -1,7 +1,7 @@
 // Relationship graph, Obsidian-style, in 3D. Nodes are notes and Markdown files (and optionally tags), edges
 // are [[links]]. A small force simulation lays them out in space and a perspective camera draws them on a 2D
 // canvas: drag the background to orbit (or to pan in flat mode), shift- or right-drag to pan, scroll or pinch
-// to zoom, drag a node to move it, hover to light up its neighbours, click to open it. Flat mode squashes the
+// to zoom, drag a node to move it, hover or click to light up its neighbours, click again to open it. Flat mode squashes the
 // z axis and turns the camera face-on, which gives the old 2D graph back.
 //
 // Each note node has a group (its category); every group gets its own colour, listed in a legend in the
@@ -139,6 +139,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     shown = N.filter((n) => !n.hidden);
     shownE = E.filter(([a, b]) => !N[a].hidden && !N[b].hidden);
     if (hover?.hidden) hover = null;
+    if (chosen?.hidden) chosen = null;
   }
   // The shown set changed shape: let the layout re-settle and the view re-frame it.
   function relayout() { applyHidden(); picked = null; alpha = Math.max(alpha, 0.6); userMoved = false; kick(); }
@@ -159,6 +160,8 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   let W = 0, H = 0, dpr = 1, raf = 0, alpha = 1;
   // view: screen pan (x, y) and zoom (k). cam: orbit angles; spread: how far out the layout reaches (for perspective and fog).
   let view = { x: 0, y: 0, k: 1 }, userMoved = false, hover = null;
+  // A clicked note stays lit with its links; clicking it again opens it, clicking the background lets go.
+  let chosen = null;
   const cam = { yaw: flat ? 0 : 0.5, pitch: flat ? 0 : -0.35 };
   let spread = 200, userTurned = false;
   // Nodes picked from outside (the assistant): they and their neighbours stay lit and the view frames them.
@@ -371,7 +374,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     ctx.translate(W / 2 + view.x, H / 2 + view.y);
     const k = view.k, X = (p) => p.sx * k, Y = (p) => p.sy * k;
     const fog = (d) => Math.min(1, Math.max(0.3, 1 - 0.7 * Math.max(0, d) / spread));
-    const focus = hover, lit = focus ? focus.nb : null;
+    const focus = hover || chosen, lit = focus ? focus.nb : null;
     const sel = !focus && picked;
 
     // Edges in four depth bands, so the far side of the ball recedes.
@@ -472,9 +475,9 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
         ctx.fillStyle = focus || sel || isActive(p) || hub ? ink : muted;
       }
       ctx.fillText(text, px, y + pad);
-      // Under the hovered note: its category and how many links it has.
-      if (p === focus && p.kind !== "tag") {
-        const sub = [p.group, t("{n} 条链接", { n: p.deg })].filter(Boolean).join(" · ");
+      // Under the hovered or clicked note: its category, how many links it has, and that a second click opens it.
+      if (p === focus && (p.kind !== "tag" || p === chosen)) {
+        const sub = [p.kind !== "tag" && p.group, p.kind !== "tag" && t("{n} 条链接", { n: p.deg }), p === chosen && t("再点一次打开")].filter(Boolean).join(" · ");
         ctx.font = `400 ${fs}px ${font}`;
         const sw = ctx.measureText(sub).width + pad * 2, sy = y + h + 1;
         placed.push([px - sw / 2, sy, sw, fs + pad * 2]);
@@ -511,7 +514,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     if (alpha > 0.003) tick();
     const turning = settleCam();
     // Turn slowly while the layout settles, so the depth is obvious, until the user takes the camera.
-    if (!flat && !userTurned && alpha > 0.02 && !drag && !hover) cam.yaw += 0.004;
+    if (!flat && !userTurned && alpha > 0.02 && !drag && !hover && !chosen) cam.yaw += 0.004;
     project();
     // A pane that was hidden (phone list view) has no size until shown, so keep easing until it fits.
     const fitting = !userMoved && fit();
@@ -592,11 +595,16 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     const d = drag; drag = null;
     if (d.node) d.node.fixed = false;
     canvas.style.cursor = hover ? "pointer" : "grab";
-    if (d.node && !d.moved && e.type === "pointerup") onOpen(d.node);
+    if (!d.moved && e.type === "pointerup") {
+      if (d.node && d.node === chosen) onOpen(d.node);
+      else chosen = d.node;   // a note: light it up; the background: let go
+    }
     kick();
   };
   canvas.addEventListener("pointerup", release);
   canvas.addEventListener("pointercancel", release);
+  canvas.addEventListener("keydown", (e) => { if (e.key === "Escape" && chosen) { chosen = null; kick(); } });
+  canvas.tabIndex = -1;
   canvas.addEventListener("pointerleave", () => { if (!drag && hover) { hover = null; kick(); } });
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
@@ -625,7 +633,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       }
       kick();
     },
-    fit() { picked = null; userMoved = false; legendPick = null; syncLegend(); kick(); },
+    fit() { picked = null; chosen = null; userMoved = false; legendPick = null; syncLegend(); kick(); },
     toggleForces() { panel.hidden = !panel.hidden; return !panel.hidden; },
     setFlat(on) {
       if (flat === !!on) return;
