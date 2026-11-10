@@ -122,11 +122,7 @@ async function checkUpdate() {
   if (document.hidden && !busy) return location.reload();
   $("updateToast").hidden = false;
 }
-$("updateToast").onclick = async () => {
-  commitAll();
-  await Promise.all([...panes.values()].map((p) => p.saving));
-  location.reload();
-};
+$("updateToast").onclick = async () => { await saveAll(); location.reload(); };
 setInterval(checkUpdate, 10 * 60 * 1000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) checkUpdate(); });
 
@@ -148,8 +144,8 @@ function load() {
   catch { store = { notes: {} }; }
 }
 function persist() {
-  try { localStorage.setItem(storeKey(), JSON.stringify(store)); }
-  catch { showNote(t("本机存储已满，最新改动可能只在内存里，请保持联网让它同步。"), "err"); }
+  try { localStorage.setItem(storeKey(), JSON.stringify(store)); clearNote("store"); }
+  catch { showNote(t("本机存储已满，最新改动可能只在内存里，请保持联网让它同步。"), "err", "store"); }
 }
 const visible = () => Object.values(store.notes).filter((n) => !n.deleted)
   .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
@@ -165,7 +161,18 @@ function merge(row) {
 // ---------- sync ----------
 let syncing = false, again = false, channel = null;
 function setSync(state, text) { $("sync").dataset.s = state; $("syncText").textContent = text; }
-function showNote(text, kind) { const n = $("note"); n.hidden = !text; n.textContent = text || ""; n.dataset.kind = kind || ""; }
+// The line under the search box. Each message names its source, and a source clears only its own message, so
+// one part of the app doing fine (a sync) no longer hides another's problem (storage full, a failed upload).
+// A click dismisses it; a message that isn't an error goes by itself after a while.
+let noteTimer = 0;
+function showNote(text, kind, src = "") {
+  const n = $("note");
+  clearTimeout(noteTimer);
+  n.hidden = !text; n.textContent = text || ""; n.dataset.kind = kind || ""; n.dataset.src = src; n.title = text ? t("点击关闭") : "";
+  if (text && kind !== "err") noteTimer = setTimeout(() => clearNote(src), 8000);
+}
+function clearNote(src) { if (!$("note").hidden && $("note").dataset.src === src) showNote(""); }
+$("note").onclick = () => showNote("");
 
 async function sync() {
   if (!uid) return;
@@ -191,11 +198,11 @@ async function sync() {
     if (changed) render();
     else renderList();
     setSync("ok", t("已同步"));
-    showNote(filesErr ? t("没能载入文件列表，几秒后会自动重试。") : "", "err");
+    if (filesErr) showNote(t("没能载入文件列表，几秒后会自动重试。"), "err", "files"); else clearNote("sync");
   } catch (e) {
     console.error(e);
     setSync("err", t("同步失败"));
-    showNote(t("没能同步到云端，改动已保存在本机，联网后会自动重试。"), "err");
+    showNote(t("没能同步到云端，改动已保存在本机，联网后会自动重试。"), "err", "sync");
   } finally {
     syncing = false;
     if (again) { again = false; sync(); }
@@ -238,12 +245,12 @@ async function loadFiles() {
     // With no list yet, say so instead of loading forever, and try again shortly.
     if (!filesLoaded) {
       filesErr = true; renderList();
-      showNote(t("没能载入文件列表，几秒后会自动重试。"), "err");
+      showNote(t("没能载入文件列表，几秒后会自动重试。"), "err", "files");
       filesRetry = setTimeout(loadFiles, 5000);
     }
     return;
   }
-  if (filesErr) { filesErr = false; showNote(""); }
+  if (filesErr) { filesErr = false; clearNote("files"); }
   const before = new Map(files.map((f) => [f.id, versionOf(f)]));
   for (const f of data) if (before.has(f.id) && before.get(f.id) !== versionOf(f)) forgetUrls(f.path);
   // Only Markdown documents are shown; any other file in the account stays in the cloud, untouched and hidden.
@@ -266,9 +273,9 @@ async function uploadFiles(input) {
   const picked = [...input].filter((f) => !baseName(f.webkitRelativePath || f.name).startsWith("."));
   // Only Markdown documents are uploaded; anything else picked (or inside a picked folder) is left out.
   const all = picked.filter((f) => isMarkdown({ name: f.name, mime: f.type || "" }));
-  if (picked.length > all.length) showNote(t("只支持 Markdown（.md）文档，跳过了 {n} 个其他文件。", { n: picked.length - all.length }), all.length ? "" : "err");
+  if (picked.length > all.length) showNote(t("只支持 Markdown（.md）文档，跳过了 {n} 个其他文件。", { n: picked.length - all.length }), all.length ? "" : "err", "upload");
   const tooBig = all.filter((f) => f.size > MAX_FILE);
-  if (tooBig.length) showNote(t("{names} 超过 50 MB，没有上传。", { names: tooBig.map((f) => f.name).join(lang === "en" ? ", " : "、") }), "err");
+  if (tooBig.length) showNote(t("{names} 超过 50 MB，没有上传。", { names: tooBig.map((f) => f.name).join(lang === "en" ? ", " : "、") }), "err", "upload");
   const ok = all.filter((f) => f.size <= MAX_FILE);
   uploading += ok.length;
   for (const file of ok) {
@@ -284,7 +291,7 @@ async function uploadFiles(input) {
       if (ins.error) { await sb.storage.from("files").remove([path]); throw ins.error; }
     } catch (e) {
       console.error(e);
-      showNote(t("「{name}」上传失败：{msg}。", { name: file.name, msg: e.message || t("网络问题") }), "err");
+      showNote(t("「{name}」上传失败：{msg}。", { name: file.name, msg: e.message || t("网络问题") }), "err", "upload");
     } finally {
       uploading--;
     }
@@ -589,11 +596,21 @@ function obsidianSyntax(part, wiki, embeds) {
       const [target, alias] = inner.split(/\\?\|/);
       const [file, heading] = target.split("#");
       const label = (alias || (file ? baseName(stripMd(file.trim())) + (heading ? " › " + heading : "") : heading || "")).trim();
-      wiki.push(file.trim());
+      wiki.push({ file: file.trim(), heading: (heading || "").trim() });
       return `[${mdEscape(label || inner)}](#suiji-wiki-${wiki.length - 1})`;
     })
     .replace(/==(?=\S)([^=\n]+?)(?<=\S)==/g, "<mark>$1</mark>");
 }
+
+// Formulas are pulled out before Markdown sees them (so _ and * inside stay intact), outside code only; the
+// documents and the assistant's replies share this.
+const MATH = [[/\$\$([\s\S]+?)\$\$/g, true], [/\\\[([\s\S]+?)\\\]/g, true], [/\\\(([\s\S]+?)\\\)/g, false],
+  [/(?<![\\$\w])\$(?!\s)([^\n$]+?)(?<![\s\\])\$(?!\d)/g, false]];
+const outsideCode = (text, fn) => text.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]+`)/g).map((part, i) => i % 2 ? part : fn(part)).join("");
+function pullMath(part, put) { for (const [re, display] of MATH) part = part.replace(re, (_, tex) => put(tex, display)); return part; }
+const katexHtml = (tex, display) => window.katex.renderToString(tex.trim(), { displayMode: display, throwOnError: false, output: "html" });
+// GitHub-style heading anchors ("#my-heading") and Obsidian's ("#My Heading") both compare equal under this.
+const slug = (s) => String(s).trim().toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, "").replace(/\s+/g, "-");
 
 async function renderMarkdown(src, f) {
   await loadMarkdownLibs();
@@ -602,19 +619,13 @@ async function renderMarkdown(src, f) {
     .replace(/\{%\s*asset_img\s+(\S+)\s*(.*?)%\}/g, (_, file, alt) => `![${alt.trim()}](${file})`)
     .replace(/^\s*\{%[^%]*%\}\s*$/gm, "");
 
-  // Pull math out before Markdown sees it (so _ and * inside formulas stay intact), skipping code.
   const math = [];
   const keep = (tex, display) => {
-    math.push(window.katex.renderToString(tex.trim(), { displayMode: display, throwOnError: false, output: "html" }));
+    math.push(katexHtml(tex, display));
     return display ? `\n\nKATEXBLOCK${math.length - 1}END\n\n` : `KATEXINLINE${math.length - 1}END`;
   };
   const wiki = [], embeds = [];
-  text = text.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]+`)/g).map((part, i) => i % 2 ? part : obsidianSyntax(part
-    .replace(/\$\$([\s\S]+?)\$\$/g, (_, t) => keep(t, true))
-    .replace(/\\\[([\s\S]+?)\\\]/g, (_, t) => keep(t, true))
-    .replace(/\\\(([\s\S]+?)\\\)/g, (_, t) => keep(t, false))
-    .replace(/(?<![\\$\w])\$(?!\s)([^\n$]+?)(?<![\s\\])\$(?!\d)/g, (_, t) => keep(t, false)), wiki, embeds)
-  ).join("");
+  text = outsideCode(text, (part) => obsidianSyntax(pullMath(part, keep), wiki, embeds));
 
   let html = window.DOMPurify.sanitize(window.marked.parse(text, { gfm: true, breaks: false }));
   html = html
@@ -668,17 +679,31 @@ async function renderMarkdown(src, f) {
   // It replaces the one docHead made, so a heading after a comment, a Hexo tag or in === style isn't shown twice.
   if (first?.tagName === "H1") { const head = art.querySelector(".md-head"); head.querySelector(".md-title")?.remove(); first.classList.add("md-title"); head.prepend(first); }
   const find = wiki.length ? linkResolver(files.filter(isMarkdown)) : null, wdir = f.name.split("/").slice(0, -1);
+  // Links inside the app carry what to open in data-open / data-heading, handled by the pane's click listener
+  // (so cached copies keep working). [[#Heading]] and (#heading) go to a heading of this document.
+  const missing = (a, title) => a.replaceWith(Object.assign(document.createElement("span"), { className: "wikilink missing", textContent: a.textContent, title }));
   for (const a of content.querySelectorAll('a[href^="#suiji-wiki-"]')) {
-    const target = find(wdir, wiki[+a.getAttribute("href").slice(12)] || "");
-    if (target) { a.dataset.open = target.id; a.href = "#"; a.title = target.name; a.classList.add("wikilink"); }
-    else a.replaceWith(Object.assign(document.createElement("span"), { className: "wikilink missing", textContent: a.textContent, title: t("没有找到这篇笔记") }));
+    const w = wiki[+a.getAttribute("href").slice(12)] || { file: "", heading: "" };
+    const target = w.file ? find(wdir, w.file) : w.heading ? f : null;
+    if (!target) { missing(a, t("没有找到这篇笔记")); continue; }
+    a.dataset.open = target.id; a.href = "#"; a.title = w.file ? target.name : w.heading; a.classList.add("wikilink");
+    if (w.heading) a.dataset.heading = w.heading;
   }
+  const attach = [];
   for (const a of content.querySelectorAll("a[href]")) {
     if (a.dataset.open) continue;
-    const href = a.getAttribute("href");
-    const target = isRel(href) && byPath.get(resolveRel(dir, href));
-    if (target && isMarkdown(target)) a.dataset.open = target.id;   // handled by the pane's click listener, so cached copies keep working
-    else if (!target && !href.startsWith("#")) { a.target = "_blank"; a.rel = "noopener"; }
+    const href = a.getAttribute("href"), hash = decodePath(href.split("#").slice(1).join("#"));
+    if (href.startsWith("#")) { if (hash) { a.dataset.open = f.id; a.dataset.heading = hash; } continue; }
+    if (!isRel(href)) { a.target = "_blank"; a.rel = "noopener"; continue; }
+    // A relative link is never followed as written: it would load a page of this site in place of the app.
+    const target = byPath.get(resolveRel(dir, href));
+    if (!target) missing(a, t("没有找到这个文件"));
+    else if (isMarkdown(target)) { a.dataset.open = target.id; if (hash) a.dataset.heading = hash; }
+    else attach.push([a, target]);   // a PDF or picture beside the document opens in a new tab
+  }
+  if (attach.length) {
+    const urls = await signedUrls([...new Set(attach.map(([, x]) => x.path))]).catch(() => new Map());
+    for (const [a, x] of attach) { const u = urls.get(x.path); if (u) Object.assign(a, { href: u, target: "_blank", rel: "noopener" }); else missing(a, t("没有找到这个文件")); }
   }
   return art;
 }
@@ -1027,9 +1052,12 @@ function folderKeys() {
   walk(buildTree(), []);
   return keys;
 }
+// Whether a folder the sidebar shows at its top level is open. Not expanded.size: it also remembers folders
+// that have since gone, or sit inside a closed one, and then the button offered to fold with nothing open.
+const anyOpen = () => (expanded.has(NOTES_KEY) && visible().length > 0) || [...buildTree().dirs.keys()].some((k) => expanded.has(k));
 function showCounts() {
   $("counts").textContent = t("{files} 个文件 · {folders} 个文件夹", { files: files.length, folders: folderKeys().length });
-  const label = expanded.size ? t("全部折叠") : t("全部展开");
+  const label = anyOpen() ? t("全部折叠") : t("全部展开");
   $("foldBtn").title = label; $("foldBtn").setAttribute("aria-label", label);
 }
 
@@ -1166,7 +1194,11 @@ function makePane(item) {
   p.ta.addEventListener("blur", () => commit(p));
   p.preview.addEventListener("click", (e) => {
     const a = e.target.closest("a[data-open]");
-    if (a) { e.preventDefault(); openIn(p, "file", a.dataset.open); }
+    if (a) {
+      e.preventDefault();
+      if (a.dataset.open !== p.itemId) openIn(p, "file", a.dataset.open);
+      if (a.dataset.heading) goHeading(p, a.dataset.open, a.dataset.heading);
+    }
     const tag = e.target.closest("[data-tag]");
     if (tag) searchTag(tag.dataset.tag);
   });
@@ -1259,7 +1291,7 @@ function makePane(item) {
     else { const s = await sb.storage.from("files").createSignedUrl(f.path, 60);
       if (!s.error) try { const r = await fetch(s.data.signedUrl + "&t=" + Date.now(), { cache: "no-store" }); if (r.ok) text = await r.text(); } catch {} }
     p.edit.disabled = false; editLabel(p, t("编辑"), false);
-    if (text === null) { showNote(t("读取文件失败，请检查网络。"), "err"); return; }
+    if (text === null) { showNote(t("读取文件失败，请检查网络。"), "err", "file"); return; }
     p.fileBase = text;
     p.ta.value = p.fileBase; p.fileEdit = true; p.editing = false;
     renderPane(p);
@@ -1308,6 +1340,8 @@ function commit(p) {
   persist(); render(); scheduleSync();
 }
 const commitAll = () => panes.forEach(commit);
+// Saves every pane now and waits for the file saves (notes save to this device at once).
+async function saveAll() { commitAll(); await Promise.all([...panes.values()].map((p) => p.saving)); }
 
 const TEXT_EXT = ["md", "markdown", "txt", "csv", "log", "json", "yml", "yaml", "toml", "tex", "py", "js", "ts", "html", "css", "sh"];
 const isEditable = (f) => f.size < 2 * 1024 * 1024 && (f.mime.startsWith("text/") || /json|xml/.test(f.mime) || TEXT_EXT.includes(extOf(f.name)));
@@ -1343,12 +1377,12 @@ async function saveFile(p) {
   setSync("saving", t("保存中…"));
   try { await writeFileText(f, text); } catch (e) {
     p.editing = true;   // keep it unsaved so the next edit or blur retries
-    setSync("err", t("保存失败")); showNote(e.message, "err");
+    setSync("err", t("保存失败")); showNote(e.message, "err", "file");
     return;
   }
   p.fileBase = text;
   p.shown = local.localPath(f) ? null : versionOf(f);   // the preview refreshes when editing ends, not now
-  setSync("ok", t("已同步")); showNote("");
+  setSync("ok", t("已同步")); clearNote("file");
   if (!p.fileEdit) renderPane(p);
 }
 
@@ -1367,15 +1401,8 @@ mountAgent({
   async markdown(text) {
     await loadMarkdownLibs();
     // Formulas as in documents: pulled out before Markdown sees them, code spans left alone.
-    const math = [], keep = (tex, display) => {
-      math.push(window.katex.renderToString(tex.trim(), { displayMode: display, throwOnError: false, output: "html" }));
-      return `KATEXMATH${math.length - 1}END`;
-    };
-    text = text.replace(/\]\(suiji:/g, "](#suiji:").split(/(```[\s\S]*?```|`[^`\n]+`)/g).map((part, i) => i % 2 ? part : part
-      .replace(/\$\$([\s\S]+?)\$\$/g, (_, t) => keep(t, true))
-      .replace(/\\\[([\s\S]+?)\\\]/g, (_, t) => keep(t, true))
-      .replace(/\\\(([\s\S]+?)\\\)/g, (_, t) => keep(t, false))
-      .replace(/(?<![\\$\w])\$(?!\s)([^\n$]+?)(?<![\s\\])\$(?!\d)/g, (_, t) => keep(t, false))).join("");
+    const math = [], keep = (tex, display) => { math.push(katexHtml(tex, display)); return `KATEXMATH${math.length - 1}END`; };
+    text = outsideCode(text.replace(/\]\(suiji:/g, "](#suiji:"), (part) => pullMath(part, keep));
     return window.DOMPurify.sanitize(window.marked.parse(text, { gfm: true, breaks: true }))
       .replace(/KATEXMATH(\d+)END/g, (_, i) => math[i]);
   },
@@ -1484,6 +1511,18 @@ function showItem(kind, id, beside) {
   openIn(focused, kind, id); return focused;
 }
 const norm = (x) => String(x || "").replace(/^#+\s*/, "").replace(/\s+/g, " ").trim().toLowerCase();
+// A heading of the document in pane p, once it has rendered (up to 6 s): the same text or anchor, else the first
+// that contains it. Scrolled to and flashed; null when there is none.
+async function goHeading(p, id, text) {
+  for (let n = 0; n < 60 && !(p.itemId === id && p.shownId === id && p.preview.querySelector(".md-body")); n++) await sleepMs(100);
+  if (p.itemId !== id) return null;
+  const all = [...p.preview.querySelectorAll(".md-body :is(h1, h2, h3, h4, h5, h6)")], want = norm(text), s = slug(text);
+  const h = all.find((x) => norm(x.textContent) === want || slug(x.textContent) === s) || (want && all.find((x) => norm(x.textContent).includes(want)));
+  if (!h) return null;
+  scrollToHeading(p, h);
+  h.classList.remove("ag-flash"); void h.offsetWidth; h.classList.add("ag-flash");
+  return h;
+}
 async function uiOpen({ kind, id, heading, beside }) {
   if (isPhone.matches) toggleAgent(false);
   const p = showItem(kind, id, beside);
@@ -1498,13 +1537,9 @@ async function uiOpen({ kind, id, heading, beside }) {
     ta.scrollTop = Math.max(0, (i / lines.length) * ta.scrollHeight - 40);
     return { opened: true, heading: lines[i] };
   }
-  // A file renders asynchronously; wait for its headings.
-  for (let n = 0; n < 60 && !(p.itemId === id && p.heads.length); n++) await sleepMs(100);
-  const i = p.heads.findIndex((h) => norm(h.textContent).includes(want));
-  if (i < 0) return { opened: true, heading: "not found", headings: p.heads.slice(0, 60).map((h) => h.textContent.trim()) };
-  const h = p.heads[i];
-  scrollToHeading(p, h);
-  h.classList.remove("ag-flash"); void h.offsetWidth; h.classList.add("ag-flash");
+  // A file renders asynchronously; goHeading waits for it.
+  const h = await goHeading(p, id, heading);
+  if (!h) return { opened: true, heading: "not found", headings: [...p.preview.querySelectorAll(".md-body :is(h1, h2, h3, h4)")].slice(0, 60).map((x) => x.textContent.trim()) };
   return { opened: true, heading: h.textContent.trim() };
 }
 async function uiGraph({ ids, query, tag }) {
@@ -1867,7 +1902,7 @@ $("graphBtn").onclick = () => {
   openIn(focused, "graph", "all");
 };
 $("foldBtn").onclick = () => {
-  expanded = new Set(expanded.size ? [] : [NOTES_KEY, ...folderKeys()]);
+  expanded = new Set(anyOpen() ? [] : [NOTES_KEY, ...folderKeys()]);
   saveExpanded(); renderList();
 };
 // Phones: the sidebar is a drawer. A tap beside it, Escape or a swipe to the left closes it; a swipe in
@@ -1989,7 +2024,7 @@ function restyled() {
       rm.type = "button"; rm.className = "ghost bordered small"; rm.textContent = t("停止同步");
       const show = document.createElement("button");
       show.type = "button"; show.className = "ghost bordered small"; show.textContent = t("在 Finder 中显示");
-      show.onclick = () => local.macOp("reveal", { path: root }).catch((e) => showNote(e.message || String(e), "err"));
+      show.onclick = () => local.macOp("reveal", { path: root }).catch((e) => showNote(e.message || String(e), "err", "mac"));
       rm.onclick = async () => {
         if (!confirm(t("停止同步「{name}」？云端已有的文件会保留。", { name: root.split("/").pop() }))) return;
         await local.removeFolder(root); fillLocal();
@@ -2323,8 +2358,7 @@ function restyled() {
     if (!b || b.dataset.lang === langChoice) return;
     try { b.dataset.lang ? localStorage.setItem("suiji:lang", b.dataset.lang) : localStorage.removeItem("suiji:lang"); } catch {}
     // Text drawn by the app follows the language from the start, so a reload is simplest; edits are saved first.
-    commitAll();
-    await Promise.all([...panes.values()].map((p) => p.saving));
+    await saveAll();
     location.reload();
   };
   $("tocAuto").onchange = (e) => {
@@ -2356,7 +2390,7 @@ function restyled() {
 }
 $("outBtn").onclick = async () => {
   $("settings").close();
-  commitAll();
+  await saveAll();   // a document being edited is written before the session that may write it goes away
   if (Object.values(store.notes).some((n) => n.dirty)) await sync();
   // Only this device: the default (global) would also sign out the Mac agent and every other device.
   await sb.auth.signOut({ scope: "local" });
