@@ -47,6 +47,16 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     const r = 22 * Math.cbrt(i + 0.5), u = 1 - 2 * ((i + 0.5) / N.length), w = Math.sqrt(1 - u * u);
     n.x = r * w * Math.cos(t); n.y = r * u; n.z = r * w * Math.sin(t);
   });
+  // Notes the user dragged stay where they were put, per device: "suiji:graphPins" maps kind:ref to [x, y, z].
+  const pinKey = (n) => n.kind + ":" + n.ref;
+  let pins = {};
+  try { pins = JSON.parse(localStorage.getItem("suiji:graphPins")) || {}; } catch {}
+  const savePins = () => { try { localStorage.setItem("suiji:graphPins", JSON.stringify(pins)); } catch {} };
+  for (const n of N) {
+    const at = pins[pinKey(n)];
+    if (Array.isArray(at) && at.length === 3 && at.every(Number.isFinite)) { n.pin = at; [n.x, n.y, n.z] = [at[0], at[1], flat ? 0 : at[2]]; }
+  }
+  const AXIS = { x: "#e5484d", y: "#30a46c", z: "#3e63dd" };
   // Size grows with links but is capped, so one hub note does not cover its neighbours.
   const S = { local: false, depth: 1, size: "links", spin: true };
   try { Object.assign(S, JSON.parse(localStorage.getItem("suiji:graphView")) || {}); } catch {}
@@ -266,11 +276,14 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     inputs[key] = { input, show };
     panel.append(row);
   }
+  const unpinAll = Object.assign(document.createElement("button"), { type: "button", className: "ghost small graph-unpin", textContent: t("清除拖动过的位置") });
+  unpinAll.onclick = () => { pins = {}; savePins(); for (const n of N) n.pin = null; alpha = Math.max(alpha, 0.6); kick(); };
   reset.onclick = () => {
     Object.assign(F, FORCE_DEFAULTS);
     for (const k in inputs) { inputs[k].input.value = F[k]; inputs[k].show(); }
     onForces?.({ ...F }); reheat();
   };
+  panel.append(unpinAll);
   host.append(panel);
   // Settle again after a slider moves, and let the view re-frame the new shape.
   const reheat = () => { alpha = Math.max(alpha, 0.5); userMoved = false; fitPending = true; kick(); };
@@ -300,6 +313,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     for (const p of shown) {
       const c = 0.012 * F.center * alpha;
       p.vx -= p.x * c; p.vy -= p.y * c; p.vz -= p.z * c;
+      if (p.pin && !p.fixed) { p.x = p.pin[0]; p.y = p.pin[1]; p.z = flat ? 0 : p.pin[2]; p.vx = p.vy = p.vz = 0; continue; }
       if (flat) { p.vz = 0; p.z *= 0.8; if (Math.abs(p.z) < 0.05) p.z = 0; }
       if (p.fixed) { p.vx = p.vy = p.vz = 0; continue; }
       p.vx *= 0.6; p.vy *= 0.6; p.vz *= 0.6;
@@ -415,10 +429,11 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     // A floor under the graph, seen in perspective, with each note's shadow on it: the strongest depth cue
     // a flat canvas can give. Only while looking down at it in 3D.
     const sp = Math.sin(cam.pitch);
+    let floorY = null;
     if (!flat && sp > 0.05 && shown.length > 1) {
       let lo = Infinity, hi = -Infinity, x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
       for (const p of shown) { lo = Math.min(lo, p.y); hi = Math.max(hi, p.y); x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); }
-      const fy = hi + Math.max(30, (hi - lo) * 0.25), cxw = (x0 + x1) / 2, czw = (z0 + z1) / 2;
+      const fy = floorY = hi + Math.max(30, (hi - lo) * 0.25), cxw = (x0 + x1) / 2, czw = (z0 + z1) / 2;
       const half = Math.max(x1 - x0, z1 - z0) / 2 + 60, step = half / 4;
       const fade = Math.min(1, (sp - 0.05) / 0.25);
       ctx.strokeStyle = ink; ctx.lineWidth = 1;
@@ -565,7 +580,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       ctx.fillText(text, px, y + pad);
       // Under the hovered or clicked note: its category, how many links it has, and that a second click opens it.
       if (p === focus && (p.kind !== "tag" || p === chosen)) {
-        const sub = [p.kind !== "tag" && p.group, p.kind !== "tag" && t("{n} 条链接", { n: p.deg }), p === chosen && t("再点一次打开")].filter(Boolean).join(" · ");
+        const sub = [p.kind !== "tag" && p.group, p.kind !== "tag" && t("{n} 条链接", { n: p.deg }), p === chosen && t("再点一次打开"), p.pin && t("已固定，右键取消")].filter(Boolean).join(" · ");
         ctx.font = lastFont = `400 ${fs}px ${font}`;
         const sw = ctx.measureText(sub).width + pad * 2, sy = y + h + 1;
         placed.push([px - sw / 2, sy, sw, fs + pad * 2]);
@@ -578,22 +593,51 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
 
     shownLabels = nowShown;
 
-    // A small x / y / z axis gizmo in the corner shows which way the graph is turned.
+    // While a note is dragged: x / y / z axes through it (the locked one bold), a line down to the floor, and
+    // where it is, so it is clear which way it moves.
+    const held = drag?.node && drag.moved ? drag.node : null;
+    if (held) {
+      const n = held, L = spread * 0.22, c0 = [X(n), Y(n)];
+      ctx.lineCap = "round"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = lastFont = `600 10px ${font}`;
+      for (const ax of flat ? ["x", "y"] : ["x", "y", "z"]) {
+        const u = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] }[ax];
+        const a = proj(n.x - u[0] * L, n.y - u[1] * L, n.z - u[2] * L), b = proj(n.x + u[0] * L, n.y + u[1] * L, n.z + u[2] * L);
+        const on = lockAxis === ax;
+        ctx.globalAlpha = lockAxis && !on ? 0.25 : 0.9;
+        ctx.strokeStyle = AXIS[ax]; ctx.lineWidth = on ? 3 : 1.5;
+        ctx.beginPath(); ctx.moveTo(a[0] * k, a[1] * k); ctx.lineTo(b[0] * k, b[1] * k); ctx.stroke();
+        ctx.fillStyle = AXIS[ax]; ctx.fillText(ax, b[0] * k + (b[0] - a[0]) * k * 0.06, b[1] * k + (b[1] - a[1]) * k * 0.06);
+      }
+      if (floorY !== null) {
+        const f = proj(n.x, floorY, n.z);
+        ctx.globalAlpha = 0.5; ctx.strokeStyle = ink; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+        ctx.beginPath(); ctx.moveTo(c0[0], c0[1]); ctx.lineTo(f[0] * k, f[1] * k); ctx.stroke(); ctx.setLineDash([]);
+      }
+      const r = (v) => Math.round(v);
+      const lines = [`x ${r(n.x)}   y ${r(-n.y)}${flat ? "" : `   z ${r(n.z)}`}`, flat ? t("按住 X / Y 只沿一个方向") : t("按住 X / Y / Z 只沿一个方向 · 滚轮前后移动")];
+      ctx.font = lastFont = `400 10px ${font}`;
+      const w = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 12, bx = c0[0] + 14, by = c0[1] - 40;
+      ctx.globalAlpha = 0.9; ctx.fillStyle = bg; ctx.beginPath(); ctx.roundRect(bx, by, w, 30, square ? 0 : 6); ctx.fill();
+      ctx.globalAlpha = 1; ctx.fillStyle = ink; ctx.textAlign = "left"; ctx.textBaseline = "top";
+      ctx.fillText(lines[0], bx + 6, by + 4); ctx.fillStyle = muted; ctx.fillText(lines[1], bx + 6, by + 17);
+    }
+
+    // The x / y / z axes in the corner show which way the graph is turned (red, green, blue, like 3D tools).
     if (!flat || cam.yaw || cam.pitch) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw), cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
-      const ox = 32, oy = H - 32, L = 18;
+      const ox = 36, oy = H - 36, L = 22;
       const axes = [["x", 1, 0, 0], ["y", 0, -1, 0], ["z", 0, 0, 1]].map(([name, x, y, z]) => {
         const x1 = x * cy + z * sy, z1 = -x * sy + z * cy;
         return { name, x: x1, y: y * cp - z1 * sp, d: y * sp + z1 * cp };
       }).sort((a, b) => b.d - a.d);
-      ctx.font = `600 10px ${font}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.lineWidth = 1.5; ctx.lineCap = "round";
+      ctx.font = lastFont = `600 10px ${font}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.lineWidth = 2; ctx.lineCap = "round";
       for (const a of axes) {
-        ctx.globalAlpha = a.d > 0 ? 0.35 : 0.8;
-        ctx.strokeStyle = ink; ctx.fillStyle = ink;
+        ctx.globalAlpha = a.d > 0 ? 0.4 : 0.95;
+        ctx.strokeStyle = AXIS[a.name]; ctx.fillStyle = AXIS[a.name];
         ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ox + a.x * L, oy + a.y * L); ctx.stroke();
-        ctx.fillText(a.name, ox + a.x * (L + 7), oy + a.y * (L + 7));
+        ctx.fillText(a.name, ox + a.x * (L + 8), oy + a.y * (L + 8));
       }
     }
     ctx.globalAlpha = 1;
@@ -642,9 +686,9 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       drag = null;
       return;
     }
-    const pt = local(e), node = e.button === 0 && !e.shiftKey ? pick(pt) : null;
+    const pt = local(e), node = (e.button === 0 && !e.shiftKey) || e.button === 2 ? pick(pt) : null;
     // Background: orbit in 3D, pan in flat mode; shift, right or middle button always pans.
-    const pan = flat || e.shiftKey || e.button === 1 || e.button === 2;
+    const pan = flat || e.shiftKey || e.button === 1 || (e.button === 2 && !node);
     drag = { node, pan, start: pt, last: pt, vx: view.x, vy: view.y, moved: false };
     if (node) { node.fixed = true; canvas.style.cursor = "grabbing"; }
   });
@@ -666,9 +710,16 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     if (Math.hypot(pt[0] - drag.start[0], pt[1] - drag.start[1]) > 4) drag.moved = true;
     if (!drag.moved) { drag.last = pt; return; }
     if (drag.node) {
-      [drag.node.x, drag.node.y, drag.node.z] = unproject(pt, drag.node.d);
-      if (flat) drag.node.z = 0;
-      hover = drag.node;
+      const n = drag.node;
+      if (lockAxis && !(flat && lockAxis === "z")) {
+        // Along one world axis only: the pointer's movement measured along that axis as it lies on screen.
+        const a = proj(n.x, n.y, n.z), u = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] }[lockAxis];
+        const b = proj(n.x + u[0], n.y + u[1], n.z + u[2]);
+        const dx = (b[0] - a[0]) * view.k, dy = (b[1] - a[1]) * view.k, len2 = dx * dx + dy * dy;
+        if (len2 > 1e-4) n[lockAxis] += ((pt[0] - drag.last[0]) * dx + (pt[1] - drag.last[1]) * dy) / len2;
+      } else [n.x, n.y, n.z] = unproject(pt, n.d);
+      if (flat) n.z = 0;
+      hover = n;
       alpha = Math.max(alpha, 0.25);
     } else if (drag.pan) {
       panBy(pt[0] - drag.last[0], pt[1] - drag.last[1]);
@@ -687,9 +738,16 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     if (pointers.size < 2) pinch = null;
     if (!drag) return;
     const d = drag; drag = null;
-    if (d.node) d.node.fixed = false;
+    if (d.node) {
+      d.node.fixed = false;
+      // Put down where it was dragged: pin it there (kept on this device). In flat mode its depth is kept.
+      if (d.moved) { const n = d.node; n.pin = [n.x, n.y, flat ? (n.pin?.[2] ?? 0) : n.z]; pins[pinKey(n)] = n.pin.map((v) => Math.round(v * 10) / 10); savePins(); }
+      // Right click on a pinned note, without dragging: let it go back to the layout.
+      else if (e.button === 2 && d.node.pin) { d.node.pin = null; delete pins[pinKey(d.node)]; savePins(); alpha = Math.max(alpha, 0.3); }
+    }
+    lockAxis = null;
     canvas.style.cursor = hover ? "pointer" : "grab";
-    if (!d.moved && e.type === "pointerup") {
+    if (!d.moved && e.type === "pointerup" && e.button === 0) {
       if (d.node && d.node === chosen) onOpen(d.node);
       else if (d.node || chosen) { chosen = d.node; userMoved = false; fitPending = true; }   // a note: light it up and fly to it; the background: let go and show everything
     }
@@ -699,9 +757,24 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   canvas.addEventListener("pointercancel", release);
   canvas.addEventListener("keydown", (e) => { if (e.key === "Escape" && chosen) { chosen = null; kick(); } });
   canvas.tabIndex = -1;
+  // While dragging a note, holding X, Y or Z keeps it on that axis.
+  let lockAxis = null;
+  const onKey = (e) => {
+    const k = e.key?.toLowerCase();
+    if (!drag?.node || !"xyz".includes(k) || k.length !== 1) return;
+    lockAxis = e.type === "keydown" ? k : lockAxis === k ? null : lockAxis;
+    e.preventDefault(); kick();
+  };
+  window.addEventListener("keydown", onKey);
+  window.addEventListener("keyup", onKey);
   canvas.addEventListener("pointerleave", () => { if (!drag && hover) { hover = null; kick(); } });
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
+    if (drag?.node && !flat) {   // while holding a note: the wheel pushes it away or pulls it closer
+      const n = drag.node, F = focal(), d = Math.max(-F * 0.75, n.d - e.deltaY * 0.4);
+      [n.x, n.y, n.z] = unproject(drag.last, d);
+      drag.moved = true; alpha = Math.max(alpha, 0.25); kick(); return;
+    }
     zoomAt(local(e), Math.min(6, Math.max(0.1, view.k * Math.exp(-e.deltaY * 0.0015))));
     userMoved = true; touchedAt = performance.now(); kick();
   }, { passive: false });
@@ -748,7 +821,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       userMoved = false; fitPending = true; kick();
       return [...core].map((i) => N[i].label);
     },
-    destroy() { cancelAnimationFrame(raf); raf = -1; ro.disconnect(); io.disconnect(); document.removeEventListener("visibilitychange", kick); scheme.removeEventListener("change", kick); },
+    destroy() { cancelAnimationFrame(raf); raf = -1; ro.disconnect(); io.disconnect(); document.removeEventListener("visibilitychange", kick); window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKey); scheme.removeEventListener("change", kick); },
   };
   return api;
 }

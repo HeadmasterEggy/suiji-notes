@@ -487,6 +487,7 @@ textarea {
 .graph-seg { display: flex; padding: 2px; border-radius: 7px; background: color-mix(in srgb, var(--ink) 7%, transparent); }
 .graph-seg button { padding: 2px 9px; border: 0; border-radius: 5px; background: none; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
 .graph-seg button[aria-checked="true"] { background: var(--bg); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
+.graph-unpin { display: block; width: 100%; margin-top: 12px; padding: 4px 8px; font-size: 11px; color: var(--muted); text-align: center; }
 .graph-empty { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: var(--muted); pointer-events: none; }
 /* How each style draws the graph (read by graph.js). */
 :root[data-style="paper"] .graph { --g-node: #8b5e34; --g-edge: rgba(139, 94, 52, .35); --g-edge-w: 1.2; }
