@@ -377,9 +377,11 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, hw = Math.max((x1 - x0) / 2, 160), hh = Math.max((y1 - y0) / 2, 120);
       x0 = cx - hw; x1 = cx + hw; y0 = cy - hh; y1 = cy + hh;
     }
-    const k = Math.min(W / (x1 - x0 + 80), H / (y1 - y0 + 80), 2.5);
+    // Keep clear of the search box and toolbar along the top: frame into the pane below them.
+    const top = H > 300 ? 48 : 0;
+    const k = Math.min(W / (x1 - x0 + 80), (H - top) / (y1 - y0 + 80), 2.5);
     if (!Number.isFinite(k) || k <= 0) return false;
-    const mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+    const mx = (x0 + x1) / 2, my = (y0 + y1) / 2 - top / 2 / k;
     const [dx, dy, dz] = unrotate(mx * 0.2, my * 0.2);
     cam.cx += dx; cam.cy += dy; cam.cz += dz;
     view.k += (k - view.k) * 0.2;
@@ -454,7 +456,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       if (!band.length) return;
       const m = s0 + span * (bi + 0.5) / BANDS, F = focal(), d = F / m - F;   // the band's middle scale, and its depth
       ctx.globalAlpha = base * Math.min(1.4, fog(d) * 1.15);
-      ctx.lineWidth = ew * Math.min(2.4, Math.max(0.4, m) ** 1.5);
+      ctx.lineWidth = ew * Math.min(ew > 1.5 ? 1.4 : 2.2, Math.max(0.4, m) ** 1.5);
       ctx.beginPath();
       for (const [a, b] of band) { ctx.moveTo(X(N[a]), Y(N[a])); ctx.lineTo(X(N[b]), Y(N[b])); }
       ctx.stroke();
@@ -513,7 +515,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       order.push(...hubs);
       fixed = order.length;
       // In 3D the near side is named too, nearest first; far names fade out (below).
-      if (!flat) order.push(...ranked.filter((p) => p.d < -0.25 * spread).sort((a, b) => a.d - b.d));
+      if (!flat) order.push(...ranked.filter((p) => p.d < -0.4 * spread).sort((a, b) => a.d - b.d));
       if (zoomLabels > 0.02) order.push(...ranked);
     }
     // Names already showing keep their place ahead of new ones, so they do not flicker as the graph turns.
@@ -555,7 +557,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
         ctx.beginPath(); ctx.roundRect(x, y, w, h, square ? 0 : h / 2); ctx.fill();
         ctx.globalAlpha = 1; ctx.fillStyle = ink;
       } else {
-        const hub = hubs?.has(p), close = !flat && p.d < -0.25 * spread;
+        const hub = hubs?.has(p), close = !flat && p.d < -0.4 * spread;
         ctx.globalAlpha = (focus || sel || isActive(p) || close ? 0.95 : hub ? Math.max(0.85, zoomLabels) : zoomLabels) * (isActive(p) ? Math.max(0.6, lf) : lf);
         ctx.fillStyle = ink;
       }
