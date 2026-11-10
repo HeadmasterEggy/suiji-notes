@@ -31,21 +31,6 @@ const FORCE_SLIDERS = [
   ["dist", "连线距离", 20, 250, 1],
 ];
 
-// Colour helpers for shading the node spheres: parse #rgb / #rrggbb / rgb(a), mix toward white or black.
-function rgba(c) {
-  c = (c || "").trim();
-  let m = c.match(/^#([0-9a-f]{3,8})$/i);
-  if (m) {
-    let h = m[1];
-    if (h.length <= 4) h = [...h].map((x) => x + x).join("");
-    return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)).concat(h.length === 8 ? parseInt(h.slice(6, 8), 16) / 255 : 1);
-  }
-  m = c.match(/^rgba?\(([^)]+)\)$/i);
-  if (m) { const v = m[1].split(/[\s,/]+/).filter(Boolean).map(parseFloat); return [v[0], v[1], v[2], v.length > 3 ? v[3] : 1]; }
-  return null;
-}
-const mix = (c, to, t) => `rgba(${[0, 1, 2].map((i) => Math.round(c[i] + (to - c[i]) * t)).join(",")},${c[3]})`;
-
 export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden = [], onHide, forces = {}, onForces, options = [] }) {
   const canvas = document.createElement("canvas");
   canvas.className = "graph-canvas";
@@ -67,8 +52,8 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   try { Object.assign(S, JSON.parse(localStorage.getItem("suiji:graphView")) || {}); } catch {}
   const saveS = () => { try { localStorage.setItem("suiji:graphView", JSON.stringify(S)); } catch {} };
   const maxLen = Math.max(1, ...N.map((n) => n.len || 0));
-  // Spheres read better a little larger in 3D than flat dots.
-  const radius = (n) => (flat ? 1 : 1.35) * (n.kind === "tag" ? 2.5 + Math.min(Math.sqrt(n.deg), 6) * 0.6
+  // A little larger in 3D, where perspective shrinks the far half.
+  const radius = (n) => (flat ? 1 : 1.15) * (n.kind === "tag" ? 2.5 + Math.min(Math.sqrt(n.deg), 6) * 0.6
     : S.size === "len" ? 2 + 9 * Math.sqrt((n.len || 0) / maxLen)
     : 2.5 + Math.min(Math.sqrt(n.deg), 9) * 0.9);
   const edgeAlpha = E.length > 400 ? 0.16 : 0.35;
@@ -158,14 +143,14 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     if (chosen?.hidden) chosen = null;
   }
   // The shown set changed shape: let the layout re-settle and the view re-frame it.
-  function relayout() { applyHidden(); picked = null; alpha = Math.max(alpha, 0.6); userMoved = false; kick(); }
+  function relayout() { applyHidden(); picked = null; alpha = Math.max(alpha, 0.6); userMoved = false; fitPending = true; kick(); }
   function setHidden() {
     applyHidden();
     if (legendPick && off.has(legendPick.key)) legendPick = null;
     picked = legendPick ? picked : null;
     syncLegend();
     onHide?.([...off]);
-    alpha = Math.max(alpha, 0.6); userMoved = false; kick();
+    alpha = Math.max(alpha, 0.6); userMoved = false; fitPending = true; kick();
   }
   if (rows.length > 1) {
     host.append(legend);
@@ -175,7 +160,9 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
 
   let W = 0, H = 0, dpr = 1, raf = 0, alpha = 1;
   // view: screen pan (x, y) and zoom (k). cam: orbit angles; spread: how far out the layout reaches (for perspective and fog).
-  let view = { x: 0, y: 0, k: 1 }, userMoved = false, hover = null;
+  // view.k is the zoom; panning moves the camera's turning point (cam.cx/cy/cz) instead of the picture, so
+  // a drag always turns the graph around the middle of the pane. fitPending: frame the graph once more.
+  let view = { x: 0, y: 0, k: 1 }, userMoved = false, fitPending = true, hover = null;
   // A clicked note stays lit with its links; clicking it again opens it, clicking the background lets go.
   let chosen = null;
   // Orbit angles, and the point the camera turns around (eased toward a clicked note so it comes into focus).
@@ -285,7 +272,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   };
   host.append(panel);
   // Settle again after a slider moves, and let the view re-frame the new shape.
-  const reheat = () => { alpha = Math.max(alpha, 0.5); userMoved = false; kick(); };
+  const reheat = () => { alpha = Math.max(alpha, 0.5); userMoved = false; fitPending = true; kick(); };
 
   // ---------- simulation ----------
   function tick() {
@@ -348,6 +335,25 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     const y = y2 * cp + d * sp, z1 = -y2 * sp + d * cp;
     return [x1 * cy - z1 * sy + cam.cx, y + cam.cy, x1 * sy + z1 * cy + cam.cz];
   }
+  // A shift on screen (pre-zoom units, at the turning point's depth) as a shift in the world.
+  function unrotate(x1, y2) {
+    const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw), cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+    const y = y2 * cp, z1 = -y2 * sp;
+    return [x1 * cy - z1 * sy, y, x1 * sy + z1 * cy];
+  }
+  // Move the picture by (dx, dy) screen px: the turning point moves the other way.
+  function panBy(dx, dy) {
+    const [x, y, z] = unrotate(-dx / view.k, -dy / view.k);
+    cam.cx += x; cam.cy += y; cam.cz += z;
+  }
+  // Zoom to k keeping the point under screen pt where it is.
+  function zoomAt(pt, k) {
+    const ux = (pt[0] - W / 2) / view.k, uy = (pt[1] - H / 2) / view.k;
+    const f = 1 - view.k / k;
+    const [x, y, z] = unrotate(ux * f, uy * f);
+    cam.cx += x; cam.cy += y; cam.cz += z; view.k = k;
+  }
+
   // Ease the camera face-on in flat mode; returns true while it is still turning.
   function settleCam() {
     if (!flat) return false;
@@ -372,9 +378,11 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     }
     const k = Math.min(W / (x1 - x0 + 80), H / (y1 - y0 + 80), 2.5);
     if (!Number.isFinite(k) || k <= 0) return false;
-    const tx = -((x0 + x1) / 2) * k, ty = -((y0 + y1) / 2) * k;
-    view.k += (k - view.k) * 0.2; view.x += (tx - view.x) * 0.2; view.y += (ty - view.y) * 0.2;
-    return Math.abs(k - view.k) > k * 0.005 || Math.abs(tx - view.x) > 0.5 || Math.abs(ty - view.y) > 0.5;
+    const mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+    const [dx, dy, dz] = unrotate(mx * 0.2, my * 0.2);
+    cam.cx += dx; cam.cy += dy; cam.cz += dz;
+    view.k += (k - view.k) * 0.2;
+    return Math.abs(k - view.k) > k * 0.005 || Math.abs(mx * k) > 0.5 || Math.abs(my * k) > 0.5;
   }
 
   // ---------- drawing ----------
@@ -462,14 +470,9 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       dot(x, y, r);
       if (p.kind === "tag") { ctx.lineWidth = 1.2; ctx.strokeStyle = on ? ink : node; ctx.fillStyle = bg; ctx.fill(); ctx.stroke(); }
       else {
-        const c = p === focus ? ink : colour(p), parts = !square && rgba(c);
+        const c = p === focus ? ink : colour(p);
         if (glow) ctx.shadowColor = c;
-        if (parts && r > 1.5) {   // a lit sphere: highlight up and to the left, darker toward the rim
-          const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.05, x, y, r);
-          g.addColorStop(0, mix(parts, 255, 0.65)); g.addColorStop(0.45, c); g.addColorStop(1, mix(parts, 0, 0.38));
-          ctx.fillStyle = g;
-        } else ctx.fillStyle = c;
-        ctx.fill();
+        ctx.fillStyle = c; ctx.fill();
         if (outline) { ctx.lineWidth = 2; ctx.strokeStyle = outline; ctx.stroke(); }
       }
       if (active) { ctx.lineWidth = 2; ctx.strokeStyle = ink; dot(x, y, r + 3); ctx.stroke(); }
@@ -495,6 +498,8 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       const ranked = shown.filter((p) => p.kind !== "tag").sort(byDeg);
       hubs = new Set(ranked.slice(0, Math.max(4, Math.min(12, Math.round(Math.sqrt(ranked.length))))));
       order.push(...hubs);
+      // In 3D the near side is named too, nearest first; far names fade out (below).
+      if (!flat) order.push(...ranked.filter((p) => p.d < -0.25 * spread).sort((a, b) => a.d - b.d));
       if (zoomLabels > 0.02) order.push(...ranked);
     }
     const placed = [], seen = new Set();
@@ -505,10 +510,13 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       const px = X(p), py = Y(p);
       if (Math.abs(px + view.x) > W / 2 || Math.abs(py + view.y) > H / 2) continue;
       const main = p === focus || (sel && sel.core.size <= 8 && sel.core.has(p.i));
-      ctx.font = `${main ? 600 : 400} ${main ? fs * 1.15 : fs}px ${font}`;
+      // Depth: names grow and brighten toward the viewer and dim and shrink away from it.
+      const near = flat ? 0.5 : Math.min(1, Math.max(0, 0.5 - p.d / (2 * spread)));
+      const lf = flat ? 1 : 0.15 + 0.85 * near ** 1.4, fz = fs * (flat ? 1 : 0.85 + 0.4 * near);
+      ctx.font = `${main ? 600 : 400} ${main ? fs * 1.15 : fz}px ${font}`;
       const max = main ? 48 : 22;
       const text = p.label.length > max ? p.label.slice(0, max - 1) + "…" : p.label;
-      const w = ctx.measureText(text).width + pad * 2, h = (main ? fs * 1.15 : fs) + pad * 2;
+      const w = ctx.measureText(text).width + pad * 2, h = (main ? fs * 1.15 : fz) + pad * 2;
       const x = px - w / 2, y = py + radius(p) * k * p.s + 2;
       if (!main && !free(x, y, w, h)) continue;
       placed.push([x, y, w, h]);
@@ -517,9 +525,9 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
         ctx.beginPath(); ctx.roundRect(x, y, w, h, square ? 0 : h / 2); ctx.fill();
         ctx.globalAlpha = 1; ctx.fillStyle = ink;
       } else {
-        const hub = hubs?.has(p);
-        ctx.globalAlpha = (focus || sel || isActive(p) ? 0.9 : hub ? Math.max(0.85, zoomLabels) : zoomLabels) * (isActive(p) ? 1 : fog(p.d));
-        ctx.fillStyle = focus || sel || isActive(p) || hub ? ink : muted;
+        const hub = hubs?.has(p), close = !flat && p.d < -0.25 * spread;
+        ctx.globalAlpha = (focus || sel || isActive(p) || close ? 0.95 : hub ? Math.max(0.85, zoomLabels) : zoomLabels) * (isActive(p) ? Math.max(0.6, lf) : lf);
+        ctx.fillStyle = ink;
       }
       ctx.fillText(text, px, y + pad);
       // Under the hovered or clicked note: its category, how many links it has, and that a second click opens it.
@@ -563,15 +571,13 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     // Turn slowly (Settings > Auto-rotate), pausing while the user handles the graph and for a few seconds after.
     const spinning = !flat && S.spin && !drag && !hover && !chosen && !picked && performance.now() - touchedAt > 4000;
     if (spinning) cam.yaw += 0.0025;
-    // Ease the turning point toward the clicked note, or back to the middle.
-    const goal = chosen && !flat ? chosen : { x: 0, y: 0, z: 0 };
-    const gx = goal.x - cam.cx, gy = goal.y - cam.cy, gz = goal.z - cam.cz, moving = Math.abs(gx) + Math.abs(gy) + Math.abs(gz) > 0.5;
-    if (moving) { cam.cx += gx * 0.15; cam.cy += gy * 0.15; cam.cz += gz * 0.15; }
     project();
-    // A pane that was hidden (phone list view) has no size until shown, so keep easing until it fits.
-    const fitting = !userMoved && fit();
+    // Frame the graph while it settles, or once when asked (a click, a filter, Center) — not all the time, so
+    // turning it never makes the zoom pump. A pane that was hidden (phone list view) has no size until shown.
+    const fitting = !userMoved && (fitPending || alpha > 0.02) && fit();
+    if (!fitting && alpha <= 0.02 && W) fitPending = false;
     draw();
-    if (alpha > 0.003 || drag || fitting || turning || spinning || moving) raf = requestAnimationFrame(frame);
+    if (alpha > 0.003 || drag || fitting || turning || spinning) raf = requestAnimationFrame(frame);
   }
   const kick = () => { if (raf !== -1 && !raf) raf = requestAnimationFrame(frame); };
 
@@ -595,7 +601,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     pointers.set(e.pointerId, local(e));
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
-      pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), k: view.k, x: view.x, y: view.y, c: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] };
+      pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), k: view.k, c: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] };
       if (drag?.node) drag.node.fixed = false;
       drag = null;
       return;
@@ -613,9 +619,8 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       const [a, b] = [...pointers.values()];
       const k = Math.min(6, Math.max(0.1, pinch.k * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.d));
       const c = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-      const wx = (pinch.c[0] - W / 2 - pinch.x) / pinch.k, wy = (pinch.c[1] - H / 2 - pinch.y) / pinch.k;
-      view = { k, x: c[0] - W / 2 - wx * k, y: c[1] - H / 2 - wy * k };
-      userMoved = true; kick(); return;
+      zoomAt(c, k); panBy(c[0] - pinch.c[0], c[1] - pinch.c[1]); pinch.c = c;
+      userMoved = true; touchedAt = performance.now(); kick(); return;
     }
     if (!drag) {
       const h = pick(pt);
@@ -630,12 +635,13 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       hover = drag.node;
       alpha = Math.max(alpha, 0.25);
     } else if (drag.pan) {
-      view.x = drag.vx + pt[0] - drag.start[0]; view.y = drag.vy + pt[1] - drag.start[1];
-      userMoved = true;
+      panBy(pt[0] - drag.last[0], pt[1] - drag.last[1]);
+      userMoved = true; touchedAt = performance.now();
     } else {
-      cam.yaw += (pt[0] - drag.last[0]) * 0.008;
-      cam.pitch = Math.max(-1.5, Math.min(1.5, cam.pitch - (pt[1] - drag.last[1]) * 0.008));
-      touchedAt = performance.now();
+      // Grab-and-turn: the near side follows the pointer, like turning a globe.
+      cam.yaw -= (pt[0] - drag.last[0]) * 0.008;
+      cam.pitch = Math.max(-1.5, Math.min(1.5, cam.pitch + (pt[1] - drag.last[1]) * 0.008));
+      userMoved = true; touchedAt = performance.now();
     }
     drag.last = pt;
     kick();
@@ -649,7 +655,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     canvas.style.cursor = hover ? "pointer" : "grab";
     if (!d.moved && e.type === "pointerup") {
       if (d.node && d.node === chosen) onOpen(d.node);
-      else if (d.node || chosen) { chosen = d.node; userMoved = false; }   // a note: light it up and fly to it; the background: let go and show everything
+      else if (d.node || chosen) { chosen = d.node; userMoved = false; fitPending = true; }   // a note: light it up and fly to it; the background: let go and show everything
     }
     kick();
   };
@@ -660,16 +666,15 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   canvas.addEventListener("pointerleave", () => { if (!drag && hover) { hover = null; kick(); } });
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
-    const pt = local(e), [wx, wy] = toScreen(pt);
-    const k = Math.min(6, Math.max(0.1, view.k * Math.exp(-e.deltaY * 0.0015)));
-    view = { k, x: pt[0] - W / 2 - wx * k, y: pt[1] - H / 2 - wy * k };
-    userMoved = true; kick();
+    zoomAt(local(e), Math.min(6, Math.max(0.1, view.k * Math.exp(-e.deltaY * 0.0015))));
+    userMoved = true; touchedAt = performance.now(); kick();
   }, { passive: false });
 
   const ro = new ResizeObserver(() => {
     const r = host.getBoundingClientRect();
     dpr = window.devicePixelRatio || 1; W = r.width; H = r.height;
     canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+    if (!userMoved) fitPending = true;
     kick();
   });
   ro.observe(host);
@@ -685,7 +690,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       }
       kick();
     },
-    fit() { picked = null; chosen = null; userMoved = false; legendPick = null; syncLegend(); kick(); },
+    fit() { picked = null; chosen = null; userMoved = false; fitPending = true; legendPick = null; syncLegend(); kick(); },
     toggleForces() { panel.hidden = !panel.hidden; return !panel.hidden; },
     setFlat(on) {
       if (flat === !!on) return;
@@ -694,14 +699,14 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
         for (const p of N) p.vz += (Math.random() - 0.5) * 40;
         cam.yaw = 0.5; cam.pitch = 0.38; touchedAt = 0;
       }
-      alpha = Math.max(alpha, 0.5); userMoved = false; kick();
+      alpha = Math.max(alpha, 0.5); userMoved = false; fitPending = true; kick();
     },
     // Lights up the nodes for which match(node) is true, with their neighbours, and frames them; returns their labels.
     focus(match) {
       const core = new Set(shown.filter((n) => match(n)).map((n) => n.i));
       legendPick = null; syncLegend();
       picked = core.size ? { core, near: new Set([...core].flatMap((i) => [i, ...N[i].nb]).filter((i) => !N[i].hidden)) } : null;
-      userMoved = false; kick();
+      userMoved = false; fitPending = true; kick();
       return [...core].map((i) => N[i].label);
     },
     destroy() { cancelAnimationFrame(raf); raf = -1; ro.disconnect(); scheme.removeEventListener("change", kick); },
