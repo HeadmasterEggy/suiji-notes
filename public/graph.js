@@ -829,9 +829,9 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const touch = matchMedia("(pointer: coarse)").matches;
-      const hint = flat ? (touch ? t("单指拖动平移 · 双指缩放") : sawPad ? t("双指滑动或拖动平移 · 捏合缩放") : t("拖动平移 · 滚轮缩放"))
+      const hint = flat ? (touch ? t("单指拖动平移 · 双指缩放") : sawPad ? t("双指滑动或拖动平移 · 滚轮或捏合缩放") : t("拖动平移 · 滚轮缩放"))
         : touch ? t("单指拖动旋转 · 双指平移和缩放")
-        : sawPad ? t("双指滑动或拖动旋转 · Shift + 双指平移 · 捏合缩放 · 点 x / y / z 正对该轴")
+        : sawPad ? t("双指横向滑动或拖动旋转 · 滚轮或捏合缩放 · 点 x / y / z 正对该轴")
         : t("拖动旋转 · 右键拖动平移 · 滚轮缩放 · 点 x / y / z 正对该轴");
       ctx.font = lastFont = `400 11px ${font}`; ctx.textAlign = "left"; ctx.textBaseline = "middle";
       const hx = gizmo ? 72 : 12, room = W - hx - Math.min(W * 0.46, 200) - 16;
@@ -987,7 +987,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   window.addEventListener("keyup", onKey);
   canvas.addEventListener("pointerleave", () => { if (!drag && (hover || gizmoHover)) { hover = null; gizmoHover = null; kick(); } });
   let wheelAt = 0, wheelPad = null, sawPad = false;
-  try { sawPad = localStorage.getItem("suiji:graphPad") === "1"; } catch {}
+  try { sawPad = localStorage.getItem("suiji:graphPad2") === "1"; } catch {}
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
     if (drag?.node && !flat) {   // while holding a note: the wheel pushes it away or pulls it closer
@@ -1002,11 +1002,13 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     wheelAt = now;
     if (e.ctrlKey) zoomBy(Math.exp(-e.deltaY * 0.01));
     else {
-      if (wheelPad === null) wheelPad = e.deltaMode === 0 && (e.deltaX !== 0 || (!!e.wheelDeltaY && e.wheelDeltaY === -3 * e.deltaY));
+      // Only a sideways component gives a trackpad away: a mouse wheel (on a Mac, too) only ever scrolls up and
+      // down, and the browser reports both in the same units, so anything else would mistake one for the other.
+      if (wheelPad === null) wheelPad = e.deltaX !== 0 && !e.shiftKey;
       if (!wheelPad) zoomBy(Math.exp(-e.deltaY * 0.0015));
       else {
-        if (!sawPad) { sawPad = true; try { localStorage.setItem("suiji:graphPad", "1"); } catch {} }
-        if (flat || e.shiftKey) panBy(-e.deltaX, -e.deltaY);
+        if (!sawPad) { sawPad = true; try { localStorage.setItem("suiji:graphPad2", "1"); } catch {} }
+        if (flat) panBy(-e.deltaX, -e.deltaY);
         else { camGoal = null; cam.yaw += e.deltaX * 0.006; cam.pitch = Math.max(-1.5, Math.min(1.5, cam.pitch - e.deltaY * 0.006)); }
       }
     }
