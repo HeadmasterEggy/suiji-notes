@@ -282,12 +282,15 @@ async function uploadFiles(input) {
     setSync("saving", t("上传中 · 剩 {n} 个", { n: uploading }));
     const id = crypto.randomUUID(), ext = extOf(file.name);
     const path = `${uid}/${id}${ext ? "." + ext : ""}`;
-    const mime = file.type || "application/octet-stream";
+    const mime = file.type || "text/markdown";   // browsers often give .md files no type; only Markdown is uploaded
     const { folder, name } = placeOf(file);
     try {
       const up = await sb.storage.from("files").upload(path, file, { contentType: mime });
       if (up.error) throw up.error;
-      const ins = await sb.from("files").insert({ id, user_id: uid, name, folder, path, size: file.size, mime });
+      // Links and tags too, as the Mac sync and a save in the editor store them: else an uploaded document
+      // stays out of the graph and a #tag search until it is next edited.
+      const meta = mdMeta(await file.text());
+      const ins = await sb.from("files").insert({ id, user_id: uid, name, folder, path, size: file.size, mime, ...meta });
       if (ins.error) { await sb.storage.from("files").remove([path]); throw ins.error; }
     } catch (e) {
       console.error(e);
@@ -2174,8 +2177,9 @@ function restyled() {
   }
   $("aiPreset").onchange = () => {
     aiPreset($("aiPreset").value);
-    const local = isLocalPreset($("aiPreset").value);
-    $("aiKey").required = !local && !aiOwn;
+    const local = isLocalPreset($("aiPreset").value), keep = !!aiOwn && aiOwn.base_url.replace(/\/+$/, "") === $("aiBase").value.trim().replace(/\/+$/, "");
+    $("aiKey").required = !local && !keep;
+    if (!local) $("aiKey").placeholder = keep ? t("留空则保留已保存的 key") : "sk-…";
     if (local) $("aiKey").placeholder = localModel()?.key ? t("留空则保留已保存的 key") : t("网关 key（没有可留空）");
   };
   // The model field predicts as you type: the models the service lists (read once per address, from the
@@ -2299,6 +2303,9 @@ function restyled() {
       aiShow(aiLast); aiMsg(t("已保存（只在这台设备上）"));
       return;
     }
+    // The saved key belongs to the address it was saved for (api/ai-key.js won't send it anywhere else).
+    const base = $("aiBase").value.trim().replace(/\/+$/, "");
+    if (!key && (!aiOwn || aiOwn.base_url.replace(/\/+$/, "") !== base)) { aiMsg(t("换了服务，请填上这个服务的 API key。"), true); $("aiKey").focus(); return; }
     setLocalModel(null);   // a key in the account replaces this device's local model
     $("aiSave").disabled = true; aiMsg(t("保存中…"));
     try {
