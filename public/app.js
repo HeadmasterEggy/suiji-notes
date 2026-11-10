@@ -224,6 +224,7 @@ function subscribe() {
 // ---------- files ----------
 // File bytes live in the private "files" bucket at <uid>/<id>.<ext>; the files table keeps the real name.
 const MAX_FILE = 50 * 1024 * 1024;
+let pathsSig = null;   // hash of every file's path, see loadFiles
 let files = [], allFiles = [], filesLoaded = false, filesErr = false, filesRetry = null;
 const isImage = (f) => f.mime.startsWith("image/");
 const extOf = (name) => { const m = /\.([a-z0-9]{1,6})$/i.exec(name); return m ? m[1].toLowerCase() : ""; };
@@ -255,6 +256,14 @@ async function loadFiles() {
   for (const f of data) if (before.has(f.id) && before.get(f.id) !== versionOf(f)) forgetUrls(f.path);
   // Only Markdown documents are shown; any other file in the account stays in the cloud, untouched and hidden.
   allFiles = data; files = data.filter(isMarkdown); filesLoaded = true;
+  // A document drawn before a file it links to (or shows) arrived, moved or went still says 没有找到; when the
+  // set of paths changes, drawings are made again (the open ones in place, where the reader is).
+  const sig = fnv(allFiles.map((x) => fullPath(x).join("/")).sort().join("\n"));
+  if (pathsSig !== null && sig !== pathsSig) {
+    rendered.clear();
+    for (const p of panes.values()) if (p.kind === "file" && !p.fileEdit) p.shown = null;
+  }
+  pathsSig = sig;
   render();
   schedulePrefetch();
 }
@@ -782,11 +791,15 @@ function toPlace(p, at) {
 
 // What a Markdown drawing was made from: the text and the look (Mermaid's generated ids differ every time,
 // so two drawings of the same text are compared by this, not node by node).
-function drawKey(text) {
+function fnv(text) {
   let h = 2166136261;
   for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+// The files a drawing could point at count too: its links and pictures are looked up among them.
+function drawKey(text) {
   const d = document.documentElement.dataset;
-  return [d.mode, d.style || "", lang, text.length, h >>> 0].join(":");
+  return [d.mode, d.style || "", lang, text.length, fnv(text), pathsSig].join(":");
 }
 const sameDrawing = (a, b) => !!a.dataset?.src && a.dataset.src === b.dataset?.src;
 async function showFile(f, p) {
@@ -803,6 +816,7 @@ async function showFile(f, p) {
     const at = again && p.place?.id === f.id ? p.place : null;
     for (const c of preview.children) p.keep.unobserve(c);
     clearTimeout(wait); preview.replaceChildren(el); preview.scrollTop = 0; p.shownId = f.id;
+    p.anchors = null;   // the observer that drops the old list only runs after this, and toPlace needs the new one now
     p.keep.observe(el);
     if (at) { p.place = at; toPlace(p, at); }
     if (staleIds.has(f.id) && !retried.has(versionOf(f))) {
@@ -2439,7 +2453,7 @@ function enter(session) {
   $("auth").hidden = !!session; app.hidden = !session;
   if (!session) {
     local.start(sb, null, { onChange: localChanged, onStatus: localStatus }).catch(console.error);
-    store = { notes: {} }; files = []; filesLoaded = filesErr = false; clearTimeout(filesRetry); bodies.clear(); warming = null; rendered.clear(); signed.clear();
+    store = { notes: {} }; files = []; filesLoaded = filesErr = false; clearTimeout(filesRetry); bodies.clear(); warming = null; rendered.clear(); signed.clear(); pathsSig = null;
     resetAgent(); toggleAgent(false);
     // Another account may sign in on this device; its documents must not mix with these.
     caches.delete(FILE_CACHE).catch(() => {}); cacheIndex = null;
