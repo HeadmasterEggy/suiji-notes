@@ -11,7 +11,11 @@
 //   const g = mountGraph(host, { nodes: [{label, kind, ref, group}], edges: [[i, j]] }, { onOpen(node), isActive(node), flat })
 //   g.redraw()       after the active set changes
 //   g.setFlat(bool)  switch between 3D and flat, animated
-//   g.toggleForces() open or close the forces panel (sliders like Obsidian's), returns whether it is open
+//   g.toggleForces() open or close the settings panel (display options and force sliders, like Obsidian's)
+//
+// Also in the pane: a search box (top left) that lights up matching notes (Enter opens the first), a local
+// graph mode (only the open notes and what lies within 1–3 links of them) and node size by links or by length
+// (node.len, in characters). Those view settings are kept per device as "suiji:graphView".
 //   g.destroy()      before the host is thrown away
 import { t } from "./i18n.js";
 
@@ -44,7 +48,13 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     n.x = r * w * Math.cos(t); n.y = r * u; n.z = r * w * Math.sin(t);
   });
   // Size grows with links but is capped, so one hub note does not cover its neighbours.
-  const radius = (n) => n.kind === "tag" ? 2.5 + Math.min(Math.sqrt(n.deg), 6) * 0.6 : 2.5 + Math.min(Math.sqrt(n.deg), 9) * 0.9;
+  const S = { local: false, depth: 1, size: "links" };
+  try { Object.assign(S, JSON.parse(localStorage.getItem("suiji:graphView")) || {}); } catch {}
+  const saveS = () => { try { localStorage.setItem("suiji:graphView", JSON.stringify(S)); } catch {} };
+  const maxLen = Math.max(1, ...N.map((n) => n.len || 0));
+  const radius = (n) => n.kind === "tag" ? 2.5 + Math.min(Math.sqrt(n.deg), 6) * 0.6
+    : S.size === "len" ? 2 + 9 * Math.sqrt((n.len || 0) / maxLen)
+    : 2.5 + Math.min(Math.sqrt(n.deg), 9) * 0.9;
   const edgeAlpha = E.length > 400 ? 0.16 : 0.35;
 
   // Groups, biggest first: each of the first ten gets a palette colour, the rest share the plain node colour.
@@ -109,14 +119,29 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     legend.append(row);
   }
   // Which nodes and links are in play: those of shown groups, and tags still linked to one of them.
-  let shown = N, shownE = E;
+  let shown = N, shownE = E, localKey = "";
   function applyHidden() {
     for (const n of N) n.hidden = n.kind !== "tag" && off.has(keyOf(n));
     for (const n of N) if (n.kind === "tag") n.hidden = ![...n.nb].some((j) => N[j].kind !== "tag" && !N[j].hidden);
+    // Local graph: walk out from the open notes, S.depth links deep; everything farther is left out.
+    const centres = S.local ? N.filter((n) => !n.hidden && isActive(n)) : [];
+    localKey = centres.map((n) => n.i).join(",");
+    if (centres.length) {
+      const seen = new Set(centres.map((n) => n.i));
+      let ring = [...seen];
+      for (let d = 0; d < S.depth; d++) {
+        const next = [];
+        for (const i of ring) for (const j of N[i].nb) if (!seen.has(j) && !N[j].hidden) { seen.add(j); next.push(j); }
+        ring = next;
+      }
+      for (const n of N) if (!seen.has(n.i)) n.hidden = true;
+    }
     shown = N.filter((n) => !n.hidden);
     shownE = E.filter(([a, b]) => !N[a].hidden && !N[b].hidden);
     if (hover?.hidden) hover = null;
   }
+  // The shown set changed shape: let the layout re-settle and the view re-frame it.
+  function relayout() { applyHidden(); picked = null; alpha = Math.max(alpha, 0.6); userMoved = false; kick(); }
   function setHidden() {
     applyHidden();
     if (legendPick && off.has(legendPick.key)) legendPick = null;
@@ -140,6 +165,25 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   let picked = null;   // { core: Set of node indices, near: core plus neighbours }
   applyHidden(); syncLegend();
 
+  // ---------- search ----------
+  // Lights up the notes whose name contains the text and frames them; Enter opens the first, Esc clears.
+  const search = Object.assign(document.createElement("input"), { type: "search", className: "graph-search", placeholder: t("搜索节点"), spellcheck: false });
+  search.setAttribute("aria-label", t("搜索节点"));
+  let hits = [];
+  search.oninput = () => {
+    const q = search.value.trim().toLowerCase();
+    if (!q) { hits = []; api.fit(); return; }
+    hits = shown.filter((n) => n.label.toLowerCase().includes(q)).sort((a, b) => (a.label.toLowerCase().startsWith(q) ? 0 : 1) - (b.label.toLowerCase().startsWith(q) ? 0 : 1) || b.deg - a.deg);
+    const set = new Set(hits);
+    api.focus((n) => set.has(n));
+    search.classList.toggle("none", !hits.length);
+  };
+  search.onkeydown = (e) => {
+    if (e.key === "Enter" && hits[0]) { e.preventDefault(); onOpen(hits[0]); }
+    else if (e.key === "Escape") { search.value = ""; search.oninput(); search.blur(); }
+  };
+  if (N.length) host.append(search);
+
   // ---------- forces panel ----------
   const F = { ...FORCE_DEFAULTS };
   for (const k in F) if (Number.isFinite(forces[k])) F[k] = forces[k];
@@ -152,25 +196,52 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   head.querySelector("b").textContent = t("力度");
   const reset = head.querySelector("button");
   reset.textContent = t("重置");
-  // Display switches from the app (show tag nodes…) above the forces.
-  if (options.length) {
-    const sec = document.createElement("div");
-    sec.className = "graph-forces-head";
-    sec.innerHTML = "<b></b>";
-    sec.querySelector("b").textContent = t("显示");
-    panel.append(sec);
-    for (const o of options) {
-      const row = document.createElement("label");
-      row.className = "graph-switch";
-      row.innerHTML = `<span></span><input type="checkbox" role="switch">`;
-      row.querySelector("span").textContent = o.label;
-      const box = row.querySelector("input");
-      box.checked = !!o.checked;
-      box.onchange = () => o.onChange(box.checked);
-      panel.append(row);
-    }
-    head.classList.add("gap");
+  // Display: the app's switches (show tag nodes…), the local graph and node size, above the forces.
+  const sec = document.createElement("div");
+  sec.className = "graph-forces-head";
+  sec.innerHTML = "<b></b>";
+  sec.querySelector("b").textContent = t("显示");
+  panel.append(sec);
+  const sw = (label, checked, change) => {
+    const row = document.createElement("label");
+    row.className = "graph-switch";
+    row.innerHTML = `<span></span><input type="checkbox" role="switch">`;
+    row.querySelector("span").textContent = label;
+    const box = row.querySelector("input");
+    box.checked = !!checked;
+    box.onchange = () => change(box.checked);
+    panel.append(row);
+    return row;
+  };
+  for (const o of options) sw(o.label, o.checked, o.onChange);
+  const localRow = sw(t("局部图谱"), S.local, (on) => { S.local = on; saveS(); depthRow.hidden = !on; relayout(); });
+  localRow.title = t("只显示其他窗格里打开的笔记，以及离它几步之内的笔记");
+  const depthRow = document.createElement("label");
+  depthRow.innerHTML = `<span></span><output></output><input type="range" min="1" max="3" step="1">`;
+  depthRow.querySelector("span").textContent = t("深度");
+  const depthIn = Object.assign(depthRow.querySelector("input"), { value: S.depth });
+  const depthOut = depthRow.querySelector("output");
+  depthOut.textContent = S.depth;
+  depthIn.oninput = () => { S.depth = +depthIn.value; depthOut.textContent = S.depth; saveS(); relayout(); };
+  depthRow.hidden = !S.local;
+  panel.append(depthRow);
+  const sizeRow = document.createElement("div");
+  sizeRow.className = "graph-seg-row";
+  sizeRow.innerHTML = `<span></span><div class="graph-seg" role="radiogroup"></div>`;
+  sizeRow.querySelector("span").textContent = t("节点大小");
+  for (const [v, label] of [["links", t("链接数")], ["len", t("篇幅")]]) {
+    const b = Object.assign(document.createElement("button"), { type: "button", textContent: label });
+    b.setAttribute("role", "radio");
+    b.setAttribute("aria-checked", S.size === v);
+    b.onclick = () => {
+      S.size = v; saveS();
+      for (const x of sizeRow.querySelectorAll("button")) x.setAttribute("aria-checked", x === b);
+      kick();
+    };
+    sizeRow.querySelector(".graph-seg").append(b);
   }
+  panel.append(sizeRow);
+  head.classList.add("gap");
   panel.append(head);
   const inputs = {};
   for (const [key, label, min, max, step] of FORCE_SLIDERS) {
@@ -547,7 +618,13 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   kick();
 
   const api = {
-    redraw: kick,
+    redraw() {
+      if (S.local) {   // another note opened beside the graph: the local graph moves to it
+        const key = N.filter((n) => !(n.kind !== "tag" && off.has(keyOf(n))) && isActive(n)).map((n) => n.i).join(",");
+        if (key !== localKey) { relayout(); return; }
+      }
+      kick();
+    },
     fit() { picked = null; userMoved = false; legendPick = null; syncLegend(); kick(); },
     toggleForces() { panel.hidden = !panel.hidden; return !panel.hidden; },
     setFlat(on) {

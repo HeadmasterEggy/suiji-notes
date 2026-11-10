@@ -478,6 +478,15 @@ textarea {
 .graph-forces label { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 8px; margin-top: 8px; color: var(--muted); }
 .graph-forces output { font-variant-numeric: tabular-nums; color: var(--ink); }
 .graph-forces input[type="range"] { grid-column: 1 / -1; width: 100%; margin: 0; accent-color: var(--ink); }
+.graph-search { position: absolute; top: 10px; left: 10px; z-index: 1; width: 200px; max-width: calc(100% - 230px); min-width: 110px; box-sizing: border-box; padding: 5px 10px; border: 1px solid var(--line, color-mix(in srgb, var(--ink) 14%, transparent)); border-radius: 999px; background: color-mix(in srgb, var(--bg) 88%, transparent); color: var(--ink); font: inherit; font-size: 12px; outline: none; }
+.graph-search:focus { border-color: color-mix(in srgb, var(--ink) 40%, transparent); }
+.graph-search.none { border-color: #e15759; }
+:root[data-style="blocks"] .graph-search { border-radius: 0; }
+.graph-forces label[hidden] { display: none; }
+.graph-seg-row { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; color: var(--muted); }
+.graph-seg { display: flex; padding: 2px; border-radius: 7px; background: color-mix(in srgb, var(--ink) 7%, transparent); }
+.graph-seg button { padding: 2px 9px; border: 0; border-radius: 5px; background: none; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
+.graph-seg button[aria-checked="true"] { background: var(--bg); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
 .graph-empty { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: var(--muted); pointer-events: none; }
 /* How each style draws the graph (read by graph.js). */
 :root[data-style="paper"] .graph { --g-node: #8b5e34; --g-edge: rgba(139, 94, 52, .35); --g-edge-w: 1.2; }
