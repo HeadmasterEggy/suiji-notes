@@ -163,6 +163,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   // view.k is the zoom; panning moves the camera's turning point (cam.cx/cy/cz) instead of the picture, so
   // a drag always turns the graph around the middle of the pane. fitPending: frame the graph once more.
   let view = { x: 0, y: 0, k: 1 }, userMoved = false, fitPending = true, hover = null;
+  let shownLabels = new Set(), labelsEasing = false, onScreen = true;
   // A clicked note stays lit with its links; clicking it again opens it, clicking the background lets go.
   let chosen = null;
   // Orbit angles, and the point the camera turns around (eased toward a clicked note so it comes into focus).
@@ -439,13 +440,25 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     ctx.lineCap = square ? "square" : "round";
     ctx.strokeStyle = edge;
     const base = focus || sel ? edgeAlpha * 0.35 : edgeAlpha;
-    for (const [a, b] of shownE) {
-      if (focus && (a === focus.i || b === focus.i)) continue;
-      const A = N[a], B = N[b];
-      ctx.globalAlpha = base * Math.min(1.4, fog((A.d + B.d) / 2) * 1.15);
-      ctx.lineWidth = ew * Math.min(2.4, Math.max(0.4, (A.s + B.s) / 2) ** 1.5);
-      ctx.beginPath(); ctx.moveTo(X(A), Y(A)); ctx.lineTo(X(B), Y(B)); ctx.stroke();
+    // Grouped into eight depth bands, one stroke each: per-link strokes cost too much on big graphs.
+    const BANDS = 8, bands = Array.from({ length: BANDS }, () => []);
+    let s0 = Infinity, s1 = -Infinity;
+    for (const p of shown) { s0 = Math.min(s0, p.s); s1 = Math.max(s1, p.s); }
+    const span = Math.max(1e-6, s1 - s0);
+    for (const e of shownE) {
+      if (focus && (e[0] === focus.i || e[1] === focus.i)) continue;
+      const m = (N[e[0]].s + N[e[1]].s) / 2;
+      bands[Math.min(BANDS - 1, Math.floor(((m - s0) / span) * BANDS))].push(e);
     }
+    bands.forEach((band, bi) => {
+      if (!band.length) return;
+      const m = s0 + span * (bi + 0.5) / BANDS, F = focal(), d = F / m - F;   // the band's middle scale, and its depth
+      ctx.globalAlpha = base * Math.min(1.4, fog(d) * 1.15);
+      ctx.lineWidth = ew * Math.min(2.4, Math.max(0.4, m) ** 1.5);
+      ctx.beginPath();
+      for (const [a, b] of band) { ctx.moveTo(X(N[a]), Y(N[a])); ctx.lineTo(X(N[b]), Y(N[b])); }
+      ctx.stroke();
+    });
     if (focus) {
       // A hub has hundreds of links; drawing them all solid turns into a white burst.
       ctx.globalAlpha = focus.nb.size > 40 ? 0.3 : focus.nb.size > 12 ? 0.55 : 0.9;
@@ -487,7 +500,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     const zoomLabels = Math.min(1, Math.max(0, (view.k - 1.1) / 0.6));
     const byDeg = (a, b) => b.deg - a.deg || a.d - b.d;
     const order = [];
-    let hubs = null;
+    let hubs = null, fixed = -1;
     if (focus) order.push(focus);
     if (sel) order.push(...[...sel.core].map((i) => N[i]));
     order.push(...N.filter((p) => p !== focus && isActive(p)));
@@ -498,11 +511,21 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       const ranked = shown.filter((p) => p.kind !== "tag").sort(byDeg);
       hubs = new Set(ranked.slice(0, Math.max(4, Math.min(12, Math.round(Math.sqrt(ranked.length))))));
       order.push(...hubs);
+      fixed = order.length;
       // In 3D the near side is named too, nearest first; far names fade out (below).
       if (!flat) order.push(...ranked.filter((p) => p.d < -0.25 * spread).sort((a, b) => a.d - b.d));
       if (zoomLabels > 0.02) order.push(...ranked);
     }
-    const placed = [], seen = new Set();
+    // Names already showing keep their place ahead of new ones, so they do not flicker as the graph turns.
+    if (fixed >= 0) {
+      const rest = order.slice(fixed);
+      order.length = fixed;
+      order.push(...rest.filter((p) => shownLabels.has(p)), ...rest.filter((p) => !shownLabels.has(p)));
+    }
+    if (order.length > 160) order.length = 160;   // measuring every name of a big graph each frame is what costs
+    const placed = [], seen = new Set(), nowShown = new Set();
+    let lastFont = "";
+    labelsEasing = false;
     const free = (x, y, w, h) => !placed.some((r) => x < r[0] + r[2] && x + w > r[0] && y < r[1] + r[3] && y + h > r[1]);
     for (const p of order) {
       if (seen.has(p) || p.hidden) continue;
@@ -512,14 +535,21 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       const main = p === focus || (sel && sel.core.size <= 8 && sel.core.has(p.i));
       // Depth: names grow and brighten toward the viewer and dim and shrink away from it.
       const near = flat ? 0.5 : Math.min(1, Math.max(0, 0.5 - p.d / (2 * spread)));
-      const lf = flat ? 1 : 0.15 + 0.85 * near ** 1.4, fz = fs * (flat ? 1 : 0.85 + 0.4 * near);
-      ctx.font = `${main ? 600 : 400} ${main ? fs * 1.15 : fz}px ${font}`;
+      const lf = flat ? 1 : 0.15 + 0.85 * near ** 1.4, fz = flat ? fs : Math.round(fs * (0.85 + 0.4 * near) * 2) / 2;
+      // Setting ctx.font parses it, which is slow: only when it changes (sizes are rounded to half pixels).
+      const f = `${main ? 600 : 400} ${main ? fs * 1.15 : fz}px ${font}`;
+      if (f !== lastFont) { ctx.font = f; lastFont = f; }
       const max = main ? 48 : 22;
       const text = p.label.length > max ? p.label.slice(0, max - 1) + "…" : p.label;
       const w = ctx.measureText(text).width + pad * 2, h = (main ? fs * 1.15 : fz) + pad * 2;
       const x = px - w / 2, y = py + radius(p) * k * p.s + 2;
       if (!main && !free(x, y, w, h)) continue;
       placed.push([x, y, w, h]);
+      // A name that just appeared fades in over a few frames.
+      if (!shownLabels.has(p)) p.la = 0;
+      p.la = Math.min(1, (p.la ?? 1) + 0.12);
+      if (p.la < 1) labelsEasing = true;
+      nowShown.add(p);
       if (main) {
         ctx.globalAlpha = 0.92; ctx.fillStyle = bg;
         ctx.beginPath(); ctx.roundRect(x, y, w, h, square ? 0 : h / 2); ctx.fill();
@@ -529,11 +559,12 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
         ctx.globalAlpha = (focus || sel || isActive(p) || close ? 0.95 : hub ? Math.max(0.85, zoomLabels) : zoomLabels) * (isActive(p) ? Math.max(0.6, lf) : lf);
         ctx.fillStyle = ink;
       }
+      ctx.globalAlpha *= p.la;
       ctx.fillText(text, px, y + pad);
       // Under the hovered or clicked note: its category, how many links it has, and that a second click opens it.
       if (p === focus && (p.kind !== "tag" || p === chosen)) {
         const sub = [p.kind !== "tag" && p.group, p.kind !== "tag" && t("{n} 条链接", { n: p.deg }), p === chosen && t("再点一次打开")].filter(Boolean).join(" · ");
-        ctx.font = `400 ${fs}px ${font}`;
+        ctx.font = lastFont = `400 ${fs}px ${font}`;
         const sw = ctx.measureText(sub).width + pad * 2, sy = y + h + 1;
         placed.push([px - sw / 2, sy, sw, fs + pad * 2]);
         ctx.globalAlpha = 0.92; ctx.fillStyle = bg;
@@ -542,6 +573,8 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
         ctx.fillText(sub, px, sy + pad);
       }
     }
+
+    shownLabels = nowShown;
 
     // A small x / y / z axis gizmo in the corner shows which way the graph is turned.
     if (!flat || cam.yaw || cam.pitch) {
@@ -569,7 +602,8 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     if (alpha > 0.003) tick();
     const turning = settleCam();
     // Turn slowly (Settings > Auto-rotate), pausing while the user handles the graph and for a few seconds after.
-    const spinning = !flat && S.spin && !drag && !hover && !chosen && !picked && performance.now() - touchedAt > 4000;
+    // Never while the pane is out of sight (a phone's list view, a hidden tab): it would burn battery for nothing.
+    const spinning = !flat && S.spin && onScreen && W > 0 && H > 0 && !document.hidden && !drag && !hover && !chosen && !picked && performance.now() - touchedAt > 4000;
     if (spinning) cam.yaw += 0.0025;
     project();
     // Frame the graph while it settles, or once when asked (a click, a filter, Center) — not all the time, so
@@ -577,7 +611,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     const fitting = !userMoved && (fitPending || alpha > 0.02) && fit();
     if (!fitting && alpha <= 0.02 && W) fitPending = false;
     draw();
-    if (alpha > 0.003 || drag || fitting || turning || spinning) raf = requestAnimationFrame(frame);
+    if (alpha > 0.003 || drag || fitting || turning || spinning || labelsEasing) raf = requestAnimationFrame(frame);
   }
   const kick = () => { if (raf !== -1 && !raf) raf = requestAnimationFrame(frame); };
 
@@ -678,6 +712,9 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     kick();
   });
   ro.observe(host);
+  const io = new IntersectionObserver(([e]) => { onScreen = e.isIntersecting; kick(); });
+  io.observe(canvas);
+  document.addEventListener("visibilitychange", kick);
   const scheme = matchMedia("(prefers-color-scheme: dark)");
   scheme.addEventListener("change", kick);
   kick();
@@ -709,7 +746,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       userMoved = false; fitPending = true; kick();
       return [...core].map((i) => N[i].label);
     },
-    destroy() { cancelAnimationFrame(raf); raf = -1; ro.disconnect(); scheme.removeEventListener("change", kick); },
+    destroy() { cancelAnimationFrame(raf); raf = -1; ro.disconnect(); io.disconnect(); document.removeEventListener("visibilitychange", kick); scheme.removeEventListener("change", kick); },
   };
   return api;
 }
