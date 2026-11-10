@@ -477,13 +477,15 @@ export function mountAgent(api) {
     if (sel.trim()) askAgent(sel); else toggleAgent();
   });
   $("agQuote").querySelector("button").onclick = () => { setQuote(null); input.focus(); };
-  // Links the assistant writes as [title](suiji:ID) open that document.
+  // Links the assistant writes as [title](suiji:ID) open that document. Any other link opens in a new tab:
+  // followed in place it would take the whole app away (a web page, or a path of this site for a relative one).
   $("agLog").addEventListener("click", (e) => {
-    const a = e.target.closest('a[href^="#suiji:"]');
+    const a = e.target.closest("a[href]");
     if (!a) return;
     e.preventDefault();
-    const d = find(a.getAttribute("href").slice(7));
-    if (d) app.open(d.kind, d.id);
+    const href = a.getAttribute("href");
+    if (href.startsWith("#suiji:")) { const d = find(href.slice(7)); if (d) app.open(d.kind, d.id); }
+    else if (/^(https?|mailto):/i.test(href)) window.open(a.href, "_blank", "noopener");
   });
 }
 export const resetAgent = () => app && reset();
