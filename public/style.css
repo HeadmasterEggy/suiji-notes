@@ -488,6 +488,18 @@ textarea {
 .graph-seg { display: flex; padding: 2px; border-radius: 7px; background: color-mix(in srgb, var(--ink) 7%, transparent); }
 .graph-seg button { padding: 2px 9px; border: 0; border-radius: 5px; background: none; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
 .graph-seg button[aria-checked="true"] { background: var(--bg); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
+.graph-forces { max-height: calc(100% - 56px); overflow-y: auto; box-sizing: border-box; }
+.graph-cg { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.graph-cg-empty { margin: 0; color: var(--muted); font-size: 11px; }
+.graph-cg-row { display: flex; align-items: center; gap: 6px; }
+.graph-cg-row input[type="color"] { flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
+.graph-cg-row input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.graph-cg-row input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 50%; }
+.graph-cg-row input[type="text"] { flex: 1; min-width: 0; padding: 3px 7px; border: 1px solid var(--line, color-mix(in srgb, var(--ink) 14%, transparent)); border-radius: 6px; background: none; color: var(--ink); font: inherit; font-size: 12px; outline: none; }
+.graph-cg-row input[type="text"]:focus { border-color: color-mix(in srgb, var(--ink) 40%, transparent); }
+.graph-cg-row button { flex: none; padding: 0 6px; font-size: 14px; color: var(--muted); }
+.graph-legend.has-cg > div:nth-child(2) { padding-bottom: 3px; margin-bottom: 3px; border-bottom: 1px solid color-mix(in srgb, var(--ink) 10%, transparent); }
+.graph-legend.folded > div:nth-child(2) { display: none; }
 .graph-unpin { display: block; width: 100%; margin-top: 12px; padding: 4px 8px; font-size: 11px; color: var(--muted); text-align: center; }
 .graph-empty { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: var(--muted); pointer-events: none; }
 /* How each style draws the graph (read by graph.js). */

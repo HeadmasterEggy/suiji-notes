@@ -58,7 +58,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   }
   const AXIS = { x: "#e5484d", y: "#30a46c", z: "#3e63dd" };
   // Size grows with links but is capped, so one hub note does not cover its neighbours.
-  const S = { local: false, depth: 1, size: "links", spin: false };
+  const S = { local: false, depth: 1, size: "links", spin: false, arrows: false, orphans: true };
   try { Object.assign(S, JSON.parse(localStorage.getItem("suiji:graphView")) || {}); } catch {}
   const saveS = () => { try { localStorage.setItem("suiji:graphView", JSON.stringify(S)); } catch {} };
   const maxLen = Math.max(1, ...N.map((n) => n.len || 0));
@@ -75,6 +75,22 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   const slot = new Map(groups.slice(0, PALETTE.length).map(([g], i) => [g, i]));
   for (const n of N) n.slot = slot.has(n.group) ? slot.get(n.group) : -1;
   let palette = PALETTE;
+
+  // Colour groups of the user's own (like Obsidian's): a query and a colour; the first group a note matches
+  // colours it, over its category. "#tag" matches a tag, "path:folder" a folder, anything else the name or path.
+  // Kept per device as "suiji:graphColors".
+  let CG = [];
+  try { CG = (JSON.parse(localStorage.getItem("suiji:graphColors")) || []).filter((g) => g && typeof g.q === "string" && typeof g.c === "string"); } catch {}
+  const saveCG = () => { try { localStorage.setItem("suiji:graphColors", JSON.stringify(CG)); } catch {} };
+  function matches(n, q) {
+    q = q.trim().toLowerCase();
+    if (!q || n.kind === "tag") return false;
+    if (q.startsWith("#")) { const tag = q.slice(1); return !!tag && (n.tags || []).some((x) => String(x).toLowerCase() === tag || String(x).toLowerCase().startsWith(tag + "/")); }
+    if (q.startsWith("path:")) return (n.path || "").toLowerCase().includes(q.slice(5).trim());
+    return n.label.toLowerCase().includes(q) || (n.path || "").toLowerCase().includes(q);
+  }
+  const recolour = () => { for (const n of N) n.cg = CG.findIndex((g) => matches(n, g.q)); };
+  recolour();
 
   // Legend: one row per coloured group (plus "other"). Click the name to light that group up (again to
   // clear); the checkbox shows or hides it; "only" hides all the others.
@@ -129,10 +145,32 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     };
     legend.append(row);
   }
+  // The user's colour groups head the legend: click one to light its notes up.
+  const cgList = document.createElement("div");
+  legendHead.after(cgList);
+  function syncCGLegend() {
+    cgList.replaceChildren();
+    CG.forEach((g, gi) => {
+      if (!g.q.trim()) return;
+      const row = document.createElement("div");
+      row.className = "graph-legend-row";
+      row.innerHTML = `<span class="box"><i></i></span><button type="button" class="name"><span></span><em></em></button>`;
+      row.querySelector("i").style.background = g.c;
+      row.querySelector(".name span").textContent = g.q.trim();
+      row.querySelector("em").textContent = N.filter((n) => n.cg === gi).length;
+      row.querySelector(".name").onclick = () => api.focus((n) => n.cg === gi);
+      cgList.append(row);
+    });
+    legend.classList.toggle("has-cg", cgList.childElementCount > 0);
+    if ((rows.length > 1 || cgList.childElementCount) && !legend.isConnected) host.append(legend);
+  }
+
   // Which nodes and links are in play: those of shown groups, and tags still linked to one of them.
   let shown = N, shownE = E, localKey = "";
   function applyHidden() {
     for (const n of N) n.hidden = n.kind !== "tag" && off.has(keyOf(n));
+    // Orphans switched off: notes without a single link to another note.
+    if (!S.orphans) for (const n of N) if (n.kind !== "tag" && ![...n.nb].some((j) => N[j].kind !== "tag")) n.hidden = true;
     for (const n of N) if (n.kind === "tag") n.hidden = ![...n.nb].some((j) => N[j].kind !== "tag" && !N[j].hidden);
     // Local graph: walk out from the open notes, S.depth links deep; everything farther is left out.
     const centres = S.local ? N.filter((n) => !n.hidden && isActive(n)) : [];
@@ -162,8 +200,9 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     onHide?.([...off]);
     alpha = Math.max(alpha, 0.6); userMoved = false; fitPending = true; kick();
   }
-  if (rows.length > 1) {
-    host.append(legend);
+  syncCGLegend();
+  if (rows.length > 1 || cgList.childElementCount) {
+    if (!legend.isConnected) host.append(legend);
     // Folded by default where it would cover much of a small pane (phones); then as the user left it.
     setFold(folded === null ? host.getBoundingClientRect().width < 560 || matchMedia("(max-width: 700px)").matches : folded === "1", false);
   }
@@ -182,6 +221,25 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   // Nodes picked from outside (the assistant): they and their neighbours stay lit and the view frames them.
   let picked = null;   // { core: Set of node indices, near: core plus neighbours }
   applyHidden(); syncLegend();
+
+  // The camera is kept per device ("suiji:graphCam"), so the graph opens turned and zoomed the way it was
+  // left. Only a view the user moved by hand is put back exactly; otherwise just the angle, and it frames itself.
+  try {
+    const sv = JSON.parse(localStorage.getItem("suiji:graphCam"));
+    if (sv && !!sv.flat === flat && [sv.yaw, sv.pitch, sv.k, ...(sv.c || [])].every(Number.isFinite)) {
+      if (!flat) { cam.yaw = sv.yaw; cam.pitch = sv.pitch; }
+      if (sv.manual && sv.c?.length === 3) { view.k = sv.k; [cam.cx, cam.cy, cam.cz] = sv.c; userMoved = true; fitPending = false; }
+    }
+  } catch {}
+  let camSaved = "", camTimer = 0;
+  function saveCam() {
+    const r = (v) => Math.round(v * 1000) / 1000;
+    const sv = JSON.stringify({ flat, yaw: r(cam.yaw), pitch: r(cam.pitch), k: r(view.k), c: [r(cam.cx), r(cam.cy), r(cam.cz)], manual: userMoved });
+    if (sv === camSaved) return;
+    camSaved = sv;
+    clearTimeout(camTimer);
+    camTimer = setTimeout(() => { try { localStorage.setItem("suiji:graphCam", sv); } catch {} }, 400);
+  }
 
   // ---------- search ----------
   // Lights up the notes whose name contains the text and frames them; Enter opens the first, Esc clears.
@@ -260,6 +318,48 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   }
   panel.append(sizeRow);
   sw(t("自动旋转"), S.spin, (on) => { S.spin = on; saveS(); kick(); });
+  sw(t("箭头"), S.arrows, (on) => { S.arrows = on; saveS(); kick(); }).title = t("在连线上画箭头，指向被链接的笔记");
+  sw(t("孤立笔记"), S.orphans, (on) => { S.orphans = on; saveS(); relayout(); }).title = t("显示没有任何链接的笔记");
+
+  // Colour groups: one row each (colour, query, remove), and a button for a new one.
+  const cgHead = document.createElement("div");
+  cgHead.className = "graph-forces-head gap";
+  cgHead.innerHTML = `<b></b><button type="button" class="ghost small"></button>`;
+  cgHead.querySelector("b").textContent = t("颜色组");
+  const cgAdd = cgHead.querySelector("button");
+  cgAdd.textContent = t("新建");
+  const cgBox = document.createElement("div");
+  cgBox.className = "graph-cg";
+  panel.append(cgHead, cgBox);
+  const cgChanged = () => { saveCG(); recolour(); syncCGLegend(); kick(); };
+  function cgRender() {
+    cgBox.replaceChildren();
+    if (!CG.length) {
+      const p = document.createElement("p");
+      p.className = "graph-cg-empty"; p.textContent = t("用标签、文件夹或名字给笔记上色");
+      cgBox.append(p);
+    }
+    CG.forEach((g) => {
+      const row = document.createElement("div");
+      row.className = "graph-cg-row";
+      row.innerHTML = `<input type="color"><input type="text" spellcheck="false"><button type="button" class="ghost small">×</button>`;
+      const [col, q] = row.querySelectorAll("input");
+      col.value = g.c; q.value = g.q; q.placeholder = t("#标签、path:文件夹 或名字");
+      col.setAttribute("aria-label", t("颜色")); q.setAttribute("aria-label", t("颜色组"));
+      col.oninput = () => { g.c = col.value; cgChanged(); };
+      q.oninput = () => { g.q = q.value; cgChanged(); };
+      row.querySelector("button").onclick = () => { CG.splice(CG.indexOf(g), 1); cgChanged(); cgRender(); };
+      row.querySelector("button").title = t("删除");
+      cgBox.append(row);
+    });
+  }
+  cgAdd.onclick = () => {
+    const used = new Set(CG.map((g) => g.c));
+    const c = ["#d6409f", "#0090ff", "#f76b15", "#12a594", "#8e4ec6", "#ffc53d", "#30a46c", "#e5484d"].find((x) => !used.has(x)) || "#d6409f";
+    CG.push({ q: "", c }); cgChanged(); cgRender();
+    cgBox.querySelector(".graph-cg-row:last-child input[type=text]")?.focus();
+  };
+  cgRender();
   head.classList.add("gap");
   panel.append(head);
   const inputs = {};
@@ -421,7 +521,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     const node = v("--g-node") || muted, edge = v("--g-edge") || muted, ew = +v("--g-edge-w") || 1;
     const pal = v("--g-palette");
     palette = pal && pal.includes(",") ? pal.split(",").map((c) => c.trim()).filter(Boolean) : PALETTE;   // "initial" (terminal, light) means the usual colours
-    const colour = (p) => p.slot >= 0 && palette.length ? palette[p.slot % palette.length] : node;
+    const colour = (p) => p.cg >= 0 ? CG[p.cg].c : p.slot >= 0 && palette.length ? palette[p.slot % palette.length] : node;
     for (const r of rows) r.el.querySelector("i").style.background = r.g === null ? node : palette[slot.get(r.g) % palette.length];
     const glow = +v("--g-glow") || 0, square = v("--g-shape") === "square", outline = v("--g-outline");
     const dot = (x, y, r) => { ctx.beginPath(); if (square) ctx.rect(x - r, y - r, r * 2, r * 2); else ctx.arc(x, y, r, 0, Math.PI * 2); };
@@ -437,6 +537,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     // (a floor and two walls, like the corner of a room), each faintly tinted with its axis colour, and every
     // note casts a shadow on the floor. Turning the graph swaps in whichever sides are behind it.
     let floorY = null;
+    room = null;
     if (!flat && shown.length > 1) {
       let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
       for (const p of shown) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); }
@@ -470,6 +571,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
         }
         ctx.stroke();
       }
+      room = { c, half, walls };
       // Shadows on the floor (or the ceiling, seen from below).
       const fl = walls[1];
       floorY = fl.v;
@@ -498,6 +600,13 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       const m = (N[e[0]].s + N[e[1]].s) / 2;
       bands[Math.min(BANDS - 1, Math.floor(((m - s0) / span) * BANDS))].push(e);
     }
+    // Arrowheads (Settings > Arrows) point at the note being linked to, just outside its dot.
+    const arrow = (from, to, size) => {
+      const dx = X(to) - X(from), dy = Y(to) - Y(from), len = Math.hypot(dx, dy), r = radius(to) * k * to.s + 1.5;
+      if (len < r + size * 2) return;
+      const ux = dx / len, uy = dy / len, tx = X(to) - ux * r, ty = Y(to) - uy * r, bx = tx - ux * size, by = ty - uy * size;
+      ctx.moveTo(tx, ty); ctx.lineTo(bx - uy * size * 0.55, by + ux * size * 0.55); ctx.lineTo(bx + uy * size * 0.55, by - ux * size * 0.55); ctx.closePath();
+    };
     bands.forEach((band, bi) => {
       if (!band.length) return;
       const m = s0 + span * (bi + 0.5) / BANDS, F = focal(), d = F / m - F;   // the band's middle scale, and its depth
@@ -506,6 +615,13 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       ctx.beginPath();
       for (const [a, b] of band) { ctx.moveTo(X(N[a]), Y(N[a])); ctx.lineTo(X(N[b]), Y(N[b])); }
       ctx.stroke();
+      if (S.arrows) {
+        const size = Math.max(3, Math.min(7, 5 * m * Math.sqrt(k))) * Math.max(1, ew * 0.7);
+        ctx.fillStyle = edge; ctx.globalAlpha = Math.min(1, ctx.globalAlpha * 1.6);
+        ctx.beginPath();
+        for (const [a, b, dir] of band) { if (dir & 1) arrow(N[a], N[b], size); if (dir & 2) arrow(N[b], N[a], size); }
+        ctx.fill();
+      }
     });
     if (focus) {
       // A hub has hundreds of links; drawing them all solid turns into a white burst.
@@ -513,6 +629,14 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       ctx.strokeStyle = ink; ctx.lineWidth = 1.2 * ew;
       ctx.beginPath();
       for (const j of focus.nb) if (!N[j].hidden) { ctx.moveTo(X(focus), Y(focus)); ctx.lineTo(X(N[j]), Y(N[j])); }
+      if (S.arrows) {
+        ctx.stroke(); ctx.fillStyle = ink; ctx.beginPath();
+        for (const [a, b, dir] of shownE) {
+          if (a !== focus.i && b !== focus.i) continue;
+          if (dir & 1) arrow(N[a], N[b], 6); if (dir & 2) arrow(N[b], N[a], 6);
+        }
+        ctx.fill(); ctx.beginPath();
+      }
       ctx.stroke();
     }
     if (sel) {
@@ -639,10 +763,26 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
         ctx.beginPath(); ctx.moveTo(a[0] * k, a[1] * k); ctx.lineTo(b[0] * k, b[1] * k); ctx.stroke();
         ctx.fillStyle = AXIS[ax]; ctx.fillText(ax, b[0] * k + (b[0] - a[0]) * k * 0.06, b[1] * k + (b[1] - a[1]) * k * 0.06);
       }
-      if (floorY !== null) {
-        const f = proj(n.x, floorY, n.z);
-        ctx.globalAlpha = 0.5; ctx.strokeStyle = ink; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
-        ctx.beginPath(); ctx.moveTo(c0[0], c0[1]); ctx.lineTo(f[0] * k, f[1] * k); ctx.stroke(); ctx.setLineDash([]);
+      // Its shadow on the floor and on both walls, each tied to it by a dashed line and crossed by two guide
+      // lines across that side: where it sits along all three axes, at a glance.
+      if (room) {
+        const AX = [AXIS.x, AXIS.y, AXIS.z], P = [n.x, n.y, n.z];
+        for (const wl of room.walls) {
+          if (wl.fade < 0.15) continue;
+          const at3 = (a, v, b, u) => { const q = [...P]; q[wl.a] = wl.v; if (b !== undefined) q[b] = u; return proj(q[0], q[1], q[2]); };
+          const s = at3();
+          ctx.strokeStyle = AX[wl.a]; ctx.lineWidth = 1;
+          ctx.globalAlpha = 0.35 * wl.fade; ctx.beginPath();
+          for (const o of wl.o) {
+            const p0 = at3(0, 0, o, room.c[o] - room.half), p1 = at3(0, 0, o, room.c[o] + room.half);
+            ctx.moveTo(p0[0] * k, p0[1] * k); ctx.lineTo(p1[0] * k, p1[1] * k);
+          }
+          ctx.stroke();
+          ctx.globalAlpha = 0.7 * wl.fade; ctx.setLineDash([3, 3]);
+          ctx.beginPath(); ctx.moveTo(c0[0], c0[1]); ctx.lineTo(s[0] * k, s[1] * k); ctx.stroke(); ctx.setLineDash([]);
+          ctx.fillStyle = AX[wl.a]; ctx.globalAlpha = 0.85 * wl.fade;
+          ctx.beginPath(); ctx.arc(s[0] * k, s[1] * k, Math.max(2.5, radius(n) * k * s[3] * 0.8), 0, Math.PI * 2); ctx.fill();
+        }
       }
       const r = (v) => Math.round(v);
       const lines = [`x ${r(n.x)}   y ${r(-n.y)}${flat ? "" : `   z ${r(n.z)}`}`, flat ? t("按住 X / Y 只沿一个方向") : t("按住 X / Y / Z 只沿一个方向 · 滚轮前后移动")];
@@ -689,8 +829,10 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const touch = matchMedia("(pointer: coarse)").matches;
-      const hint = flat ? (touch ? t("单指拖动平移 · 双指缩放") : t("拖动平移 · 滚轮缩放"))
-        : touch ? t("单指拖动旋转 · 双指平移和缩放") : t("拖动旋转 · 右键拖动平移 · 滚轮缩放 · 点 x / y / z 正对该轴");
+      const hint = flat ? (touch ? t("单指拖动平移 · 双指缩放") : sawPad ? t("双指滑动或拖动平移 · 捏合缩放") : t("拖动平移 · 滚轮缩放"))
+        : touch ? t("单指拖动旋转 · 双指平移和缩放")
+        : sawPad ? t("双指滑动或拖动旋转 · Shift + 双指平移 · 捏合缩放 · 点 x / y / z 正对该轴")
+        : t("拖动旋转 · 右键拖动平移 · 滚轮缩放 · 点 x / y / z 正对该轴");
       ctx.font = lastFont = `400 11px ${font}`; ctx.textAlign = "left"; ctx.textBaseline = "middle";
       const hx = gizmo ? 72 : 12, room = W - hx - Math.min(W * 0.46, 200) - 16;
       if (ctx.measureText(hint).width <= room) { ctx.globalAlpha = 0.6; ctx.fillStyle = muted; ctx.fillText(hint, hx, H - 16); }
@@ -711,6 +853,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     // turning it never makes the zoom pump. A pane that was hidden (phone list view) has no size until shown.
     const fitting = !userMoved && (fitPending || alpha > 0.02) && fit();
     if (!fitting && alpha <= 0.02 && W) fitPending = false;
+    if (W) saveCam();
     draw();
     if (alpha > 0.003 || drag || fitting || turning || spinning || labelsEasing) raf = requestAnimationFrame(frame);
   }
@@ -729,7 +872,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     return best;
   }
   const pointers = new Map();
-  let drag = null, pinch = null, gizmo = null, gizmoHover = null;
+  let drag = null, pinch = null, gizmo = null, gizmoHover = null, room = null;
   // The corner axes: a letter looks straight along that axis (again: from the other side); the middle goes back to the usual view.
   function gizmoAt([px, py]) {
     if (!gizmo || flat) return null;
@@ -843,6 +986,8 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   window.addEventListener("keydown", onKey);
   window.addEventListener("keyup", onKey);
   canvas.addEventListener("pointerleave", () => { if (!drag && (hover || gizmoHover)) { hover = null; gizmoHover = null; kick(); } });
+  let wheelAt = 0, wheelPad = null, sawPad = false;
+  try { sawPad = localStorage.getItem("suiji:graphPad") === "1"; } catch {}
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
     if (drag?.node && !flat) {   // while holding a note: the wheel pushes it away or pulls it closer
@@ -850,8 +995,22 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       [n.x, n.y, n.z] = unproject(drag.last, d);
       drag.moved = true; alpha = Math.max(alpha, 0.25); kick(); return;
     }
-    zoomAt([W / 2, H / 2], Math.min(6, Math.max(0.1, view.k * Math.exp(-e.deltaY * 0.0015))));
-    userMoved = true; touchedAt = performance.now(); kick();
+    // A trackpad: pinching (sent as a wheel with ctrl) zooms; two fingers turn the graph (move it in 2D, or
+    // with shift). A mouse wheel zooms. Which one it is gets decided once per gesture, so it cannot flip midway.
+    const now = performance.now(), zoomBy = (f) => zoomAt([W / 2, H / 2], Math.min(6, Math.max(0.1, view.k * f)));
+    if (now - wheelAt > 250) wheelPad = null;
+    wheelAt = now;
+    if (e.ctrlKey) zoomBy(Math.exp(-e.deltaY * 0.01));
+    else {
+      if (wheelPad === null) wheelPad = e.deltaMode === 0 && (e.deltaX !== 0 || (!!e.wheelDeltaY && e.wheelDeltaY === -3 * e.deltaY));
+      if (!wheelPad) zoomBy(Math.exp(-e.deltaY * 0.0015));
+      else {
+        if (!sawPad) { sawPad = true; try { localStorage.setItem("suiji:graphPad", "1"); } catch {} }
+        if (flat || e.shiftKey) panBy(-e.deltaX, -e.deltaY);
+        else { camGoal = null; cam.yaw += e.deltaX * 0.006; cam.pitch = Math.max(-1.5, Math.min(1.5, cam.pitch - e.deltaY * 0.006)); }
+      }
+    }
+    userMoved = true; touchedAt = now; kick();
   }, { passive: false });
 
   const ro = new ResizeObserver(() => {
@@ -896,7 +1055,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       userMoved = false; fitPending = true; kick();
       return [...core].map((i) => N[i].label);
     },
-    destroy() { cancelAnimationFrame(raf); raf = -1; ro.disconnect(); io.disconnect(); document.removeEventListener("visibilitychange", kick); window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKey); scheme.removeEventListener("change", kick); },
+    destroy() { clearTimeout(camTimer); try { if (camSaved) localStorage.setItem("suiji:graphCam", camSaved); } catch {} cancelAnimationFrame(raf); raf = -1; ro.disconnect(); io.disconnect(); document.removeEventListener("visibilitychange", kick); window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKey); scheme.removeEventListener("change", kick); },
   };
   return api;
 }

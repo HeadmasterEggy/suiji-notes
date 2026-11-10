@@ -1452,7 +1452,7 @@ mountAgent({
 // Nodes: Markdown files and notes (plus tags when switched on). Edges: [[links]] and relative .md links,
 // resolved the way Obsidian does: relative to the file, then from the vault root, then by unique file name.
 function graphData(withTags) {
-  const nodes = [], edges = new Set(), idx = new Map();
+  const nodes = [], edges = new Map(), idx = new Map();
   const add = (key, node) => { if (!idx.has(key)) { idx.set(key, nodes.length); nodes.push(node); } return idx.get(key); };
   const md = files.filter(isMarkdown);
   // Category (the node's colour): the first folder level where files part ways, so a single synced vault
@@ -1463,22 +1463,28 @@ function graphData(withTags) {
   // split, or every note ends up in one category: it is named after the shared folder instead.
   while (dirs.length && dirs.every((d) => d.length > depth && d[depth] === dirs[0][depth])) depth++;
   // len: rough length in characters for "node size by length" (UTF-8 bytes; CJK text is about 3 a character).
-  md.forEach((f, k) => add("file:" + f.id, { label: stripMd(baseName(f.name)), kind: "file", ref: f.id, group: dirs[k][depth] || dirs[k][depth - 1] || t("未分类"), len: (f.size || 0) / 2 }));
+  md.forEach((f, k) => add("file:" + f.id, { label: stripMd(baseName(f.name)), kind: "file", ref: f.id, group: dirs[k][depth] || dirs[k][depth - 1] || t("未分类"), len: (f.size || 0) / 2, tags: f.tags || [], path: fullPath(f).join("/") }));
   const find = linkResolver(md);
   const resolve = (dir, target) => { const f = find(dir, target); return f ? idx.get("file:" + f.id) : undefined; };
-  const link = (a, b) => { if (b !== undefined && a !== b) edges.add(a < b ? a + "," + b : b + "," + a); };
+  // One edge per pair; its third value says which way the links run (1: low index to high, 2: back, 3: both,
+  // 0: a tag), for the arrows.
+  const link = (a, b, dir = true) => {
+    if (b === undefined || a === b) return;
+    const key = a < b ? a + "," + b : b + "," + a;
+    edges.set(key, (edges.get(key) || 0) | (!dir ? 0 : a < b ? 1 : 2));
+  };
   for (const f of md) {
     const i = idx.get("file:" + f.id), dir = f.name.split("/").slice(0, -1);
     for (const l of f.links || []) link(i, resolve(dir, l));
-    if (withTags) for (const t of f.tags || []) link(i, add("tag:" + t, { label: "#" + t, kind: "tag", ref: t }));
+    if (withTags) for (const t of f.tags || []) link(i, add("tag:" + t, { label: "#" + t, kind: "tag", ref: t }), false);
   }
   for (const n of visible()) {
-    const i = add("note:" + n.id, { label: titleOf(n.body), kind: "note", ref: n.id, group: t("随手记"), len: n.body.length });
     const meta = mdMeta(n.body);
+    const i = add("note:" + n.id, { label: titleOf(n.body), kind: "note", ref: n.id, group: t("随手记"), len: n.body.length, tags: meta.tags, path: "" });
     for (const l of meta.links) link(i, resolve([], l));
-    if (withTags) for (const t of meta.tags) link(i, add("tag:" + t, { label: "#" + t, kind: "tag", ref: t }));
+    if (withTags) for (const t of meta.tags) link(i, add("tag:" + t, { label: "#" + t, kind: "tag", ref: t }), false);
   }
-  return { nodes, edges: [...edges].map((e) => e.split(",").map(Number)) };
+  return { nodes, edges: [...edges].map(([e, dir]) => [...e.split(",").map(Number), dir]) };
 }
 
 function graphKey(p) {
