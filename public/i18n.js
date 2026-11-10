@@ -298,6 +298,7 @@ const EN = {
   "[图片：{name}]": "[image: {name}]",
   "没有找到这篇笔记": "Note not found",
   "没有找到这个文件": "File not found",
+  "点击关闭": "Click to dismiss",
   "文件": "file",
   "读取失败": "Couldn't read it",
   "离线，这个文件还没缓存过": "Offline, and this file isn't cached yet",

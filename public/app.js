@@ -144,8 +144,8 @@ function load() {
   catch { store = { notes: {} }; }
 }
 function persist() {
-  try { localStorage.setItem(storeKey(), JSON.stringify(store)); }
-  catch { showNote(t("本机存储已满，最新改动可能只在内存里，请保持联网让它同步。"), "err"); }
+  try { localStorage.setItem(storeKey(), JSON.stringify(store)); clearNote("store"); }
+  catch { showNote(t("本机存储已满，最新改动可能只在内存里，请保持联网让它同步。"), "err", "store"); }
 }
 const visible = () => Object.values(store.notes).filter((n) => !n.deleted)
   .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
@@ -161,7 +161,18 @@ function merge(row) {
 // ---------- sync ----------
 let syncing = false, again = false, channel = null;
 function setSync(state, text) { $("sync").dataset.s = state; $("syncText").textContent = text; }
-function showNote(text, kind) { const n = $("note"); n.hidden = !text; n.textContent = text || ""; n.dataset.kind = kind || ""; }
+// The line under the search box. Each message names its source, and a source clears only its own message, so
+// one part of the app doing fine (a sync) no longer hides another's problem (storage full, a failed upload).
+// A click dismisses it; a message that isn't an error goes by itself after a while.
+let noteTimer = 0;
+function showNote(text, kind, src = "") {
+  const n = $("note");
+  clearTimeout(noteTimer);
+  n.hidden = !text; n.textContent = text || ""; n.dataset.kind = kind || ""; n.dataset.src = src; n.title = text ? t("点击关闭") : "";
+  if (text && kind !== "err") noteTimer = setTimeout(() => clearNote(src), 8000);
+}
+function clearNote(src) { if (!$("note").hidden && $("note").dataset.src === src) showNote(""); }
+$("note").onclick = () => showNote("");
 
 async function sync() {
   if (!uid) return;
@@ -187,11 +198,11 @@ async function sync() {
     if (changed) render();
     else renderList();
     setSync("ok", t("已同步"));
-    showNote(filesErr ? t("没能载入文件列表，几秒后会自动重试。") : "", "err");
+    if (filesErr) showNote(t("没能载入文件列表，几秒后会自动重试。"), "err", "files"); else clearNote("sync");
   } catch (e) {
     console.error(e);
     setSync("err", t("同步失败"));
-    showNote(t("没能同步到云端，改动已保存在本机，联网后会自动重试。"), "err");
+    showNote(t("没能同步到云端，改动已保存在本机，联网后会自动重试。"), "err", "sync");
   } finally {
     syncing = false;
     if (again) { again = false; sync(); }
@@ -234,12 +245,12 @@ async function loadFiles() {
     // With no list yet, say so instead of loading forever, and try again shortly.
     if (!filesLoaded) {
       filesErr = true; renderList();
-      showNote(t("没能载入文件列表，几秒后会自动重试。"), "err");
+      showNote(t("没能载入文件列表，几秒后会自动重试。"), "err", "files");
       filesRetry = setTimeout(loadFiles, 5000);
     }
     return;
   }
-  if (filesErr) { filesErr = false; showNote(""); }
+  if (filesErr) { filesErr = false; clearNote("files"); }
   const before = new Map(files.map((f) => [f.id, versionOf(f)]));
   for (const f of data) if (before.has(f.id) && before.get(f.id) !== versionOf(f)) forgetUrls(f.path);
   // Only Markdown documents are shown; any other file in the account stays in the cloud, untouched and hidden.
@@ -262,9 +273,9 @@ async function uploadFiles(input) {
   const picked = [...input].filter((f) => !baseName(f.webkitRelativePath || f.name).startsWith("."));
   // Only Markdown documents are uploaded; anything else picked (or inside a picked folder) is left out.
   const all = picked.filter((f) => isMarkdown({ name: f.name, mime: f.type || "" }));
-  if (picked.length > all.length) showNote(t("只支持 Markdown（.md）文档，跳过了 {n} 个其他文件。", { n: picked.length - all.length }), all.length ? "" : "err");
+  if (picked.length > all.length) showNote(t("只支持 Markdown（.md）文档，跳过了 {n} 个其他文件。", { n: picked.length - all.length }), all.length ? "" : "err", "upload");
   const tooBig = all.filter((f) => f.size > MAX_FILE);
-  if (tooBig.length) showNote(t("{names} 超过 50 MB，没有上传。", { names: tooBig.map((f) => f.name).join(lang === "en" ? ", " : "、") }), "err");
+  if (tooBig.length) showNote(t("{names} 超过 50 MB，没有上传。", { names: tooBig.map((f) => f.name).join(lang === "en" ? ", " : "、") }), "err", "upload");
   const ok = all.filter((f) => f.size <= MAX_FILE);
   uploading += ok.length;
   for (const file of ok) {
@@ -280,7 +291,7 @@ async function uploadFiles(input) {
       if (ins.error) { await sb.storage.from("files").remove([path]); throw ins.error; }
     } catch (e) {
       console.error(e);
-      showNote(t("「{name}」上传失败：{msg}。", { name: file.name, msg: e.message || t("网络问题") }), "err");
+      showNote(t("「{name}」上传失败：{msg}。", { name: file.name, msg: e.message || t("网络问题") }), "err", "upload");
     } finally {
       uploading--;
     }
@@ -1041,9 +1052,12 @@ function folderKeys() {
   walk(buildTree(), []);
   return keys;
 }
+// Whether a folder the sidebar shows at its top level is open. Not expanded.size: it also remembers folders
+// that have since gone, or sit inside a closed one, and then the button offered to fold with nothing open.
+const anyOpen = () => (expanded.has(NOTES_KEY) && visible().length > 0) || [...buildTree().dirs.keys()].some((k) => expanded.has(k));
 function showCounts() {
   $("counts").textContent = t("{files} 个文件 · {folders} 个文件夹", { files: files.length, folders: folderKeys().length });
-  const label = expanded.size ? t("全部折叠") : t("全部展开");
+  const label = anyOpen() ? t("全部折叠") : t("全部展开");
   $("foldBtn").title = label; $("foldBtn").setAttribute("aria-label", label);
 }
 
@@ -1277,7 +1291,7 @@ function makePane(item) {
     else { const s = await sb.storage.from("files").createSignedUrl(f.path, 60);
       if (!s.error) try { const r = await fetch(s.data.signedUrl + "&t=" + Date.now(), { cache: "no-store" }); if (r.ok) text = await r.text(); } catch {} }
     p.edit.disabled = false; editLabel(p, t("编辑"), false);
-    if (text === null) { showNote(t("读取文件失败，请检查网络。"), "err"); return; }
+    if (text === null) { showNote(t("读取文件失败，请检查网络。"), "err", "file"); return; }
     p.fileBase = text;
     p.ta.value = p.fileBase; p.fileEdit = true; p.editing = false;
     renderPane(p);
@@ -1363,12 +1377,12 @@ async function saveFile(p) {
   setSync("saving", t("保存中…"));
   try { await writeFileText(f, text); } catch (e) {
     p.editing = true;   // keep it unsaved so the next edit or blur retries
-    setSync("err", t("保存失败")); showNote(e.message, "err");
+    setSync("err", t("保存失败")); showNote(e.message, "err", "file");
     return;
   }
   p.fileBase = text;
   p.shown = local.localPath(f) ? null : versionOf(f);   // the preview refreshes when editing ends, not now
-  setSync("ok", t("已同步")); showNote("");
+  setSync("ok", t("已同步")); clearNote("file");
   if (!p.fileEdit) renderPane(p);
 }
 
@@ -1888,7 +1902,7 @@ $("graphBtn").onclick = () => {
   openIn(focused, "graph", "all");
 };
 $("foldBtn").onclick = () => {
-  expanded = new Set(expanded.size ? [] : [NOTES_KEY, ...folderKeys()]);
+  expanded = new Set(anyOpen() ? [] : [NOTES_KEY, ...folderKeys()]);
   saveExpanded(); renderList();
 };
 // Phones: the sidebar is a drawer. A tap beside it, Escape or a swipe to the left closes it; a swipe in
@@ -2010,7 +2024,7 @@ function restyled() {
       rm.type = "button"; rm.className = "ghost bordered small"; rm.textContent = t("停止同步");
       const show = document.createElement("button");
       show.type = "button"; show.className = "ghost bordered small"; show.textContent = t("在 Finder 中显示");
-      show.onclick = () => local.macOp("reveal", { path: root }).catch((e) => showNote(e.message || String(e), "err"));
+      show.onclick = () => local.macOp("reveal", { path: root }).catch((e) => showNote(e.message || String(e), "err", "mac"));
       rm.onclick = async () => {
         if (!confirm(t("停止同步「{name}」？云端已有的文件会保留。", { name: root.split("/").pop() }))) return;
         await local.removeFolder(root); fillLocal();
