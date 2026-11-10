@@ -541,7 +541,10 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     if (!flat && shown.length > 1) {
       let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
       for (const p of shown) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); }
-      const c = [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2], half = Math.max(x1 - x0, y1 - y0, z1 - z0) / 2 + 40, step = half / 4;
+      // While a note is dragged the box stays put, or its walls would slide along with the note and the
+      // guides on them would show nothing.
+      if (!(drag?.node && drag.moved && roomBox)) roomBox = { c: [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2], half: Math.max(x1 - x0, y1 - y0, z1 - z0) / 2 + 40 };
+      const { c, half } = roomBox, step = half / 4;
       const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw), cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
       // How squarely each axis points at the viewer (1: straight on, 0: edge-on).
       const facing = [Math.abs(-sy * cp), Math.abs(sp), Math.abs(cy * cp)];
@@ -735,7 +738,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       ctx.fillText(text, px, y + pad);
       // Under the hovered or clicked note: its category, how many links it has, and that a second click opens it.
       if (p === focus && (p.kind !== "tag" || p === chosen)) {
-        const sub = [p.kind !== "tag" && p.group, p.kind !== "tag" && t("{n} 条链接", { n: p.deg }), p === chosen && t("再点一次打开"), p.pin && t("已固定，右键取消")].filter(Boolean).join(" · ");
+        const sub = [p.kind !== "tag" && p.group, p.kind !== "tag" && t("{n} 条链接", { n: p.deg }), p === chosen && t("再点一次打开"), p.pin && (matchMedia("(pointer: coarse)").matches ? t("已固定，长按取消") : t("已固定，右键取消"))].filter(Boolean).join(" · ");
         ctx.font = lastFont = `400 ${fs}px ${font}`;
         const sw = ctx.measureText(sub).width + pad * 2, sy = y + h + 1;
         placed.push([px - sw / 2, sy, sw, fs + pad * 2]);
@@ -825,6 +828,14 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       if (gizmoHover === "home") { ctx.globalAlpha = 0.25; ctx.fillStyle = ink; ctx.beginPath(); ctx.arc(ox, oy, 5, 0, Math.PI * 2); ctx.fill(); }
     } else gizmo = null;
 
+    // Nothing left to show (every category hidden, or a local graph with nothing open): say so, not a blank pane.
+    if (!shown.length && N.length) {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.font = lastFont = `400 13px ${font}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.globalAlpha = 0.8; ctx.fillStyle = muted;
+      ctx.fillText(off.size ? t("所有分类都隐藏了，在右下角重新打开") : S.local ? t("局部图谱：先在旁边的窗格打开一篇笔记") : t("没有可显示的笔记"), W / 2, H / 2);
+    }
+
     // How to move around, in one quiet line at the bottom left (beside the axes in 3D).
     {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -872,7 +883,8 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     return best;
   }
   const pointers = new Map();
-  let drag = null, pinch = null, gizmo = null, gizmoHover = null, room = null;
+  let pressTimer = 0;
+  let drag = null, pinch = null, gizmo = null, gizmoHover = null, room = null, roomBox = null;
   // The corner axes: a letter looks straight along that axis (again: from the other side); the middle goes back to the usual view.
   function gizmoAt([px, py]) {
     if (!gizmo || flat) return null;
@@ -907,6 +919,13 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     const pan = flat || e.shiftKey || e.button === 1 || (e.button === 2 && !node);
     drag = { node, pan, start: pt, last: pt, vx: view.x, vy: view.y, moved: false };
     if (node) { node.fixed = true; canvas.style.cursor = "grabbing"; }
+    // No right button on a touch screen: holding a pinned note still for a moment releases it instead.
+    clearTimeout(pressTimer);
+    if (node?.pin && e.pointerType !== "mouse") pressTimer = setTimeout(() => {
+      if (drag?.node !== node || drag.moved) return;
+      node.fixed = false; node.pin = null; delete pins[pinKey(node)]; savePins();
+      drag = null; alpha = Math.max(alpha, 0.3); navigator.vibrate?.(10); kick();
+    }, 550);
   });
   canvas.addEventListener("pointermove", (e) => {
     const pt = local(e);
@@ -939,6 +958,9 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       if (flat) n.z = 0;
       hover = n;
       alpha = Math.max(alpha, 0.25);
+      // The view holds still while a note is moved: re-framing as the layout reacts would slide the graph out
+      // from under the pointer (and the note away from where it is dropped).
+      userMoved = true;
     } else if (drag.pan) {
       panBy(pt[0] - drag.last[0], pt[1] - drag.last[1]);
       userMoved = true; touchedAt = performance.now();
@@ -1057,7 +1079,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       userMoved = false; fitPending = true; kick();
       return [...core].map((i) => N[i].label);
     },
-    destroy() { clearTimeout(camTimer); try { if (camSaved) localStorage.setItem("suiji:graphCam", camSaved); } catch {} cancelAnimationFrame(raf); raf = -1; ro.disconnect(); io.disconnect(); document.removeEventListener("visibilitychange", kick); window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKey); scheme.removeEventListener("change", kick); },
+    destroy() { clearTimeout(camTimer); clearTimeout(pressTimer); try { if (camSaved) localStorage.setItem("suiji:graphCam", camSaved); } catch {} cancelAnimationFrame(raf); raf = -1; ro.disconnect(); io.disconnect(); document.removeEventListener("visibilitychange", kick); window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKey); scheme.removeEventListener("change", kick); },
   };
   return api;
 }
