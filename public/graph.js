@@ -27,7 +27,7 @@ const FORCE_SLIDERS = [
   ["dist", "连线距离", 20, 250, 1],
 ];
 
-export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden = [], onHide, forces = {}, onForces }) {
+export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden = [], onHide, forces = {}, onForces, options = [] }) {
   const canvas = document.createElement("canvas");
   canvas.className = "graph-canvas";
   host.prepend(canvas);
@@ -68,7 +68,20 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   if (rest) rows.push({ g: null, key: OTHER, c: rest });
   const allBtn = Object.assign(document.createElement("button"), { type: "button", className: "graph-legend-all" });
   allBtn.onclick = () => { if (off.size) off.clear(); else for (const r of rows) off.add(r.key); setHidden(); };
-  legend.append(allBtn);
+  const legendHead = document.createElement("div");
+  legendHead.className = "graph-legend-head";
+  const fold = Object.assign(document.createElement("button"), { type: "button", className: "graph-legend-fold" });
+  fold.innerHTML = `<span></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>`;
+  fold.querySelector("span").textContent = t("分类");
+  let folded = null;
+  try { folded = localStorage.getItem("suiji:graphLegend"); } catch {}
+  const setFold = (on, save) => {
+    legend.classList.toggle("folded", on); fold.setAttribute("aria-expanded", !on);
+    if (save) try { localStorage.setItem("suiji:graphLegend", on ? "1" : "0"); } catch {}
+  };
+  fold.onclick = () => setFold(!legend.classList.contains("folded"), true);
+  legendHead.append(fold, allBtn);
+  legend.append(legendHead);
   const syncLegend = () => {
     for (const r of rows) { r.el.classList.toggle("on", r === legendPick); r.el.classList.toggle("off", off.has(r.key)); r.box.setAttribute("aria-checked", !off.has(r.key)); }
     allBtn.textContent = off.size ? t("全部显示") : t("全部隐藏");
@@ -112,7 +125,11 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     onHide?.([...off]);
     alpha = Math.max(alpha, 0.6); userMoved = false; kick();
   }
-  if (rows.length > 1) host.append(legend);
+  if (rows.length > 1) {
+    host.append(legend);
+    // Folded by default where it would cover much of a small pane (phones); then as the user left it.
+    setFold(folded === null ? host.getBoundingClientRect().width < 560 || matchMedia("(max-width: 700px)").matches : folded === "1", false);
+  }
 
   let W = 0, H = 0, dpr = 1, raf = 0, alpha = 1;
   // view: screen pan (x, y) and zoom (k). cam: orbit angles; spread: how far out the layout reaches (for perspective and fog).
@@ -135,6 +152,25 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   head.querySelector("b").textContent = t("力度");
   const reset = head.querySelector("button");
   reset.textContent = t("重置");
+  // Display switches from the app (show tag nodes…) above the forces.
+  if (options.length) {
+    const sec = document.createElement("div");
+    sec.className = "graph-forces-head";
+    sec.innerHTML = "<b></b>";
+    sec.querySelector("b").textContent = t("显示");
+    panel.append(sec);
+    for (const o of options) {
+      const row = document.createElement("label");
+      row.className = "graph-switch";
+      row.innerHTML = `<span></span><input type="checkbox" role="switch">`;
+      row.querySelector("span").textContent = o.label;
+      const box = row.querySelector("input");
+      box.checked = !!o.checked;
+      box.onchange = () => o.onChange(box.checked);
+      panel.append(row);
+    }
+    head.classList.add("gap");
+  }
   panel.append(head);
   const inputs = {};
   for (const [key, label, min, max, step] of FORCE_SLIDERS) {
@@ -327,12 +363,19 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     const zoomLabels = Math.min(1, Math.max(0, (view.k - 1.1) / 0.6));
     const byDeg = (a, b) => b.deg - a.deg || a.d - b.d;
     const order = [];
+    let hubs = null;
     if (focus) order.push(focus);
     if (sel) order.push(...[...sel.core].map((i) => N[i]));
     order.push(...N.filter((p) => p !== focus && isActive(p)));
     if (focus) order.push(...[...focus.nb].map((j) => N[j]).sort(byDeg).slice(0, 30));
     else if (sel) order.push(...[...sel.near].map((i) => N[i]).sort(byDeg).slice(0, 40));
-    else if (zoomLabels > 0.02) order.push(...[...N].sort(byDeg));
+    else {
+      // The best-connected notes are always named, so the graph reads at a glance; the rest fade in with zoom.
+      const ranked = shown.filter((p) => p.kind !== "tag").sort(byDeg);
+      hubs = new Set(ranked.slice(0, Math.max(4, Math.min(12, Math.round(Math.sqrt(ranked.length))))));
+      order.push(...hubs);
+      if (zoomLabels > 0.02) order.push(...ranked);
+    }
     const placed = [], seen = new Set();
     const free = (x, y, w, h) => !placed.some((r) => x < r[0] + r[2] && x + w > r[0] && y < r[1] + r[3] && y + h > r[1]);
     for (const p of order) {
@@ -353,10 +396,22 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
         ctx.beginPath(); ctx.roundRect(x, y, w, h, square ? 0 : h / 2); ctx.fill();
         ctx.globalAlpha = 1; ctx.fillStyle = ink;
       } else {
-        ctx.globalAlpha = (focus || sel || isActive(p) ? 0.9 : zoomLabels) * (isActive(p) ? 1 : fog(p.d));
-        ctx.fillStyle = focus || sel || isActive(p) ? ink : muted;
+        const hub = hubs?.has(p);
+        ctx.globalAlpha = (focus || sel || isActive(p) ? 0.9 : hub ? Math.max(0.85, zoomLabels) : zoomLabels) * (isActive(p) ? 1 : fog(p.d));
+        ctx.fillStyle = focus || sel || isActive(p) || hub ? ink : muted;
       }
       ctx.fillText(text, px, y + pad);
+      // Under the hovered note: its category and how many links it has.
+      if (p === focus && p.kind !== "tag") {
+        const sub = [p.group, t("{n} 条链接", { n: p.deg })].filter(Boolean).join(" · ");
+        ctx.font = `400 ${fs}px ${font}`;
+        const sw = ctx.measureText(sub).width + pad * 2, sy = y + h + 1;
+        placed.push([px - sw / 2, sy, sw, fs + pad * 2]);
+        ctx.globalAlpha = 0.92; ctx.fillStyle = bg;
+        ctx.beginPath(); ctx.roundRect(px - sw / 2, sy, sw, fs + pad * 2, square ? 0 : (fs + pad * 2) / 2); ctx.fill();
+        ctx.globalAlpha = 1; ctx.fillStyle = muted;
+        ctx.fillText(sub, px, sy + pad);
+      }
     }
 
     // A small x / y / z axis gizmo in the corner shows which way the graph is turned.

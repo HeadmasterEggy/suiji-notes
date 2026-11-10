@@ -1449,8 +1449,6 @@ function showGraph(p) {
   wrap.className = "graph";
   const tools = document.createElement("div");
   tools.className = "graph-tools";
-  const tagBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: p.graphTags ? t("隐藏标签") : t("显示标签") });
-  tagBtn.onclick = () => { p.graphTags = !p.graphTags; p.shown = null; saveLayout(); renderPane(p); };
   const fitBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: t("居中") });
   fitBtn.onclick = () => { p.graphFocus = null; p.graph?.fit(); };
   // 3D by default; the flat graph is one click away and each pane remembers its choice.
@@ -1460,15 +1458,17 @@ function showGraph(p) {
     dimBtn.textContent = p.graphFlat ? "3D" : "2D"; dimBtn.title = p.graphFlat ? t("切换到立体视图") : t("切换到平面视图");
     p.graph?.setFlat(p.graphFlat);
   };
-  const forceBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: t("力度"), title: t("调节向心力、排斥力和连线") });
+  // Settings: display switches and the forces, in one panel like Obsidian's.
+  const forceBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: t("设置"), title: t("显示选项和力度") });
   forceBtn.onclick = () => forceBtn.classList.toggle("on", p.graph?.toggleForces());
-  tools.append(dimBtn, forceBtn, tagBtn, fitBtn);
+  tools.append(dimBtn, forceBtn, fitBtn);
   wrap.append(tools);
   if (!data.nodes.length) wrap.append(Object.assign(document.createElement("p"), { className: "graph-empty", textContent: t("还没有 Markdown 文件或笔记。") }));
   p.preview.classList.remove("doc");
   p.preview.replaceChildren(wrap);
   p.graph = mountGraph(wrap, data, {
     flat: !!p.graphFlat,
+    options: [{ label: t("标签节点（#标签）"), checked: p.graphTags, onChange: (on) => { p.graphTags = on; p.shown = null; p.graphPanel = true; saveLayout(); renderPane(p); } }],
     hidden: p.graphHidden || [],
     onHide: (h) => { p.graphHidden = h; saveLayout(); },
     // Forces are one setting for the device, like a preference, not per pane.
@@ -1485,6 +1485,8 @@ function showGraph(p) {
     },
   });
   if (p.graphFocus) p.graph.focus(p.graphFocus);
+  // Rebuilt from inside the settings panel (tag switch): keep it open.
+  if (p.graphPanel) { p.graphPanel = false; forceBtn.classList.toggle("on", p.graph.toggleForces()); }
 }
 
 // ---------- what the assistant can do in the interface ----------
