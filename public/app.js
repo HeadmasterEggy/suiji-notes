@@ -1467,6 +1467,8 @@ function showGraph(p) {
   p.preview.replaceChildren(wrap);
   p.graph = mountGraph(wrap, data, {
     flat: !!p.graphFlat,
+    hidden: p.graphHidden || [],
+    onHide: (h) => { p.graphHidden = h; saveLayout(); },
     isActive: (n) => n.kind !== "tag" && [...panes.values()].some((x) => x !== p && x.kind === n.kind && x.itemId === n.ref),
     onOpen: (n) => {
       if (n.kind === "tag") { searchTag(n.ref); return; }
@@ -1827,7 +1829,7 @@ function saveLayout() {
     const top = p.restoreTop || (p.kind ? Math.round(scroller(p).scrollTop) : 0);   // still waiting to scroll back: keep that
     if (p.kind && p.hi >= 0) p.hist[p.hi] = { kind: p.kind, id: p.itemId, top };
     const from = Math.max(0, p.hi - 20), h = p.hist.slice(from, from + 30);
-    return { kind: p.kind, id: p.itemId, f: p === focused ? 1 : 0, t: p.graphTags ? 1 : 0, g: p.graphFlat ? 1 : 0, o: p.tocOpen ? 1 : 0, top, h, hi: p.hi - from };
+    return { kind: p.kind, id: p.itemId, f: p === focused ? 1 : 0, t: p.graphTags ? 1 : 0, g: p.graphFlat ? 1 : 0, x: p.graphHidden?.length ? p.graphHidden : undefined, o: p.tocOpen ? 1 : 0, top, h, hi: p.hi - from };
   };
   const ser = (n) => n.pane ? pane(n.pane) : { dir: n.dir, ratio: n.ratio, a: ser(n.a), b: ser(n.b) };
   try { localStorage.setItem(layoutKey(), JSON.stringify(ser(layout))); } catch {}
@@ -1843,6 +1845,7 @@ function restoreLayout() {
       if (s && s.f) focused = p;
       p.graphTags = !!(s && s.t);
       p.graphFlat = !!(s && s.g);
+      p.graphHidden = Array.isArray(s?.x) ? s.x.filter((x) => typeof x === "string") : [];
       p.tocOpen = s && "o" in s ? s.o !== 0 : tocAuto;   // each pane keeps its own outline open or closed
       if (Array.isArray(s?.h) && s.h[s.hi]?.id === s.id) { p.hist = s.h.filter((x) => x && x.kind); p.hi = Math.min(s.hi, p.hist.length - 1); navState(p); }
       if (s?.top) p.restoreTop = s.top;

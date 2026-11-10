@@ -5,7 +5,8 @@
 // z axis and turns the camera face-on, which gives the old 2D graph back.
 //
 // Each note node has a group (its category); every group gets its own colour, listed in a legend in the
-// corner, and clicking a legend entry lights up that group.
+// corner. Clicking a legend entry lights that group up and dims the rest; its checkbox shows or hides the
+// group, and "only" hides every other group. Hidden groups leave the layout, which re-settles without them.
 //
 //   const g = mountGraph(host, { nodes: [{label, kind, ref, group}], edges: [[i, j]] }, { onOpen(node), isActive(node), flat })
 //   g.redraw()       after the active set changes
@@ -16,7 +17,7 @@ import { t } from "./i18n.js";
 // Categorical colours, readable on light and dark backgrounds. A style can swap them with --g-palette.
 const PALETTE = ["#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#b07aa1", "#76b7b2", "#edc948", "#ff9da7", "#9c755f", "#5fa8d3"];
 
-export function mountGraph(host, data, { onOpen, isActive, flat = false }) {
+export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden = [], onHide }) {
   const canvas = document.createElement("canvas");
   canvas.className = "graph-canvas";
   host.prepend(canvas);
@@ -44,27 +45,62 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false }) {
   for (const n of N) n.slot = slot.has(n.group) ? slot.get(n.group) : -1;
   let palette = PALETTE;
 
-  // Legend: one row per coloured group (plus "other"), click to light that group up, click again to clear.
+  // Legend: one row per coloured group (plus "other"). Click the name to light that group up (again to
+  // clear); the checkbox shows or hides it; "only" hides all the others.
+  const OTHER = "\u0000other";
+  const keyOf = (n) => n.slot < 0 ? OTHER : n.group;
+  const off = new Set(hidden);
   let legendPick = null;
   const legend = document.createElement("div");
   legend.className = "graph-legend";
-  const rows = groups.slice(0, PALETTE.length).map(([g, c]) => ({ g, c }));
+  const rows = groups.slice(0, PALETTE.length).map(([g, c]) => ({ g, key: g, c }));
   const rest = groups.slice(PALETTE.length).reduce((a, [, c]) => a + c, 0);
-  if (rest) rows.push({ g: null, c: rest });
+  if (rest) rows.push({ g: null, key: OTHER, c: rest });
+  const allBtn = Object.assign(document.createElement("button"), { type: "button", className: "graph-legend-all" });
+  allBtn.onclick = () => { if (off.size) off.clear(); else for (const r of rows) off.add(r.key); setHidden(); };
+  legend.append(allBtn);
+  const syncLegend = () => {
+    for (const r of rows) { r.el.classList.toggle("on", r === legendPick); r.el.classList.toggle("off", off.has(r.key)); r.box.setAttribute("aria-checked", !off.has(r.key)); }
+    allBtn.textContent = off.size ? t("全部显示") : t("全部隐藏");
+  };
   for (const r of rows) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.innerHTML = `<i></i><span></span><em></em>`;
-    b.querySelector("span").textContent = r.g ?? t("其他");
-    b.querySelector("em").textContent = r.c;
-    b.title = r.g ?? t("其他");
-    r.el = b;
-    b.onclick = () => {
-      if (legendPick === r) { legendPick = null; api.fit(); }
-      else { api.focus(r.g === null ? (n) => n.kind !== "tag" && n.slot < 0 : (n) => n.group === r.g); legendPick = r; }
-      for (const x of rows) x.el.classList.toggle("on", x === legendPick);
+    const row = document.createElement("div");
+    row.className = "graph-legend-row";
+    row.innerHTML = `<button type="button" role="checkbox" class="box"><i></i></button><button type="button" class="name"><span></span><em></em></button><button type="button" class="only"></button>`;
+    const name = r.g ?? t("其他");
+    r.el = row; r.box = row.querySelector(".box");
+    r.box.title = t("显示 / 隐藏"); r.box.setAttribute("aria-label", name);
+    row.querySelector("span").textContent = name;
+    row.querySelector("em").textContent = r.c;
+    row.querySelector(".name").title = t("高亮这一类");
+    const only = row.querySelector(".only");
+    only.textContent = t("只看"); only.title = t("只显示这一类");
+    r.box.onclick = () => { off.has(r.key) ? off.delete(r.key) : off.add(r.key); setHidden(); };
+    only.onclick = () => { off.clear(); for (const x of rows) if (x !== r) off.add(x.key); setHidden(); };
+    row.querySelector(".name").onclick = () => {
+      if (legendPick === r) { api.fit(); return; }
+      if (off.has(r.key)) { off.delete(r.key); setHidden(); }
+      api.focus((n) => keyOf(n) === r.key && n.kind !== "tag");
+      legendPick = r; syncLegend();
     };
-    legend.append(b);
+    legend.append(row);
+  }
+  // Which nodes and links are in play: those of shown groups, and tags still linked to one of them.
+  let shown = N, shownE = E;
+  function applyHidden() {
+    for (const n of N) n.hidden = n.kind !== "tag" && off.has(keyOf(n));
+    for (const n of N) if (n.kind === "tag") n.hidden = ![...n.nb].some((j) => N[j].kind !== "tag" && !N[j].hidden);
+    shown = N.filter((n) => !n.hidden);
+    shownE = E.filter(([a, b]) => !N[a].hidden && !N[b].hidden);
+    if (hover?.hidden) hover = null;
+  }
+  function setHidden() {
+    applyHidden();
+    if (legendPick && off.has(legendPick.key)) legendPick = null;
+    picked = legendPick ? picked : null;
+    syncLegend();
+    onHide?.([...off]);
+    alpha = Math.max(alpha, 0.6); userMoved = false; kick();
   }
   if (rows.length > 1) host.append(legend);
 
@@ -75,14 +111,15 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false }) {
   let spread = 200, userTurned = false;
   // Nodes picked from outside (the assistant): they and their neighbours stay lit and the view frames them.
   let picked = null;   // { core: Set of node indices, near: core plus neighbours }
+  applyHidden(); syncLegend();
 
   // ---------- simulation ----------
   function tick() {
-    const n = N.length;
+    const V = shown, n = V.length;
     for (let i = 0; i < n; i++) {
-      const a = N[i];
+      const a = V[i];
       for (let j = i + 1; j < n; j++) {
-        const b = N[j];
+        const b = V[j];
         let dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z, d2 = dx * dx + dy * dy + dz * dz;
         if (d2 > 160000) continue;
         if (d2 < 1) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; dz = flat ? 0 : Math.random() - 0.5; d2 = 1; }
@@ -90,7 +127,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false }) {
         a.vx += dx * f; a.vy += dy * f; a.vz += dz * f; b.vx -= dx * f; b.vy -= dy * f; b.vz -= dz * f;
       }
     }
-    for (const [ia, ib] of E) {
+    for (const [ia, ib] of shownE) {
       const a = N[ia], b = N[ib];
       // Clamp the distance: two linked nodes almost on top of each other would otherwise get a huge kick.
       const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, d = Math.max(Math.hypot(dx, dy, dz), 4);
@@ -98,7 +135,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false }) {
       a.vx += dx * s; a.vy += dy * s; a.vz += dz * s; b.vx -= dx * s; b.vy -= dy * s; b.vz -= dz * s;
     }
     let far = 0;
-    for (const p of N) {
+    for (const p of shown) {
       p.vx -= p.x * 0.012 * alpha; p.vy -= p.y * 0.012 * alpha; p.vz -= p.z * 0.012 * alpha;
       if (flat) { p.vz = 0; p.z *= 0.8; if (Math.abs(p.z) < 0.05) p.z = 0; }
       if (p.fixed) { p.vx = p.vy = p.vz = 0; continue; }
@@ -145,9 +182,9 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false }) {
 
   // Eases the view toward showing everything; returns true while it is still moving.
   function fit() {
-    if (!N.length || !W) return false;
+    if (!shown.length || !W) return false;
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const p of picked ? [...picked.near].map((i) => N[i]) : N) { x0 = Math.min(x0, p.sx); y0 = Math.min(y0, p.sy); x1 = Math.max(x1, p.sx); y1 = Math.max(y1, p.sy); }
+    for (const p of picked ? [...picked.near].map((i) => N[i]).filter((p) => !p.hidden) : shown) { x0 = Math.min(x0, p.sx); y0 = Math.min(y0, p.sy); x1 = Math.max(x1, p.sx); y1 = Math.max(y1, p.sy); }
     if (picked) {   // a few picked nodes: keep some of their surroundings in view
       const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, hw = Math.max((x1 - x0) / 2, 160), hh = Math.max((y1 - y0) / 2, 120);
       x0 = cx - hw; x1 = cx + hw; y0 = cy - hh; y1 = cy + hh;
@@ -187,7 +224,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false }) {
     ctx.lineCap = square ? "square" : "butt";
     ctx.strokeStyle = edge;
     const bands = [[], [], [], []];
-    for (const e of E) {
+    for (const e of shownE) {
       const [a, b] = e;
       if (focus && (a === focus.i || b === focus.i)) continue;
       const d = (N[a].d + N[b].d) / 2 / spread;
@@ -207,18 +244,18 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false }) {
       ctx.globalAlpha = focus.nb.size > 40 ? 0.3 : focus.nb.size > 12 ? 0.55 : 0.9;
       ctx.strokeStyle = ink; ctx.lineWidth = 1.2 * ew;
       ctx.beginPath();
-      for (const j of focus.nb) { ctx.moveTo(X(focus), Y(focus)); ctx.lineTo(X(N[j]), Y(N[j])); }
+      for (const j of focus.nb) if (!N[j].hidden) { ctx.moveTo(X(focus), Y(focus)); ctx.lineTo(X(N[j]), Y(N[j])); }
       ctx.stroke();
     }
     if (sel) {
       ctx.globalAlpha = 0.7; ctx.strokeStyle = ink; ctx.lineWidth = 1.2 * ew;
       ctx.beginPath();
-      for (const [a, b] of E) if (sel.core.has(a) || sel.core.has(b)) { ctx.moveTo(X(N[a]), Y(N[a])); ctx.lineTo(X(N[b]), Y(N[b])); }
+      for (const [a, b] of shownE) if (sel.core.has(a) || sel.core.has(b)) { ctx.moveTo(X(N[a]), Y(N[a])); ctx.lineTo(X(N[b]), Y(N[b])); }
       ctx.stroke();
     }
 
     if (glow) { ctx.shadowColor = node; ctx.shadowBlur = glow; }
-    const back = [...N].sort((a, b) => b.d - a.d);   // far to near, so near nodes cover far ones
+    const back = [...shown].sort((a, b) => b.d - a.d);   // far to near, so near nodes cover far ones
     for (const p of back) {
       const on = p === focus || (lit && lit.has(p.i)) || (sel && sel.near.has(p.i)), active = isActive(p);
       ctx.globalAlpha = ((focus || sel) && !on ? 0.18 : 1) * (on || active ? 1 : fog(p.d));
@@ -252,7 +289,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false }) {
     const placed = [], seen = new Set();
     const free = (x, y, w, h) => !placed.some((r) => x < r[0] + r[2] && x + w > r[0] && y < r[1] + r[3] && y + h > r[1]);
     for (const p of order) {
-      if (seen.has(p)) continue;
+      if (seen.has(p) || p.hidden) continue;
       seen.add(p);
       const px = X(p), py = Y(p);
       if (Math.abs(px + view.x) > W / 2 || Math.abs(py + view.y) > H / 2) continue;
@@ -316,7 +353,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false }) {
   function pick(pt) {
     const [wx, wy] = toScreen(pt);
     let best = null, bd = Infinity;
-    for (const p of N) {   // nearest to the viewer wins when two overlap
+    for (const p of shown) {   // nearest to the viewer wins when two overlap
       const dist = Math.hypot(p.sx - wx, p.sy - wy);
       if (dist < radius(p) * p.s + 6 / view.k && p.d < bd) { best = p; bd = p.d; }
     }
@@ -409,7 +446,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false }) {
 
   const api = {
     redraw: kick,
-    fit() { picked = null; userMoved = false; legendPick = null; for (const x of rows) x.el.classList.remove("on"); kick(); },
+    fit() { picked = null; userMoved = false; legendPick = null; syncLegend(); kick(); },
     setFlat(on) {
       if (flat === !!on) return;
       flat = !!on;
@@ -421,9 +458,9 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false }) {
     },
     // Lights up the nodes for which match(node) is true, with their neighbours, and frames them; returns their labels.
     focus(match) {
-      const core = new Set(N.filter((n) => match(n)).map((n) => n.i));
-      legendPick = null; for (const x of rows) x.el.classList.remove("on");
-      picked = core.size ? { core, near: new Set([...core].flatMap((i) => [i, ...N[i].nb])) } : null;
+      const core = new Set(shown.filter((n) => match(n)).map((n) => n.i));
+      legendPick = null; syncLegend();
+      picked = core.size ? { core, near: new Set([...core].flatMap((i) => [i, ...N[i].nb]).filter((i) => !N[i].hidden)) } : null;
       userMoved = false; kick();
       return [...core].map((i) => N[i].label);
     },
