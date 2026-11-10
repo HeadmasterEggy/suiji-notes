@@ -58,7 +58,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   }
   const AXIS = { x: "#e5484d", y: "#30a46c", z: "#3e63dd" };
   // Size grows with links but is capped, so one hub note does not cover its neighbours.
-  const S = { local: false, depth: 1, size: "links", spin: true };
+  const S = { local: false, depth: 1, size: "links", spin: false };
   try { Object.assign(S, JSON.parse(localStorage.getItem("suiji:graphView")) || {}); } catch {}
   const saveS = () => { try { localStorage.setItem("suiji:graphView", JSON.stringify(S)); } catch {} };
   const maxLen = Math.max(1, ...N.map((n) => n.len || 0));
@@ -369,10 +369,17 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     cam.cx += x; cam.cy += y; cam.cz += z; view.k = k;
   }
 
-  // Ease the camera face-on in flat mode; returns true while it is still turning.
+  // Ease the camera face-on in flat mode, or to a view picked on the corner axes; true while still turning.
+  const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+  let camGoal = null;
   function settleCam() {
+    if (!flat && camGoal) {
+      const dy = wrap(camGoal.yaw - cam.yaw), dp = camGoal.pitch - cam.pitch;
+      if (Math.abs(dy) < 0.002 && Math.abs(dp) < 0.002) { cam.yaw = camGoal.yaw; cam.pitch = camGoal.pitch; camGoal = null; return false; }
+      cam.yaw += dy * 0.18; cam.pitch += dp * 0.18;
+      return true;
+    }
     if (!flat) return false;
-    const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
     cam.yaw = wrap(cam.yaw); cam.yaw *= 0.8; cam.pitch *= 0.8;
     if (Math.abs(cam.yaw) < 0.001) cam.yaw = 0;
     if (Math.abs(cam.pitch) < 0.001) cam.pitch = 0;
@@ -622,6 +629,14 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       ctx.fillText(lines[0], bx + 6, by + 4); ctx.fillStyle = muted; ctx.fillText(lines[1], bx + 6, by + 17);
     }
 
+    // While turning the graph, mark the point it turns around (always the middle of the pane).
+    if (drag && drag.moved && !drag.node && !drag.pan && !flat) {
+      ctx.globalAlpha = 0.55; ctx.strokeStyle = ink; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2); ctx.moveTo(-12, 0); ctx.lineTo(-8, 0); ctx.moveTo(8, 0); ctx.lineTo(12, 0);
+      ctx.moveTo(0, -12); ctx.lineTo(0, -8); ctx.moveTo(0, 8); ctx.lineTo(0, 12); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
     // The x / y / z axes in the corner show which way the graph is turned (red, green, blue, like 3D tools).
     if (!flat || cam.yaw || cam.pitch) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -633,12 +648,28 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       }).sort((a, b) => b.d - a.d);
       ctx.font = lastFont = `600 10px ${font}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.lineWidth = 2; ctx.lineCap = "round";
+      gizmo = { ox, oy, hits: [] };
       for (const a of axes) {
         ctx.globalAlpha = a.d > 0 ? 0.4 : 0.95;
         ctx.strokeStyle = AXIS[a.name]; ctx.fillStyle = AXIS[a.name];
         ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ox + a.x * L, oy + a.y * L); ctx.stroke();
-        ctx.fillText(a.name, ox + a.x * (L + 8), oy + a.y * (L + 8));
+        const lx = ox + a.x * (L + 8), ly = oy + a.y * (L + 8);
+        if (gizmoHover === a.name) { ctx.globalAlpha = 0.18; ctx.beginPath(); ctx.arc(lx, ly, 8, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; }
+        ctx.fillText(a.name, lx, ly);
+        gizmo.hits.push({ name: a.name, x: lx, y: ly });
       }
+      if (gizmoHover === "home") { ctx.globalAlpha = 0.25; ctx.fillStyle = ink; ctx.beginPath(); ctx.arc(ox, oy, 5, 0, Math.PI * 2); ctx.fill(); }
+    } else gizmo = null;
+
+    // How to move around, in one quiet line at the bottom left (beside the axes in 3D).
+    {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const touch = matchMedia("(pointer: coarse)").matches;
+      const hint = flat ? (touch ? t("单指拖动平移 · 双指缩放") : t("拖动平移 · 滚轮缩放"))
+        : touch ? t("单指拖动旋转 · 双指平移和缩放") : t("拖动旋转 · 右键拖动平移 · 滚轮缩放 · 点 x / y / z 正对该轴");
+      ctx.font = lastFont = `400 11px ${font}`; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      const hx = gizmo ? 72 : 12, room = W - hx - Math.min(W * 0.46, 200) - 16;
+      if (ctx.measureText(hint).width <= room) { ctx.globalAlpha = 0.6; ctx.fillStyle = muted; ctx.fillText(hint, hx, H - 16); }
     }
     ctx.globalAlpha = 1;
   }
@@ -674,7 +705,22 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     return best;
   }
   const pointers = new Map();
-  let drag = null, pinch = null;
+  let drag = null, pinch = null, gizmo = null, gizmoHover = null;
+  // The corner axes: a letter looks straight along that axis (again: from the other side); the middle goes back to the usual view.
+  function gizmoAt([px, py]) {
+    if (!gizmo || flat) return null;
+    for (const h of gizmo.hits) if (Math.hypot(px - h.x, py - h.y) < 10) return h.name;
+    return Math.hypot(px - gizmo.ox, py - gizmo.oy) < 7 ? "home" : null;
+  }
+  function viewAlong(name) {
+    const views = { x: [-Math.PI / 2, 0], y: [0, 1.5], z: [0, 0], home: [0.5, 0.38] };
+    let [yaw, pitch] = views[name];
+    const same = Math.abs(wrap(cam.yaw - yaw)) < 0.05 && Math.abs(cam.pitch - pitch) < 0.05;
+    if (same && name === "y") pitch = -1.5;
+    else if (same && name !== "home") yaw += Math.PI;
+    camGoal = { yaw: cam.yaw + wrap(yaw - cam.yaw), pitch };
+    userMoved = false; fitPending = true; touchedAt = performance.now(); kick();
+  }
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   canvas.addEventListener("pointerdown", (e) => {
     canvas.setPointerCapture(e.pointerId);
@@ -686,6 +732,9 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       drag = null;
       return;
     }
+    const g = e.button === 0 && gizmoAt(local(e));
+    if (g) { viewAlong(g); return; }
+    camGoal = null;
     const pt = local(e), node = (e.button === 0 && !e.shiftKey) || e.button === 2 ? pick(pt) : null;
     // Background: orbit in 3D, pan in flat mode; shift, right or middle button always pans.
     const pan = flat || e.shiftKey || e.button === 1 || (e.button === 2 && !node);
@@ -703,8 +752,10 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       userMoved = true; touchedAt = performance.now(); kick(); return;
     }
     if (!drag) {
-      const h = pick(pt);
-      if (h !== hover) { hover = h; canvas.style.cursor = h ? "pointer" : "grab"; kick(); }
+      const g = gizmoAt(pt), h = g ? null : pick(pt);
+      if (g !== gizmoHover) { gizmoHover = g; kick(); }
+      if (h !== hover) { hover = h; kick(); }
+      canvas.style.cursor = h || g ? "pointer" : "grab";
       return;
     }
     if (Math.hypot(pt[0] - drag.start[0], pt[1] - drag.start[1]) > 4) drag.moved = true;
@@ -767,7 +818,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   };
   window.addEventListener("keydown", onKey);
   window.addEventListener("keyup", onKey);
-  canvas.addEventListener("pointerleave", () => { if (!drag && hover) { hover = null; kick(); } });
+  canvas.addEventListener("pointerleave", () => { if (!drag && (hover || gizmoHover)) { hover = null; gizmoHover = null; kick(); } });
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
     if (drag?.node && !flat) {   // while holding a note: the wheel pushes it away or pulls it closer
@@ -775,7 +826,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       [n.x, n.y, n.z] = unproject(drag.last, d);
       drag.moved = true; alpha = Math.max(alpha, 0.25); kick(); return;
     }
-    zoomAt(local(e), Math.min(6, Math.max(0.1, view.k * Math.exp(-e.deltaY * 0.0015))));
+    zoomAt([W / 2, H / 2], Math.min(6, Math.max(0.1, view.k * Math.exp(-e.deltaY * 0.0015))));
     userMoved = true; touchedAt = performance.now(); kick();
   }, { passive: false });
 
