@@ -230,8 +230,9 @@ textarea {
 .placeholder b { font-family: var(--font-display); font-size: 22px; color: var(--ink); display: block; }
 .placeholder span { display: block; }
 @media (max-width: 720px) { .placeholder .ph-split { display: none; } }   /* phones have no split panes */
-.note { font-size: 13px; color: var(--muted); margin: 0 2px 8px; }
-.note[data-kind="err"] { color: var(--danger); }
+.note { font-size: 13px; line-height: 1.5; color: var(--muted); margin: 0 0 10px; padding: 8px 12px; border-radius: 12px;
+  background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.note[data-kind="err"] { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .note:not([hidden]) { cursor: pointer; }
 
 /* File tree: folders open in place as drawers, with indent guides. */
@@ -602,7 +603,7 @@ textarea {
   background: repeating-linear-gradient(transparent 0 2px, rgba(0, 0, 0, .18) 2px 3px);
 }
 :root[data-style="terminal"] .ghost, :root[data-style="terminal"] .btn-primary,
-:root[data-style="terminal"] input[type="search"], :root[data-style="terminal"] .tree-row, :root[data-style="terminal"] .toc-list button { border-radius: 4px; }
+:root[data-style="terminal"] input[type="search"], :root[data-style="terminal"] .tree-row, :root[data-style="terminal"] .toc-list button, :root[data-style="terminal"] .note { border-radius: 4px; }
 :root[data-style="terminal"] .md-body h1::before { content: "# "; color: var(--muted); }
 :root[data-style="terminal"] .md-body h2::before { content: "## "; color: var(--muted); }
 :root[data-style="terminal"] .md-body h3::before { content: "### "; color: var(--muted); }
@@ -663,7 +664,7 @@ textarea {
 }
 :root[data-style="blocks"] input::placeholder { color: #a0a0a0; }
 /* the file tree reads like an inventory: hover outlines a slot, the open file is a dark slot */
-:root[data-style="blocks"] .tree-row { border-radius: 0; }
+:root[data-style="blocks"] :is(.tree-row, .note) { border-radius: 0; }
 :root[data-style="blocks"] .tree-row:hover { background: rgba(255, 255, 255, .45); transform: none; }
 :root[data-style="blocks"] .tree-file[aria-current="true"] { background: #8b8b8b; color: #fff; box-shadow: var(--slot); text-shadow: 2px 2px 0 #3f3f3f; }
 :root[data-style="blocks"] .chev::before { border-color: #1e1e1e; border-width: 0 3px 3px 0; }
