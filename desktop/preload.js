@@ -1,5 +1,6 @@
 // Gives the page the same bridge the Swift app does (mac/main.swift), so public/ runs unchanged:
 //   window.webkit.messageHandlers.suijiFs.postMessage({op, ...}) → Promise   (folder sync, localHttp, magpieLink)
+//   window.webkit.messageHandlers.suijiFs.stream({url, ...}, onChunk) → Promise  (localHttp, streamed)
 //   window.webkit.messageHandlers.suiji.postMessage({style, lang})           (Dock icon and language)
 // Also the title bar: the page fills the window under the traffic lights, and a strip over the gap it leaves
 // at the top drags the window, and double-click zooms it (macOS does that for drag regions), as in the Swift app.
@@ -12,6 +13,16 @@ contextBridge.exposeInMainWorld("webkit", {
         const r = await ipcRenderer.invoke("suijiFs", body);
         if (r.error != null) throw new Error(r.error);
         return r.value;
+      },
+      // localHttp that hands each piece of the answer to onChunk as it arrives (the answer still comes whole at the end).
+      stream: async (body, onChunk) => {
+        const on = (_e, m) => { if (m?.id === body.id) onChunk(m.d); };
+        ipcRenderer.on("localHttpChunk", on);
+        try {
+          const r = await ipcRenderer.invoke("suijiFs", { ...body, op: "localHttp", stream: true });
+          if (r.error != null) throw new Error(r.error);
+          return r.value;
+        } finally { ipcRenderer.removeListener("localHttpChunk", on); }
       },
     },
     suiji: { postMessage: (body) => { ipcRenderer.send("suiji", body); } },
