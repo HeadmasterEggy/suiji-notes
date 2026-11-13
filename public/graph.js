@@ -1,4 +1,4 @@
-// Relationship graph, Obsidian-style, in 3D. Nodes are notes and Markdown files (and optionally tags), edges
+// Relationship graph, Obsidian-style, in 3D. Nodes are notes and Markdown files (never tags), edges
 // are [[links]]. A small force simulation lays them out in space and a perspective camera draws them on a 2D
 // canvas: drag the background to orbit (or to pan in flat mode), shift- or right-drag to pan, scroll or pinch
 // to zoom, drag a node to move it, hover or click to light up its neighbours, click again to open it. Flat mode squashes the

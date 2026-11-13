@@ -1453,9 +1453,10 @@ mountAgent({
 });
 
 // ---------- graph ----------
-// Nodes: Markdown files and notes (plus tags when switched on). Edges: [[links]] and relative .md links,
+// Nodes: Markdown files and notes, never tags (Joey: tags stay out of the graph; a tag is matched through each
+// note's own tags list, for colour groups and the assistant). Edges: [[links]] and relative .md links,
 // resolved the way Obsidian does: relative to the file, then from the vault root, then by unique file name.
-function graphData(withTags) {
+function graphData() {
   const nodes = [], edges = new Map(), idx = new Map();
   const add = (key, node) => { if (!idx.has(key)) { idx.set(key, nodes.length); nodes.push(node); } return idx.get(key); };
   const md = files.filter(isMarkdown);
@@ -1480,13 +1481,11 @@ function graphData(withTags) {
   for (const f of md) {
     const i = idx.get("file:" + f.id), dir = f.name.split("/").slice(0, -1);
     for (const l of f.links || []) link(i, resolve(dir, l));
-    if (withTags) for (const t of f.tags || []) link(i, add("tag:" + t, { label: "#" + t, kind: "tag", ref: t }), false);
   }
   for (const n of visible()) {
     const meta = mdMeta(n.body);
     const i = add("note:" + n.id, { label: titleOf(n.body), kind: "note", ref: n.id, group: t("随手记"), len: n.body.length, tags: meta.tags, path: "" });
     for (const l of meta.links) link(i, resolve([], l));
-    if (withTags) for (const t of meta.tags) link(i, add("tag:" + t, { label: "#" + t, kind: "tag", ref: t }), false);
   }
   return { nodes, edges: [...edges].map(([e, dir]) => [...e.split(",").map(Number), dir]) };
 }
@@ -1495,7 +1494,7 @@ function graphKey(p) {
   let latest = "";
   for (const f of files) if ((f.updated_at || "") > latest) latest = f.updated_at;
   const notes = visible();   // newest first: a note edited since (new [[links]], tags) redraws the graph too
-  return ["graph", files.length, latest, notes.length, notes[0]?.updated_at || "", p.graphTags ? 1 : 0].join("@");
+  return ["graph", files.length, latest, notes.length, notes[0]?.updated_at || ""].join("@");
 }
 
 function showGraph(p) {
@@ -1503,7 +1502,7 @@ function showGraph(p) {
   // does not scatter and settle again from scratch on every save.
   const prev = p.graph?.state();
   p.graph?.destroy();
-  const data = graphData(p.graphTags);
+  const data = graphData();
   p.meta.textContent = t("关系图谱 · {nodes} 个节点 · {edges} 条链接", { nodes: data.nodes.length, edges: data.edges.length });
   const wrap = document.createElement("div");
   wrap.className = "graph";
@@ -1529,7 +1528,6 @@ function showGraph(p) {
   p.graph = mountGraph(wrap, data, {
     flat: !!p.graphFlat,
     prev,
-    options: [{ label: t("标签节点（#标签）"), checked: p.graphTags, onChange: (on) => { p.graphTags = on; p.shown = null; p.graphPanel = true; saveLayout(); renderPane(p); } }],
     hidden: p.graphHidden || [],
     onHide: (h) => { p.graphHidden = h; saveLayout(); },
     // Forces are one setting for the device, like a preference, not per pane.
@@ -1608,8 +1606,7 @@ async function uiGraph({ ids, query, tag }) {
   const pathOf = new Map(files.map((f) => [f.id, fullPath(f).join("/").toLowerCase()]));
   const match = (n) => idSet.has(n.ref)
     || (q && n.kind !== "tag" && (n.label.toLowerCase().includes(q) || (pathOf.get(n.ref) || "").includes(q)))
-    || (tg && n.kind === "tag" && n.ref.toLowerCase() === tg);
-  if (tg && !g.graphTags) { g.graphTags = true; g.shown = null; }
+    || (tg && (n.tags || []).some((x) => String(x).toLowerCase() === tg));
   g.graphFocus = idSet.size || q || tg ? match : null;
   if (g.shown == null) renderPane(g);   // a fresh graph applies graphFocus when it is built
   const labels = g.graphFocus ? g.graph.focus(match) : (g.graph.fit(), []);
@@ -1905,7 +1902,7 @@ function saveLayout() {
     const top = p.restoreTop || (p.kind ? Math.round(scroller(p).scrollTop) : 0);   // still waiting to scroll back: keep that
     if (p.kind && p.hi >= 0) p.hist[p.hi] = { kind: p.kind, id: p.itemId, top };
     const from = Math.max(0, p.hi - 20), h = p.hist.slice(from, from + 30);
-    return { kind: p.kind, id: p.itemId, f: p === focused ? 1 : 0, t: p.graphTags ? 1 : 0, g: p.graphFlat ? 1 : 0, x: p.graphHidden?.length ? p.graphHidden : undefined, o: p.tocOpen ? 1 : 0, top, h, hi: p.hi - from };
+    return { kind: p.kind, id: p.itemId, f: p === focused ? 1 : 0, g: p.graphFlat ? 1 : 0, x: p.graphHidden?.length ? p.graphHidden : undefined, o: p.tocOpen ? 1 : 0, top, h, hi: p.hi - from };
   };
   const ser = (n) => n.pane ? pane(n.pane) : { dir: n.dir, ratio: n.ratio, a: ser(n.a), b: ser(n.b) };
   try { localStorage.setItem(layoutKey(), JSON.stringify(ser(layout))); } catch {}
@@ -1919,7 +1916,6 @@ function restoreLayout() {
     if (!s || !s.dir) {
       const p = makePane(s && s.kind ? { kind: s.kind, id: s.id } : null);
       if (s && s.f) focused = p;
-      p.graphTags = !!(s && s.t);
       p.graphFlat = !!(s && s.g);
       p.graphHidden = Array.isArray(s?.x) ? s.x.filter((x) => typeof x === "string") : [];
       p.tocOpen = s && "o" in s ? s.o !== 0 : tocAuto;   // each pane keeps its own outline open or closed
