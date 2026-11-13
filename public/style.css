@@ -221,6 +221,8 @@ textarea {
 }
 .placeholder { flex: 1; display: grid; place-items: center; color: var(--muted); text-align: center; padding: 24px; line-height: 1.7; }
 .placeholder b { font-family: var(--font-display); font-size: 22px; color: var(--ink); display: block; }
+.placeholder span { display: block; }
+@media (max-width: 720px) { .placeholder .ph-split { display: none; } }   /* phones have no split panes */
 .note { font-size: 13px; color: var(--muted); margin: 0 2px 8px; }
 .note[data-kind="err"] { color: var(--danger); }
 .note:not([hidden]) { cursor: pointer; }
@@ -381,10 +383,20 @@ textarea {
 .md-body p, .md-body ul, .md-body ol, .md-body blockquote, .md-body table, .md-body pre { margin: 0 0 1em; }
 .md-body ul, .md-body ol { padding-left: 1.4em; }
 .md-body li + li { margin-top: .25em; }
+/* - [ ] tasks: the box stands in for the bullet, in the style's colour */
+.md-body li:has(> input[type=checkbox]) { list-style: none; }
+.md-body li > input[type=checkbox] { appearance: none; position: relative; display: inline-block; width: .95em; height: .95em; margin: 0 .45em 0 -1.35em;
+  vertical-align: -.12em; border: 1.5px solid var(--muted); border-radius: .25em; background: none; }
+.md-body li > input[type=checkbox]:checked { background: var(--accent); border-color: var(--accent); }
+.md-body li > input[type=checkbox]:checked::before { content: ""; position: absolute; left: 50%; top: 42%; width: .48em; height: .26em;
+  border: solid var(--on-accent); border-width: 0 0 2px 2px; transform: translate(-50%, -50%) rotate(-45deg); }
+.md-body .math-nb { white-space: nowrap; }   /* a formula keeps the punctuation after it on its line */
+.md-body li:has(> input[type=checkbox]:checked) { color: var(--muted); }
 .md-body a { color: var(--accent); }
 .md-body img { display: block; max-width: 100%; height: auto; margin: 1em auto; border-radius: 6px; }
-.md-body blockquote { padding: .2em 1em; border-left: 3px solid var(--accent); color: var(--muted); background: var(--bg); border-radius: 0 6px 6px 0; }
-.md-body code { font: .88em var(--font-mono); background: var(--bg); padding: .12em .35em; border-radius: 4px; }
+.md-body blockquote > :last-child { margin-bottom: 0; }   /* even space above and below the text */
+.md-body blockquote { padding: .6em 1em; border-left: 3px solid var(--accent); color: var(--muted); background: var(--bg); border-radius: 0 6px 6px 0; }
+.md-body code { font: .88em var(--font-mono); background: color-mix(in srgb, var(--ink) 7%, transparent); padding: .12em .35em; border-radius: 4px; }
 .md-body pre { background: var(--bg); padding: 14px 16px; border-radius: 8px; overflow-x: auto; white-space: pre; }
 .md-body pre code { background: none; padding: 0; font-size: 13px; line-height: 1.6; }
 .md-body table { display: block; overflow-x: auto; border-collapse: collapse; font-size: .92em; }

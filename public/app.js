@@ -642,6 +642,7 @@ async function renderMarkdown(src, f) {
   let html = window.DOMPurify.sanitize(window.marked.parse(text, { gfm: true, breaks: false }));
   html = html
     .replace(/<p>KATEXBLOCK(\d+)END<\/p>/g, (_, i) => `<div class="math-block">${math[i]}</div>`)
+    .replace(/KATEXINLINE(\d+)END([，。、；：！？）」』”’,.;:!?)]+)/g, (_, i, punct) => `<span class="math-nb">${math[i]}${punct}</span>`)
     .replace(/KATEX(?:BLOCK|INLINE)(\d+)END/g, (_, i) => math[i]);
 
   const art = document.createElement("article");
