@@ -161,7 +161,7 @@ function merge(row) {
 // ---------- sync ----------
 let syncing = false, again = false, channel = null;
 function setSync(state, text) { $("sync").dataset.s = state; $("syncText").textContent = text; }
-// The line under the search box. Each message names its source, and a source clears only its own message, so
+// The notice above the search box. Each message names its source, and a source clears only its own message, so
 // one part of the app doing fine (a sync) no longer hides another's problem (storage full, a failed upload).
 // A click dismisses it; a message that isn't an error goes by itself after a while.
 let noteTimer = 0;
@@ -287,6 +287,7 @@ async function uploadFiles(input) {
   if (tooBig.length) showNote(t("{names} 超过 50 MB，没有上传。", { names: tooBig.map((f) => f.name).join(lang === "en" ? ", " : "、") }), "err", "upload");
   const ok = all.filter((f) => f.size <= MAX_FILE);
   uploading += ok.length;
+  let failed = 0;
   for (const file of ok) {
     setSync("saving", t("上传中 · 剩 {n} 个", { n: uploading }));
     const id = crypto.randomUUID(), ext = extOf(file.name);
@@ -304,11 +305,13 @@ async function uploadFiles(input) {
     } catch (e) {
       console.error(e);
       showNote(t("「{name}」上传失败：{msg}。", { name: file.name, msg: e.message || t("网络问题") }), "err", "upload");
+      failed++;
     } finally {
       uploading--;
     }
   }
-  setSync("ok", t("已同步"));
+  // Another batch may still be going (two drops in a row): it sets the state when it ends.
+  if (!uploading) setSync(failed ? "err" : "ok", failed ? t("上传失败") : t("已同步"));
   await loadFiles();
 }
 
@@ -1074,7 +1077,7 @@ function folderKeys() {
 // that have since gone, or sit inside a closed one, and then the button offered to fold with nothing open.
 const anyOpen = () => (expanded.has(NOTES_KEY) && visible().length > 0) || [...buildTree().dirs.keys()].some((k) => expanded.has(k));
 function showCounts() {
-  $("counts").textContent = t("{files} 个文件 · {folders} 个文件夹", { files: files.length, folders: folderKeys().length });
+  $("counts").textContent = $("counts").title = t("{files} 个文件 · {folders} 个文件夹", { files: files.length, folders: folderKeys().length });   // title: a narrow sidebar cuts it off
   const label = anyOpen() ? t("全部折叠") : t("全部展开");
   $("foldBtn").title = label; $("foldBtn").setAttribute("aria-label", label);
 }

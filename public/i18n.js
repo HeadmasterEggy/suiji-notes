@@ -289,6 +289,7 @@ const EN = {
   "同步中…": "Syncing…",
   "已同步": "Synced",
   "同步失败": "Sync failed",
+  "上传失败": "Upload failed",
   "没能同步到云端，改动已保存在本机，联网后会自动重试。": "Couldn't sync to the cloud. Your changes are saved on this device and will retry once online.",
   "未命名": "Untitled",
   "{names} 超过 50 MB，没有上传。": "{names}: over 50 MB, not uploaded.",
