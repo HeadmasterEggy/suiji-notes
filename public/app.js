@@ -1452,25 +1452,39 @@ mountAgent({
 // Nodes: Markdown files and notes (plus tags when switched on). Edges: [[links]] and relative .md links,
 // resolved the way Obsidian does: relative to the file, then from the vault root, then by unique file name.
 function graphData(withTags) {
-  const nodes = [], edges = new Set(), idx = new Map();
+  const nodes = [], edges = new Map(), idx = new Map();
   const add = (key, node) => { if (!idx.has(key)) { idx.set(key, nodes.length); nodes.push(node); } return idx.get(key); };
   const md = files.filter(isMarkdown);
-  for (const f of md) add("file:" + f.id, { label: stripMd(baseName(f.name)), kind: "file", ref: f.id });
+  // Category (the node's colour): the first folder level where files part ways, so a single synced vault
+  // folder still splits by its subfolders. Files sitting above that level, and quick notes, get their own.
+  const dirs = md.map((f) => fullPath(f).slice(0, -1));
+  let depth = 0;
+  // A file sitting right in that shared folder (say a README beside the course folders) must not stop the
+  // split, or every note ends up in one category: it is named after the shared folder instead.
+  while (dirs.length && dirs.every((d) => d.length > depth && d[depth] === dirs[0][depth])) depth++;
+  // len: rough length in characters for "node size by length" (UTF-8 bytes; CJK text is about 3 a character).
+  md.forEach((f, k) => add("file:" + f.id, { label: stripMd(baseName(f.name)), kind: "file", ref: f.id, group: dirs[k][depth] || dirs[k][depth - 1] || t("未分类"), len: (f.size || 0) / 2, tags: f.tags || [], path: fullPath(f).join("/") }));
   const find = linkResolver(md);
   const resolve = (dir, target) => { const f = find(dir, target); return f ? idx.get("file:" + f.id) : undefined; };
-  const link = (a, b) => { if (b !== undefined && a !== b) edges.add(a < b ? a + "," + b : b + "," + a); };
+  // One edge per pair; its third value says which way the links run (1: low index to high, 2: back, 3: both,
+  // 0: a tag), for the arrows.
+  const link = (a, b, dir = true) => {
+    if (b === undefined || a === b) return;
+    const key = a < b ? a + "," + b : b + "," + a;
+    edges.set(key, (edges.get(key) || 0) | (!dir ? 0 : a < b ? 1 : 2));
+  };
   for (const f of md) {
     const i = idx.get("file:" + f.id), dir = f.name.split("/").slice(0, -1);
     for (const l of f.links || []) link(i, resolve(dir, l));
-    if (withTags) for (const t of f.tags || []) link(i, add("tag:" + t, { label: "#" + t, kind: "tag", ref: t }));
+    if (withTags) for (const t of f.tags || []) link(i, add("tag:" + t, { label: "#" + t, kind: "tag", ref: t }), false);
   }
   for (const n of visible()) {
-    const i = add("note:" + n.id, { label: titleOf(n.body), kind: "note", ref: n.id });
     const meta = mdMeta(n.body);
+    const i = add("note:" + n.id, { label: titleOf(n.body), kind: "note", ref: n.id, group: t("随手记"), len: n.body.length, tags: meta.tags, path: "" });
     for (const l of meta.links) link(i, resolve([], l));
-    if (withTags) for (const t of meta.tags) link(i, add("tag:" + t, { label: "#" + t, kind: "tag", ref: t }));
+    if (withTags) for (const t of meta.tags) link(i, add("tag:" + t, { label: "#" + t, kind: "tag", ref: t }), false);
   }
-  return { nodes, edges: [...edges].map((e) => e.split(",").map(Number)) };
+  return { nodes, edges: [...edges].map(([e, dir]) => [...e.split(",").map(Number), dir]) };
 }
 
 function graphKey(p) {
@@ -1481,6 +1495,9 @@ function graphKey(p) {
 }
 
 function showGraph(p) {
+  // Rebuilt in place (a note saved beside it, the tag switch): carry the layout and view over, so the graph
+  // does not scatter and settle again from scratch on every save.
+  const prev = p.graph?.state();
   p.graph?.destroy();
   const data = graphData(p.graphTags);
   p.meta.textContent = t("关系图谱 · {nodes} 个节点 · {edges} 条链接", { nodes: data.nodes.length, edges: data.edges.length });
@@ -1488,16 +1505,32 @@ function showGraph(p) {
   wrap.className = "graph";
   const tools = document.createElement("div");
   tools.className = "graph-tools";
-  const tagBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: p.graphTags ? t("隐藏标签") : t("显示标签") });
-  tagBtn.onclick = () => { p.graphTags = !p.graphTags; p.shown = null; saveLayout(); renderPane(p); };
   const fitBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: t("居中") });
   fitBtn.onclick = () => { p.graphFocus = null; p.graph?.fit(); };
-  tools.append(tagBtn, fitBtn);
+  // 3D by default; the flat graph is one click away and each pane remembers its choice.
+  const dimBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: p.graphFlat ? "3D" : "2D", title: p.graphFlat ? t("切换到立体视图") : t("切换到平面视图") });
+  dimBtn.onclick = () => {
+    p.graphFlat = !p.graphFlat; saveLayout();
+    dimBtn.textContent = p.graphFlat ? "3D" : "2D"; dimBtn.title = p.graphFlat ? t("切换到立体视图") : t("切换到平面视图");
+    p.graph?.setFlat(p.graphFlat);
+  };
+  // Settings: display switches and the forces, in one panel like Obsidian's.
+  const forceBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: t("设置"), title: t("显示选项和力度") });
+  forceBtn.onclick = () => forceBtn.classList.toggle("on", p.graph?.toggleForces());
+  tools.append(dimBtn, forceBtn, fitBtn);
   wrap.append(tools);
   if (!data.nodes.length) wrap.append(Object.assign(document.createElement("p"), { className: "graph-empty", textContent: t("还没有 Markdown 文件或笔记。") }));
   p.preview.classList.remove("doc");
   p.preview.replaceChildren(wrap);
   p.graph = mountGraph(wrap, data, {
+    flat: !!p.graphFlat,
+    prev,
+    options: [{ label: t("标签节点（#标签）"), checked: p.graphTags, onChange: (on) => { p.graphTags = on; p.shown = null; p.graphPanel = true; saveLayout(); renderPane(p); } }],
+    hidden: p.graphHidden || [],
+    onHide: (h) => { p.graphHidden = h; saveLayout(); },
+    // Forces are one setting for the device, like a preference, not per pane.
+    forces: (() => { try { return JSON.parse(localStorage.getItem("suiji:graphForces")) || {}; } catch { return {}; } })(),
+    onForces: (f) => { try { localStorage.setItem("suiji:graphForces", JSON.stringify(f)); } catch {} },
     isActive: (n) => n.kind !== "tag" && [...panes.values()].some((x) => x !== p && x.kind === n.kind && x.itemId === n.ref),
     onOpen: (n) => {
       if (n.kind === "tag") { searchTag(n.ref); return; }
@@ -1509,6 +1542,8 @@ function showGraph(p) {
     },
   });
   if (p.graphFocus) p.graph.focus(p.graphFocus);
+  // Rebuilt from inside the settings panel (tag switch): keep it open.
+  if (p.graphPanel) { p.graphPanel = false; forceBtn.classList.toggle("on", p.graph.toggleForces()); }
 }
 
 // ---------- what the assistant can do in the interface ----------
@@ -1866,7 +1901,7 @@ function saveLayout() {
     const top = p.restoreTop || (p.kind ? Math.round(scroller(p).scrollTop) : 0);   // still waiting to scroll back: keep that
     if (p.kind && p.hi >= 0) p.hist[p.hi] = { kind: p.kind, id: p.itemId, top };
     const from = Math.max(0, p.hi - 20), h = p.hist.slice(from, from + 30);
-    return { kind: p.kind, id: p.itemId, f: p === focused ? 1 : 0, t: p.graphTags ? 1 : 0, o: p.tocOpen ? 1 : 0, top, h, hi: p.hi - from };
+    return { kind: p.kind, id: p.itemId, f: p === focused ? 1 : 0, t: p.graphTags ? 1 : 0, g: p.graphFlat ? 1 : 0, x: p.graphHidden?.length ? p.graphHidden : undefined, o: p.tocOpen ? 1 : 0, top, h, hi: p.hi - from };
   };
   const ser = (n) => n.pane ? pane(n.pane) : { dir: n.dir, ratio: n.ratio, a: ser(n.a), b: ser(n.b) };
   try { localStorage.setItem(layoutKey(), JSON.stringify(ser(layout))); } catch {}
@@ -1881,6 +1916,8 @@ function restoreLayout() {
       const p = makePane(s && s.kind ? { kind: s.kind, id: s.id } : null);
       if (s && s.f) focused = p;
       p.graphTags = !!(s && s.t);
+      p.graphFlat = !!(s && s.g);
+      p.graphHidden = Array.isArray(s?.x) ? s.x.filter((x) => typeof x === "string") : [];
       p.tocOpen = s && "o" in s ? s.o !== 0 : tocAuto;   // each pane keeps its own outline open or closed
       if (Array.isArray(s?.h) && s.h[s.hi]?.id === s.id) { p.hist = s.h.filter((x) => x && x.kind); p.hi = Math.min(s.hi, p.hist.length - 1); navState(p); }
       if (s?.top) p.restoreTop = s.top;
