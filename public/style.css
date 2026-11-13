@@ -607,6 +607,14 @@ textarea {
 :root[data-style="terminal"] .md-body h1::before { content: "# "; color: var(--muted); }
 :root[data-style="terminal"] .md-body h2::before { content: "## "; color: var(--muted); }
 :root[data-style="terminal"] .md-body h3::before { content: "### "; color: var(--muted); }
+:root[data-style="terminal"] .md-body h4::before { content: "#### "; color: var(--muted); }
+/* Monospace list numbers are wide: "10. " needs about 4ch, or the numbers stick out past the text (off the screen on a phone). */
+:root[data-style="terminal"] .md-body ol { padding-left: 4ch; }
+/* Code, quotes and table headers took --bg, which is the same near-black as the page, so they didn't show as blocks. */
+:root[data-style="terminal"] .md-body :is(pre, code, blockquote, th) { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+:root[data-style="terminal"] .md-body pre { border: 1px solid var(--line); border-radius: 4px; }
+:root[data-style="terminal"] .md-body pre code { background: none; }
+:root[data-style="terminal"] .md-body blockquote { border-radius: 0 4px 4px 0; }
 
 /* ---- 方块: a blocky, pixel-art world — sky, grass and dirt, stone panels, chunky bevels ---- */
 :root[data-style="blocks"] {
