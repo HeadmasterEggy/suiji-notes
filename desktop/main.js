@@ -1,7 +1,7 @@
 // 随记 for Mac, in Electron: the web app in a window, with the same file bridge as the Swift app in mac/, so the
 // page's own code (public/localsync.js, public/agent.js) runs unchanged through preload.js. Keeps running while
 // the window is closed, with a menu bar item for the folder sync. Build with desktop/build.sh.
-const { app, BrowserWindow, Menu, dialog, ipcMain, net, shell, systemPreferences } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, net, screen, shell, systemPreferences } = require("electron");
 const fs = require("node:fs"), path = require("node:path"), os = require("node:os");
 const { execFileSync, spawn } = require("node:child_process");
 const local = require("./localfiles");
@@ -128,6 +128,8 @@ function install(next, relaunch) {
   const script = `
 while kill -0 "$1" 2>/dev/null; do sleep 0.2; done
 old="$2"; new="$3"
+# The download may have waited days in the temporary folder, which macOS trims: swap only a whole, signed bundle.
+codesign --verify --deep "$new" 2>/dev/null || { [ "$4" = 1 ] && open "$old"; exit 0; }
 rm -rf "$old.previous" && mv "$old" "$old.previous" && mv "$new" "$old" && rm -rf "$old.previous" || { [ -d "$old" ] || mv "$old.previous" "$old"; }
 xattr -dr com.apple.quarantine "$old" 2>/dev/null
 [ "$4" = 1 ] && open "$old"
@@ -147,7 +149,10 @@ function setDockIcon(style) {
 }
 
 // Only the app's own pages, in the main frame, may use the bridge.
-const fromApp = (e) => e.sender === win?.webContents && e.senderFrame === e.sender.mainFrame && new URL(e.senderFrame.url).origin === appURL.origin;
+const fromApp = (e) => {
+  try { return e.sender === win?.webContents && !!e.senderFrame && e.senderFrame === e.sender.mainFrame && new URL(e.senderFrame.url).origin === appURL.origin; }
+  catch { return false; }   // a frame mid-navigation; throwing here would be an error dialog from the main process
+};
 
 // The page reports its style and language: {style, lang}.
 ipcMain.on("suiji", (e, body) => {
@@ -165,11 +170,11 @@ ipcMain.on("suiji", (e, body) => {
 ipcMain.handle("suijiFs", async (e, body) => {
   try {
     if (!fromApp(e) || !body || typeof body !== "object") throw new Error("not allowed");
-    return { value: await bridge(body) };
+    return { value: await bridge(body, e.sender) };
   } catch (err) { return { error: err.message || String(err) }; }
 });
 
-async function bridge(body) {
+async function bridge(body, sender) {
   switch (body.op) {
     case "addFolder": {
       const r = await dialog.showOpenDialog(win, {
@@ -187,7 +192,11 @@ async function bridge(body) {
     case "reveal":
       if (!local.folders().includes(body.path)) throw new Error("not a synced folder");
       return shell.openPath(body.path).then((err) => { if (err) throw new Error(err); });
-    case "syncLog": return shell.openPath(path.join(local.suijiHome, "sync.log")).then(() => undefined);
+    case "syncLog": {
+      const file = path.join(local.suijiHome, "sync.log");
+      if (!fs.existsSync(file)) local.appendLog(new Date().toISOString() + " 还没有同步记录");   // else the button did nothing
+      return shell.openPath(file).then(() => undefined);
+    }
     case "checkUpdates": checkForUpdates(true); return undefined;
     case "zoom": return typeof body.f === "number" && body.f > 0 ? setZoom(body.f) : win.webContents.getZoomFactor();
     case "appVersion": return currentBuild ? `${version} (${currentBuild})` : version;
@@ -203,7 +212,8 @@ async function bridge(body) {
       const str = (v) => typeof v === "string" ? v : "";
       return { enabled: j.enabled === true, model: str(j.model), url: str(g.url), key: str(g.key) };
     }
-    case "localHttp": return localHttp(body);
+    case "localHttp": return localHttp(body, body.stream ? sender : null);
+    case "localHttpAbort": localHttpRuns.get(body.id)?.abort(new Error("stopped")); return undefined;
     default: {
       const v = local.handle(body);
       if (body.op === "removeFolder") watch(local.folders());
@@ -214,14 +224,18 @@ async function bridge(body) {
 
 // The assistant's model on this computer (Magpie, Ollama…): the page's https origin can't call http://127.0.0.1
 // in WebKit, and the Swift app makes the request; this does the same here. Only loopback addresses; the answer
-// comes back whole. Gives up after ten minutes without a byte from the server.
-async function localHttp(body) {
+// comes back whole, and with stream: true each piece is also sent to the page as it arrives (localHttpChunk,
+// see preload.js) so the answer can be shown as it is written. Gives up after ten minutes without a byte.
+// Requests still running, by the id the page gave them, so its Stop button can end them (op localHttpAbort).
+const localHttpRuns = new Map();
+async function localHttp(body, sender) {
   let u;
   try { u = new URL(body.url); } catch { u = null; }
   if (!u || !["http:", "https:"].includes(u.protocol) || !["127.0.0.1", "localhost", "[::1]"].includes(u.hostname.toLowerCase())) {
     throw new Error("only addresses on this computer");
   }
-  const ctl = new AbortController();
+  const ctl = new AbortController(), id = typeof body.id === "string" ? body.id : null;
+  if (id) localHttpRuns.set(id, ctl);
   let idle;
   const touch = () => { clearTimeout(idle); idle = setTimeout(() => ctl.abort(new Error("timed out")), 600_000); };
   const headers = { "user-agent": `Suiji/${version}` };   // how Magpie tells 随记's requests apart
@@ -232,10 +246,13 @@ async function localHttp(body) {
       method: typeof body.method === "string" ? body.method : "GET", headers,
       body: typeof body.body === "string" ? body.body : undefined, signal: ctl.signal, bypassCustomProtocolHandlers: true,
     });
-    const chunks = [];
-    if (res.body) for await (const c of res.body) { chunks.push(c); touch(); }
+    const chunks = [], dec = new TextDecoder();
+    if (res.body) for await (const c of res.body) {
+      chunks.push(c); touch();
+      if (sender && id && !sender.isDestroyed()) sender.send("localHttpChunk", { id, d: dec.decode(c, { stream: true }) });
+    }
     return { status: res.status, body: Buffer.concat(chunks).toString("utf8") };
-  } finally { clearTimeout(idle); }
+  } finally { clearTimeout(idle); if (id) localHttpRuns.delete(id); }
 }
 
 // Magpie lists 随记 on its Agents page once this file exists; it fills it in when 随记 is connected there.
@@ -264,7 +281,12 @@ const boundsFile = () => path.join(app.getPath("userData"), "window.json");
 
 function buildWindow() {
   let bounds = {};
-  try { bounds = JSON.parse(fs.readFileSync(boundsFile(), "utf8")); } catch {}
+  try { bounds = JSON.parse(fs.readFileSync(boundsFile(), "utf8")) || {}; } catch {}
+  // Saved on a screen that is no longer there (an external display unplugged): macOS would open the window off
+  // screen, out of reach. Keep only the size then, and center it.
+  const onScreen = Number.isFinite(bounds.x) && Number.isFinite(bounds.y) && screen.getAllDisplays().some(({ workArea: a }) =>
+    bounds.x < a.x + a.width - 80 && bounds.x + (bounds.width || 0) > a.x + 80 && bounds.y >= a.y - 10 && bounds.y < a.y + a.height - 40);
+  if (!onScreen) { delete bounds.x; delete bounds.y; }
   win = new BrowserWindow({
     width: 1280, height: 820, ...bounds, minWidth: 380, minHeight: 480,
     title: L("随记", "Suiji"), titleBarStyle: "hidden", show: false,
@@ -274,7 +296,7 @@ function buildWindow() {
       spellcheck: true,
     },
   });
-  if (!bounds.x) win.center();
+  if (!onScreen) win.center();   // x is 0 for a window at the left edge, so that alone does not mean "no position"
   const saveBounds = () => { if (!win.isFullScreen()) try { fs.writeFileSync(boundsFile(), JSON.stringify(win.getNormalBounds())); } catch {} };
   win.on("resized", saveBounds); win.on("moved", saveBounds);
   win.on("page-title-updated", (e) => e.preventDefault());

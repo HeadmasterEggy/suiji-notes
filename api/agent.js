@@ -5,7 +5,7 @@
 //   {t:"text", d}  {t:"reasoning", d}  {t:"tool", id, name, input}  {t:"error", message, code?}  {t:"done", reason}
 import { streamText, jsonSchema } from "ai";
 import { userOf, modelFor, line, fail } from "./_ai.js";
-import { TOOLS as SPEC_TOOLS, instructions } from "../public/agentspec.js";
+import { TOOLS as SPEC_TOOLS, instructions, effortBody } from "../public/agentspec.js";
 
 const MAX_CHARS = 600_000;   // whole conversation, so one request can't run up a huge bill
 
@@ -30,6 +30,9 @@ export async function POST(request) {
     instructions: instructions(body.context || {}),
     messages,
     tools: TOOLS,
+    // Thinking effort from Settings, as the request fields this service understands ("suiji" is the
+    // provider's name in _ai.js, so these pass straight into the request body).
+    providerOptions: { suiji: effortBody(picked.base, typeof body.effort === "string" ? body.effort : "") },
     abortSignal: request.signal,
   });
   const enc = new TextEncoder();
@@ -39,7 +42,7 @@ export async function POST(request) {
       try {
         for await (const part of result.stream) {
           if (part.type === "text-delta") send({ t: "text", d: part.text });
-          else if (part.type === "reasoning-delta") send({ t: "reasoning", d: part.text });   // so a reply that is all thinking isn't a blank
+          else if (part.type === "reasoning-delta") { if (part.text) send({ t: "reasoning", d: part.text }); }
           else if (part.type === "tool-call") send({ t: "tool", id: part.toolCallId, name: part.toolName, input: part.input });
           else if (part.type === "error") send({ t: "error", message: String(part.error?.message || part.error) });
           else if (part.type === "finish") send({ t: "done", reason: part.finishReason });

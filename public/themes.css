@@ -34,7 +34,7 @@
 :root[data-style="ink"] .md-title::after { content: ""; display: inline-block; width: .42em; height: .42em; margin-left: .4em; vertical-align: .55em; background: var(--accent); border-radius: 2px; }
 :root[data-style="ink"] .md-body blockquote { background: none; border-left: 2px solid var(--ink); border-radius: 0; font-family: var(--font-display); }
 :root[data-style="ink"] .tree-file[aria-current="true"] { background: var(--ink); color: var(--panel); box-shadow: none; }
-:root[data-style="ink"] .btn-primary { border-radius: 4px; }
+:root[data-style="ink"] :is(.btn-primary, .ghost.bordered, input:is([type="search"], [type="email"], [type="password"])) { border-radius: 4px; }
 :root[data-style="ink"] .graph { --g-node: #1d1d1b; --g-edge: rgba(29, 29, 27, .25); --g-edge-w: 1.1; }
 :root[data-style="ink"][data-mode="dark"] {
   --bg: #121210; --panel: #1a1a17; --ink: #e8e3d6; --muted: #918b7d; --line: #2e2d28;
@@ -134,7 +134,7 @@
 }
 :root[data-style="swiss"] body::before, :root[data-style="swiss"] body::after { display: none; }
 :root[data-style="swiss"] .glass { border-radius: 0; border: 0; border-top: 4px solid var(--ink); box-shadow: none; }
-:root[data-style="swiss"] :is(.ghost, .btn-primary, input[type="search"], .tree-row, .toc-list button, .md-tag, .md-chip, .md-prop-list, .settings, .set-styles button, .seg, .seg button) { border-radius: 0; }
+:root[data-style="swiss"] :is(.note, .ghost, .btn-primary, input:is([type="search"], [type="email"], [type="password"]), .tree-row, .toc-list button, .md-tag, .md-chip, .md-prop-list, .settings, .set-styles button, .seg, .seg button) { border-radius: 0; }
 :root[data-style="swiss"] .brand { font-weight: 800; letter-spacing: -.03em; }
 :root[data-style="swiss"] .brand::after { content: "."; color: var(--accent); }
 :root[data-style="swiss"] .md-body :is(h1, h2, h3) { font-weight: 800; letter-spacing: -.02em; }
@@ -210,7 +210,7 @@
 }
 :root[data-style="blueprint"] body::before, :root[data-style="blueprint"] body::after { display: none; }
 :root[data-style="blueprint"] .glass { border-radius: 2px; border: 1px solid var(--rim-low); box-shadow: 4px 4px 0 rgba(0, 0, 0, .15); }
-:root[data-style="blueprint"] :is(.ghost, .btn-primary, input[type="search"], .tree-row, .md-tag, .md-chip, .md-prop-list, .settings, .set-styles button, .seg, .seg button) { border-radius: 2px; }
+:root[data-style="blueprint"] :is(.note, .ghost, .btn-primary, input:is([type="search"], [type="email"], [type="password"]), .tree-row, .md-tag, .md-chip, .md-prop-list, .settings, .set-styles button, .seg, .seg button) { border-radius: 2px; }
 :root[data-style="blueprint"] .brand, :root[data-style="blueprint"] .md-body :is(h1, h2, h3), :root[data-style="blueprint"] .md-title { text-transform: uppercase; letter-spacing: .08em; font-weight: 600; }
 /* headings get a dimension line: |———| under them */
 :root[data-style="blueprint"] .md-body h2 { padding-bottom: .35em; background:
@@ -373,3 +373,88 @@
 .swatch.eyecare-sw { background: radial-gradient(circle at 72% 70%, #3f7a52 0 16%, transparent 17%), linear-gradient(#2e3a2f 0 0) 18% 30% / 50% 2px no-repeat, linear-gradient(#5b6c5c 0 0) 18% 50% / 38% 2px no-repeat, #c7e3c9; }
 .swatch.sunset-sw { background: radial-gradient(circle at 50% 120%, #fff3c4 0 30%, transparent 32%), linear-gradient(#ffb88c, #ff9a8b 45%, #9d8ad9); }
 @media (max-width: 720px) { :root[data-style="swiss"] .md-title { font-size: 1.9em; } }
+
+/* ===================== Thinking-effort switch, per style =====================
+   Liquid glass (style.css) is the 玻璃 look. Every other style gives the lens the look of its own selected
+   row, and drops the glass where the style has none. --eff-on / --eff-bar: text and bar colour on the lens. */
+:root[data-style] .effort-thumb { background: var(--accent); border: 0; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root[data-style] .effort-seg { --eff-on: var(--on-accent); --eff-bar: currentColor; box-shadow: none; }
+:where(:root[data-style]:not([data-style="neon"], [data-style="sunset"])) .effort-seg { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--panel); border-color: var(--line); }
+
+/* 纸张: a sepia ink tab on warm paper */
+:root[data-style="paper"] .effort-thumb { border-radius: 10px; box-shadow: 0 2px 6px rgba(80, 60, 30, .18); }
+
+/* 终端: a glowing green cursor block, square corners */
+:root[data-style="terminal"] .effort-seg { border-radius: 4px; background: transparent; border-color: var(--rim-low); }
+:root[data-style="terminal"] .effort-seg button { border-radius: 2px; }
+:root[data-style="terminal"] .effort-thumb { border-radius: 2px; box-shadow: 0 0 14px rgba(74, 222, 128, .45); }
+
+/* 方块: a raised grass block in a stone slot; it hops from level to level instead of gliding */
+:root[data-style="blocks"] .effort-seg { border-radius: 0; border: 0; background: #8b8b8b; box-shadow: var(--slot); padding: calc(var(--px) + 2px); }
+:root[data-style="blocks"] .effort-seg button { border-radius: 0; font-family: var(--font-pixel); }
+:root[data-style="blocks"] .effort-thumb { border-radius: 0; top: calc(var(--px) + 2px); bottom: calc(var(--px) + 2px); box-shadow: var(--bevel); transition-timing-function: steps(4, end); }
+:root[data-style="blocks"] .effort-bars i { border-radius: 0; }
+:root[data-style="blocks"] .effort-thumb.wobble { animation: none; }
+
+/* 水墨: a stroke of solid ink */
+:root[data-style="ink"] .effort-seg { border-radius: 4px; }
+:root[data-style="ink"] .effort-thumb { border-radius: 2px; background: var(--ink); }
+:root[data-style="ink"] .effort-seg { --eff-on: var(--panel); }
+
+/* 墨水屏: black on white, no motion at all */
+:root[data-style="eink"] .effort-seg { border-radius: 0; border-color: #000; }
+:root[data-style="eink"] .effort-seg button { border-radius: 0; }
+:root[data-style="eink"] .effort-thumb { border-radius: 0; transition: none; }
+:root[data-style="eink"] :is(.effort-thumb.wobble, .ai-effort.pop .effort-seg, .ai-effort.pop .effort-seg button) { animation: none; }
+
+/* 手帐: a highlighter swipe, a little crooked, on a dashed line */
+:root[data-style="notebook"] .effort-seg { border-style: dashed; border-radius: 6px; }
+:root[data-style="notebook"] .effort-thumb { background: #ffe9a8; border-radius: 3px; rotate: -1.2deg; }
+:root[data-style="notebook"] .effort-seg { --eff-on: var(--ink); --eff-bar: var(--ink); }
+:root[data-style="notebook"][data-mode="dark"] .effort-thumb { background: #5a4a26; }
+
+/* 瑞士: a hard red block, no rounding */
+:root[data-style="swiss"] .effort-seg, :root[data-style="swiss"] .effort-seg button, :root[data-style="swiss"] .effort-thumb { border-radius: 0; }
+:root[data-style="swiss"] .effort-seg { --eff-on: #fff; }
+
+/* 霓虹: a glowing tube over smoked glass */
+:root[data-style="neon"] .effort-thumb { box-shadow: 0 0 18px rgba(255, 62, 200, .6); }
+:root[data-style="neon"] .effort-seg { --eff-on: #0b0716; }
+:root[data-style="neon"][data-mode="light"] .effort-seg { --eff-on: #fff; }
+:root[data-style="neon"][data-mode="light"] .effort-thumb { box-shadow: 0 6px 18px rgba(212, 15, 160, .35); }
+
+/* 蓝图: a white plate on dashed construction lines */
+:root[data-style="blueprint"] .effort-seg { border-radius: 2px; border-style: dashed; }
+:root[data-style="blueprint"] .effort-seg button, :root[data-style="blueprint"] .effort-thumb { border-radius: 2px; }
+:root[data-style="blueprint"] .effort-thumb { background: #fff; }
+:root[data-style="blueprint"] .effort-seg { --eff-on: var(--bg); }
+:root[data-style="blueprint"][data-mode="light"] .effort-thumb { background: var(--accent); }
+:root[data-style="blueprint"][data-mode="light"] .effort-seg { --eff-on: #fff; }
+
+/* 粘土: a puffy clay pill pressed into a soft trough */
+:root[data-style="clay"] .effort-seg { border-radius: 999px; border: 0; box-shadow: inset 0 3px 6px rgba(40, 20, 120, .12), inset 0 -1px 0 rgba(255, 255, 255, .6); }
+:root[data-style="clay"] .effort-seg button, :root[data-style="clay"] .effort-thumb { border-radius: 999px; }
+:root[data-style="clay"] .effort-thumb { box-shadow: inset 0 2px 1px rgba(255, 255, 255, .45), inset 0 -4px 8px rgba(40, 20, 120, .25), 0 8px 16px -6px rgba(123, 97, 255, .6); }
+:root[data-style="clay"] .effort-seg { --eff-on: #fff; }
+:root[data-style="clay"][data-mode="dark"] .effort-seg { --eff-on: #1b1830; }
+
+/* 日落: the orange-to-pink sky gradient */
+:root[data-style="sunset"] .effort-thumb { background: linear-gradient(90deg, #ff8a4c, #e0458c); box-shadow: 0 8px 18px -6px rgba(224, 69, 140, .5); }
+:root[data-style="sunset"] .effort-seg { --eff-on: #fff; }
+
+/* 护眼: a calm solid green, no glow */
+:root[data-style="eyecare"] .effort-thumb { border-radius: 10px; }
+
+/* Model suggestions, per style: no blur where the style has no glass, and its own corners. */
+:where(:root[data-style]:not([data-style="neon"], [data-style="sunset"])) .suggest { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--panel); border-color: var(--line); }
+:root:is([data-style="swiss"], [data-style="eink"], [data-style="blocks"]) :is(.suggest, .sug) { border-radius: 0; }
+:root:is([data-style="terminal"], [data-style="blueprint"], [data-style="ink"]) :is(.suggest, .sug) { border-radius: 3px; }
+:root[data-style="blocks"] .suggest { box-shadow: var(--bevel), 0 0 0 var(--px) #1e1e1e; font-family: var(--font-pixel); }
+:root[data-style="eink"] .suggest { border-color: #000; box-shadow: none; }
+:root[data-style="eink"] :is(.suggest.pop, .suggest.pop .sug) { animation: none; }
+:root[data-style="notebook"] .sug[aria-selected=true] { background: #ffe9a8; color: var(--ink); }
+:root[data-style="notebook"][data-mode="dark"] .sug[aria-selected=true] { background: #5a4a26; }
+:root[data-style="sunset"] .sug[aria-selected=true] { background: linear-gradient(90deg, #ff8a4c, #e0458c); color: #fff; }
+:root[data-style="neon"] .sug[aria-selected=true] { box-shadow: 0 0 14px rgba(255, 62, 200, .5); }
+:root[data-style="clay"] .suggest { border-radius: 20px; }
+:root[data-style="clay"] .sug { border-radius: 999px; }

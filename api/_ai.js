@@ -66,5 +66,5 @@ export async function modelFor(user) {
   const bad = checkBaseUrl(cfg.base_url);
   if (bad) throw new Error(bad);
   const provider = createOpenAICompatible({ name: "suiji", baseURL: cfg.base_url.replace(/\/+$/, ""), apiKey: cfg.apiKey });
-  return { model: provider.chatModel(cfg.model), name: cfg.model, own: cfg.own };
+  return { model: provider.chatModel(cfg.model), name: cfg.model, base: cfg.base_url, own: cfg.own };
 }

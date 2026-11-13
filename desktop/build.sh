@@ -6,10 +6,10 @@
 # Raise BUILD for every release you publish; installed apps only update to a higher BUILD. The Swift app is at 9.
 # Apple silicon only for now.
 set -e
-VERSION=${VERSION:-2.3}
-BUILD=${BUILD:-13}
+VERSION=${VERSION:-2.5}
+BUILD=${BUILD:-15}
 REPO=HeadmasterEggy/suiji-notes
-NOTES="Interface size: a slider in Settings → Appearance (75–150 %), the same zoom as ⌘+ / ⌘−, now kept after a restart. 界面大小：设置 → 外观 里的滑块（75%–150%），和 ⌘+ / ⌘− 是同一个缩放，重启后也会保留。"
+NOTES="The assistant's answers from Magpie or a model on this computer now appear as they are written, instead of all at once at the end. 助手：用 Magpie 或本机模型时，回答会边生成边显示，不用等整段写完。"
 cd "$(dirname "$0")"
 
 [ -d node_modules/electron-builder ] || npm ci

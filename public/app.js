@@ -6,7 +6,8 @@ import { mdMeta } from "./mdmeta.js";
 import { mountGraph } from "./graph.js";
 import { t, lang, langChoice, translatePage } from "./i18n.js";
 import * as local from "./localsync.js";
-import { mountAgent, toggleAgent, resetAgent, localModel, setLocalModel, localHttp, refreshMagpie, askAgent } from "./agent.js";
+import { mountAgent, toggleAgent, resetAgent, localModel, setLocalModel, localHttp, refreshMagpie, askAgent, aiEffort, setAiEffort } from "./agent.js";
+import { effortFamily, effortFor } from "./agentspec.js";
 import { mountMenu } from "./ctxmenu.js";
 
 translatePage();
@@ -121,11 +122,7 @@ async function checkUpdate() {
   if (document.hidden && !busy) return location.reload();
   $("updateToast").hidden = false;
 }
-$("updateToast").onclick = async () => {
-  commitAll();
-  await Promise.all([...panes.values()].map((p) => p.saving));
-  location.reload();
-};
+$("updateToast").onclick = async () => { await saveAll(); location.reload(); };
 setInterval(checkUpdate, 10 * 60 * 1000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) checkUpdate(); });
 
@@ -147,8 +144,8 @@ function load() {
   catch { store = { notes: {} }; }
 }
 function persist() {
-  try { localStorage.setItem(storeKey(), JSON.stringify(store)); }
-  catch { showNote(t("本机存储已满，最新改动可能只在内存里，请保持联网让它同步。"), "err"); }
+  try { localStorage.setItem(storeKey(), JSON.stringify(store)); clearNote("store"); }
+  catch { showNote(t("本机存储已满，最新改动可能只在内存里，请保持联网让它同步。"), "err", "store"); }
 }
 const visible = () => Object.values(store.notes).filter((n) => !n.deleted)
   .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
@@ -164,7 +161,18 @@ function merge(row) {
 // ---------- sync ----------
 let syncing = false, again = false, channel = null;
 function setSync(state, text) { $("sync").dataset.s = state; $("syncText").textContent = text; }
-function showNote(text, kind) { const n = $("note"); n.hidden = !text; n.textContent = text || ""; n.dataset.kind = kind || ""; }
+// The notice above the search box. Each message names its source, and a source clears only its own message, so
+// one part of the app doing fine (a sync) no longer hides another's problem (storage full, a failed upload).
+// A click dismisses it; a message that isn't an error goes by itself after a while.
+let noteTimer = 0;
+function showNote(text, kind, src = "") {
+  const n = $("note");
+  clearTimeout(noteTimer);
+  n.hidden = !text; n.textContent = text || ""; n.dataset.kind = kind || ""; n.dataset.src = src; n.title = text ? t("点击关闭") : "";
+  if (text && kind !== "err") noteTimer = setTimeout(() => clearNote(src), 8000);
+}
+function clearNote(src) { if (!$("note").hidden && $("note").dataset.src === src) showNote(""); }
+$("note").onclick = () => showNote("");
 
 async function sync() {
   if (!uid) return;
@@ -190,11 +198,11 @@ async function sync() {
     if (changed) render();
     else renderList();
     setSync("ok", t("已同步"));
-    showNote(filesErr ? t("没能载入文件列表，几秒后会自动重试。") : "", "err");
+    if (filesErr) showNote(t("没能载入文件列表，几秒后会自动重试。"), "err", "files"); else clearNote("sync");
   } catch (e) {
     console.error(e);
     setSync("err", t("同步失败"));
-    showNote(t("没能同步到云端，改动已保存在本机，联网后会自动重试。"), "err");
+    showNote(t("没能同步到云端，改动已保存在本机，联网后会自动重试。"), "err", "sync");
   } finally {
     syncing = false;
     if (again) { again = false; sync(); }
@@ -216,6 +224,7 @@ function subscribe() {
 // ---------- files ----------
 // File bytes live in the private "files" bucket at <uid>/<id>.<ext>; the files table keeps the real name.
 const MAX_FILE = 50 * 1024 * 1024;
+let pathsSig = null;   // hash of every file's path, see loadFiles
 let files = [], allFiles = [], filesLoaded = false, filesErr = false, filesRetry = null;
 const isImage = (f) => f.mime.startsWith("image/");
 const extOf = (name) => { const m = /\.([a-z0-9]{1,6})$/i.exec(name); return m ? m[1].toLowerCase() : ""; };
@@ -237,16 +246,24 @@ async function loadFiles() {
     // With no list yet, say so instead of loading forever, and try again shortly.
     if (!filesLoaded) {
       filesErr = true; renderList();
-      showNote(t("没能载入文件列表，几秒后会自动重试。"), "err");
+      showNote(t("没能载入文件列表，几秒后会自动重试。"), "err", "files");
       filesRetry = setTimeout(loadFiles, 5000);
     }
     return;
   }
-  if (filesErr) { filesErr = false; showNote(""); }
+  if (filesErr) { filesErr = false; clearNote("files"); }
   const before = new Map(files.map((f) => [f.id, versionOf(f)]));
   for (const f of data) if (before.has(f.id) && before.get(f.id) !== versionOf(f)) forgetUrls(f.path);
   // Only Markdown documents are shown; any other file in the account stays in the cloud, untouched and hidden.
   allFiles = data; files = data.filter(isMarkdown); filesLoaded = true;
+  // A document drawn before a file it links to (or shows) arrived, moved or went still says 没有找到; when the
+  // set of paths changes, drawings are made again (the open ones in place, where the reader is).
+  const sig = fnv(allFiles.map((x) => fullPath(x).join("/")).sort().join("\n"));
+  if (pathsSig !== null && sig !== pathsSig) {
+    rendered.clear();
+    for (const p of panes.values()) if (p.kind === "file" && !p.fileEdit) p.shown = null;
+  }
+  pathsSig = sig;
   render();
   schedulePrefetch();
 }
@@ -265,30 +282,36 @@ async function uploadFiles(input) {
   const picked = [...input].filter((f) => !baseName(f.webkitRelativePath || f.name).startsWith("."));
   // Only Markdown documents are uploaded; anything else picked (or inside a picked folder) is left out.
   const all = picked.filter((f) => isMarkdown({ name: f.name, mime: f.type || "" }));
-  if (picked.length > all.length) showNote(t("只支持 Markdown（.md）文档，跳过了 {n} 个其他文件。", { n: picked.length - all.length }), all.length ? "" : "err");
+  if (picked.length > all.length) showNote(t("只支持 Markdown（.md）文档，跳过了 {n} 个其他文件。", { n: picked.length - all.length }), all.length ? "" : "err", "upload");
   const tooBig = all.filter((f) => f.size > MAX_FILE);
-  if (tooBig.length) showNote(t("{names} 超过 50 MB，没有上传。", { names: tooBig.map((f) => f.name).join(lang === "en" ? ", " : "、") }), "err");
+  if (tooBig.length) showNote(t("{names} 超过 50 MB，没有上传。", { names: tooBig.map((f) => f.name).join(lang === "en" ? ", " : "、") }), "err", "upload");
   const ok = all.filter((f) => f.size <= MAX_FILE);
   uploading += ok.length;
+  let failed = 0;
   for (const file of ok) {
     setSync("saving", t("上传中 · 剩 {n} 个", { n: uploading }));
     const id = crypto.randomUUID(), ext = extOf(file.name);
     const path = `${uid}/${id}${ext ? "." + ext : ""}`;
-    const mime = file.type || "application/octet-stream";
+    const mime = file.type || "text/markdown";   // browsers often give .md files no type; only Markdown is uploaded
     const { folder, name } = placeOf(file);
     try {
       const up = await sb.storage.from("files").upload(path, file, { contentType: mime });
       if (up.error) throw up.error;
-      const ins = await sb.from("files").insert({ id, user_id: uid, name, folder, path, size: file.size, mime });
+      // Links and tags too, as the Mac sync and a save in the editor store them: else an uploaded document
+      // stays out of the graph and a #tag search until it is next edited.
+      const meta = mdMeta(await file.text());
+      const ins = await sb.from("files").insert({ id, user_id: uid, name, folder, path, size: file.size, mime, ...meta });
       if (ins.error) { await sb.storage.from("files").remove([path]); throw ins.error; }
     } catch (e) {
       console.error(e);
-      showNote(t("「{name}」上传失败：{msg}。", { name: file.name, msg: e.message || t("网络问题") }), "err");
+      showNote(t("「{name}」上传失败：{msg}。", { name: file.name, msg: e.message || t("网络问题") }), "err", "upload");
+      failed++;
     } finally {
       uploading--;
     }
   }
-  setSync("ok", t("已同步"));
+  // Another batch may still be going (two drops in a row): it sets the state when it ends.
+  if (!uploading) setSync(failed ? "err" : "ok", failed ? t("上传失败") : t("已同步"));
   await loadFiles();
 }
 
@@ -588,11 +611,21 @@ function obsidianSyntax(part, wiki, embeds) {
       const [target, alias] = inner.split(/\\?\|/);
       const [file, heading] = target.split("#");
       const label = (alias || (file ? baseName(stripMd(file.trim())) + (heading ? " › " + heading : "") : heading || "")).trim();
-      wiki.push(file.trim());
+      wiki.push({ file: file.trim(), heading: (heading || "").trim() });
       return `[${mdEscape(label || inner)}](#suiji-wiki-${wiki.length - 1})`;
     })
     .replace(/==(?=\S)([^=\n]+?)(?<=\S)==/g, "<mark>$1</mark>");
 }
+
+// Formulas are pulled out before Markdown sees them (so _ and * inside stay intact), outside code only; the
+// documents and the assistant's replies share this.
+const MATH = [[/\$\$([\s\S]+?)\$\$/g, true], [/\\\[([\s\S]+?)\\\]/g, true], [/\\\(([\s\S]+?)\\\)/g, false],
+  [/(?<![\\$\w])\$(?!\s)([^\n$]+?)(?<![\s\\])\$(?!\d)/g, false]];
+const outsideCode = (text, fn) => text.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]+`)/g).map((part, i) => i % 2 ? part : fn(part)).join("");
+function pullMath(part, put) { for (const [re, display] of MATH) part = part.replace(re, (_, tex) => put(tex, display)); return part; }
+const katexHtml = (tex, display) => window.katex.renderToString(tex.trim(), { displayMode: display, throwOnError: false, output: "html" });
+// GitHub-style heading anchors ("#my-heading") and Obsidian's ("#My Heading") both compare equal under this.
+const slug = (s) => String(s).trim().toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, "").replace(/\s+/g, "-");
 
 async function renderMarkdown(src, f) {
   await loadMarkdownLibs();
@@ -601,23 +634,18 @@ async function renderMarkdown(src, f) {
     .replace(/\{%\s*asset_img\s+(\S+)\s*(.*?)%\}/g, (_, file, alt) => `![${alt.trim()}](${file})`)
     .replace(/^\s*\{%[^%]*%\}\s*$/gm, "");
 
-  // Pull math out before Markdown sees it (so _ and * inside formulas stay intact), skipping code.
   const math = [];
   const keep = (tex, display) => {
-    math.push(window.katex.renderToString(tex.trim(), { displayMode: display, throwOnError: false, output: "html" }));
+    math.push(katexHtml(tex, display));
     return display ? `\n\nKATEXBLOCK${math.length - 1}END\n\n` : `KATEXINLINE${math.length - 1}END`;
   };
   const wiki = [], embeds = [];
-  text = text.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]+`)/g).map((part, i) => i % 2 ? part : obsidianSyntax(part
-    .replace(/\$\$([\s\S]+?)\$\$/g, (_, t) => keep(t, true))
-    .replace(/\\\[([\s\S]+?)\\\]/g, (_, t) => keep(t, true))
-    .replace(/\\\(([\s\S]+?)\\\)/g, (_, t) => keep(t, false))
-    .replace(/(?<![\\$\w])\$(?!\s)([^\n$]+?)(?<![\s\\])\$(?!\d)/g, (_, t) => keep(t, false)), wiki, embeds)
-  ).join("");
+  text = outsideCode(text, (part) => obsidianSyntax(pullMath(part, keep), wiki, embeds));
 
   let html = window.DOMPurify.sanitize(window.marked.parse(text, { gfm: true, breaks: false }));
   html = html
     .replace(/<p>KATEXBLOCK(\d+)END<\/p>/g, (_, i) => `<div class="math-block">${math[i]}</div>`)
+    .replace(/KATEXINLINE(\d+)END([，。、；：！？）」』”’,.;:!?)]+)/g, (_, i, punct) => `<span class="math-nb">${math[i]}${punct}</span>`)
     .replace(/KATEX(?:BLOCK|INLINE)(\d+)END/g, (_, i) => math[i]);
 
   const art = document.createElement("article");
@@ -667,17 +695,31 @@ async function renderMarkdown(src, f) {
   // It replaces the one docHead made, so a heading after a comment, a Hexo tag or in === style isn't shown twice.
   if (first?.tagName === "H1") { const head = art.querySelector(".md-head"); head.querySelector(".md-title")?.remove(); first.classList.add("md-title"); head.prepend(first); }
   const find = wiki.length ? linkResolver(files.filter(isMarkdown)) : null, wdir = f.name.split("/").slice(0, -1);
+  // Links inside the app carry what to open in data-open / data-heading, handled by the pane's click listener
+  // (so cached copies keep working). [[#Heading]] and (#heading) go to a heading of this document.
+  const missing = (a, title) => a.replaceWith(Object.assign(document.createElement("span"), { className: "wikilink missing", textContent: a.textContent, title }));
   for (const a of content.querySelectorAll('a[href^="#suiji-wiki-"]')) {
-    const target = find(wdir, wiki[+a.getAttribute("href").slice(12)] || "");
-    if (target) { a.dataset.open = target.id; a.href = "#"; a.title = target.name; a.classList.add("wikilink"); }
-    else a.replaceWith(Object.assign(document.createElement("span"), { className: "wikilink missing", textContent: a.textContent, title: t("没有找到这篇笔记") }));
+    const w = wiki[+a.getAttribute("href").slice(12)] || { file: "", heading: "" };
+    const target = w.file ? find(wdir, w.file) : w.heading ? f : null;
+    if (!target) { missing(a, t("没有找到这篇笔记")); continue; }
+    a.dataset.open = target.id; a.href = "#"; a.title = w.file ? target.name : w.heading; a.classList.add("wikilink");
+    if (w.heading) a.dataset.heading = w.heading;
   }
+  const attach = [];
   for (const a of content.querySelectorAll("a[href]")) {
     if (a.dataset.open) continue;
-    const href = a.getAttribute("href");
-    const target = isRel(href) && byPath.get(resolveRel(dir, href));
-    if (target && isMarkdown(target)) a.dataset.open = target.id;   // handled by the pane's click listener, so cached copies keep working
-    else if (!target && !href.startsWith("#")) { a.target = "_blank"; a.rel = "noopener"; }
+    const href = a.getAttribute("href"), hash = decodePath(href.split("#").slice(1).join("#"));
+    if (href.startsWith("#")) { if (hash) { a.dataset.open = f.id; a.dataset.heading = hash; } continue; }
+    if (!isRel(href)) { a.target = "_blank"; a.rel = "noopener"; continue; }
+    // A relative link is never followed as written: it would load a page of this site in place of the app.
+    const target = byPath.get(resolveRel(dir, href));
+    if (!target) missing(a, t("没有找到这个文件"));
+    else if (isMarkdown(target)) { a.dataset.open = target.id; if (hash) a.dataset.heading = hash; }
+    else attach.push([a, target]);   // a PDF or picture beside the document opens in a new tab
+  }
+  if (attach.length) {
+    const urls = await signedUrls([...new Set(attach.map(([, x]) => x.path))]).catch(() => new Map());
+    for (const [a, x] of attach) { const u = urls.get(x.path); if (u) Object.assign(a, { href: u, target: "_blank", rel: "noopener" }); else missing(a, t("没有找到这个文件")); }
   }
   return art;
 }
@@ -753,11 +795,15 @@ function toPlace(p, at) {
 
 // What a Markdown drawing was made from: the text and the look (Mermaid's generated ids differ every time,
 // so two drawings of the same text are compared by this, not node by node).
-function drawKey(text) {
+function fnv(text) {
   let h = 2166136261;
   for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+// The files a drawing could point at count too: its links and pictures are looked up among them.
+function drawKey(text) {
   const d = document.documentElement.dataset;
-  return [d.mode, d.style || "", lang, text.length, h >>> 0].join(":");
+  return [d.mode, d.style || "", lang, text.length, fnv(text), pathsSig].join(":");
 }
 const sameDrawing = (a, b) => !!a.dataset?.src && a.dataset.src === b.dataset?.src;
 async function showFile(f, p) {
@@ -774,6 +820,7 @@ async function showFile(f, p) {
     const at = again && p.place?.id === f.id ? p.place : null;
     for (const c of preview.children) p.keep.unobserve(c);
     clearTimeout(wait); preview.replaceChildren(el); preview.scrollTop = 0; p.shownId = f.id;
+    p.anchors = null;   // the observer that drops the old list only runs after this, and toPlace needs the new one now
     p.keep.observe(el);
     if (at) { p.place = at; toPlace(p, at); }
     if (staleIds.has(f.id) && !retried.has(versionOf(f))) {
@@ -1026,9 +1073,12 @@ function folderKeys() {
   walk(buildTree(), []);
   return keys;
 }
+// Whether a folder the sidebar shows at its top level is open. Not expanded.size: it also remembers folders
+// that have since gone, or sit inside a closed one, and then the button offered to fold with nothing open.
+const anyOpen = () => (expanded.has(NOTES_KEY) && visible().length > 0) || [...buildTree().dirs.keys()].some((k) => expanded.has(k));
 function showCounts() {
-  $("counts").textContent = t("{files} 个文件 · {folders} 个文件夹", { files: files.length, folders: folderKeys().length });
-  const label = expanded.size ? t("全部折叠") : t("全部展开");
+  $("counts").textContent = $("counts").title = t("{files} 个文件 · {folders} 个文件夹", { files: files.length, folders: folderKeys().length });   // title: a narrow sidebar cuts it off
+  const label = anyOpen() ? t("全部折叠") : t("全部展开");
   $("foldBtn").title = label; $("foldBtn").setAttribute("aria-label", label);
 }
 
@@ -1165,7 +1215,11 @@ function makePane(item) {
   p.ta.addEventListener("blur", () => commit(p));
   p.preview.addEventListener("click", (e) => {
     const a = e.target.closest("a[data-open]");
-    if (a) { e.preventDefault(); openIn(p, "file", a.dataset.open); }
+    if (a) {
+      e.preventDefault();
+      if (a.dataset.open !== p.itemId) openIn(p, "file", a.dataset.open);
+      if (a.dataset.heading) goHeading(p, a.dataset.open, a.dataset.heading);
+    }
     const tag = e.target.closest("[data-tag]");
     if (tag) searchTag(tag.dataset.tag);
   });
@@ -1258,7 +1312,7 @@ function makePane(item) {
     else { const s = await sb.storage.from("files").createSignedUrl(f.path, 60);
       if (!s.error) try { const r = await fetch(s.data.signedUrl + "&t=" + Date.now(), { cache: "no-store" }); if (r.ok) text = await r.text(); } catch {} }
     p.edit.disabled = false; editLabel(p, t("编辑"), false);
-    if (text === null) { showNote(t("读取文件失败，请检查网络。"), "err"); return; }
+    if (text === null) { showNote(t("读取文件失败，请检查网络。"), "err", "file"); return; }
     p.fileBase = text;
     p.ta.value = p.fileBase; p.fileEdit = true; p.editing = false;
     renderPane(p);
@@ -1307,6 +1361,8 @@ function commit(p) {
   persist(); render(); scheduleSync();
 }
 const commitAll = () => panes.forEach(commit);
+// Saves every pane now and waits for the file saves (notes save to this device at once).
+async function saveAll() { commitAll(); await Promise.all([...panes.values()].map((p) => p.saving)); }
 
 const TEXT_EXT = ["md", "markdown", "txt", "csv", "log", "json", "yml", "yaml", "toml", "tex", "py", "js", "ts", "html", "css", "sh"];
 const isEditable = (f) => f.size < 2 * 1024 * 1024 && (f.mime.startsWith("text/") || /json|xml/.test(f.mime) || TEXT_EXT.includes(extOf(f.name)));
@@ -1342,12 +1398,12 @@ async function saveFile(p) {
   setSync("saving", t("保存中…"));
   try { await writeFileText(f, text); } catch (e) {
     p.editing = true;   // keep it unsaved so the next edit or blur retries
-    setSync("err", t("保存失败")); showNote(e.message, "err");
+    setSync("err", t("保存失败")); showNote(e.message, "err", "file");
     return;
   }
   p.fileBase = text;
   p.shown = local.localPath(f) ? null : versionOf(f);   // the preview refreshes when editing ends, not now
-  setSync("ok", t("已同步")); showNote("");
+  setSync("ok", t("已同步")); clearNote("file");
   if (!p.fileEdit) renderPane(p);
 }
 
@@ -1366,15 +1422,8 @@ mountAgent({
   async markdown(text) {
     await loadMarkdownLibs();
     // Formulas as in documents: pulled out before Markdown sees them, code spans left alone.
-    const math = [], keep = (tex, display) => {
-      math.push(window.katex.renderToString(tex.trim(), { displayMode: display, throwOnError: false, output: "html" }));
-      return `KATEXMATH${math.length - 1}END`;
-    };
-    text = text.replace(/\]\(suiji:/g, "](#suiji:").split(/(```[\s\S]*?```|`[^`\n]+`)/g).map((part, i) => i % 2 ? part : part
-      .replace(/\$\$([\s\S]+?)\$\$/g, (_, t) => keep(t, true))
-      .replace(/\\\[([\s\S]+?)\\\]/g, (_, t) => keep(t, true))
-      .replace(/\\\(([\s\S]+?)\\\)/g, (_, t) => keep(t, false))
-      .replace(/(?<![\\$\w])\$(?!\s)([^\n$]+?)(?<![\s\\])\$(?!\d)/g, (_, t) => keep(t, false))).join("");
+    const math = [], keep = (tex, display) => { math.push(katexHtml(tex, display)); return `KATEXMATH${math.length - 1}END`; };
+    text = outsideCode(text.replace(/\]\(suiji:/g, "](#suiji:"), (part) => pullMath(part, keep));
     return window.DOMPurify.sanitize(window.marked.parse(text, { gfm: true, breaks: true }))
       .replace(/KATEXMATH(\d+)END/g, (_, i) => math[i]);
   },
@@ -1404,55 +1453,90 @@ mountAgent({
 });
 
 // ---------- graph ----------
-// Nodes: Markdown files and notes (plus tags when switched on). Edges: [[links]] and relative .md links,
+// Nodes: Markdown files and notes, never tags (Joey: tags stay out of the graph; a tag is matched through each
+// note's own tags list, for colour groups and the assistant). Edges: [[links]] and relative .md links,
 // resolved the way Obsidian does: relative to the file, then from the vault root, then by unique file name.
-function graphData(withTags) {
-  const nodes = [], edges = new Set(), idx = new Map();
+// Folders the graph leaves out, at any depth (Joey: the mind maps would only crowd it). They stay in the sidebar.
+const GRAPH_SKIP = new Set(["思维导图"]);
+
+function graphData() {
+  const nodes = [], edges = new Map(), idx = new Map();
   const add = (key, node) => { if (!idx.has(key)) { idx.set(key, nodes.length); nodes.push(node); } return idx.get(key); };
-  const md = files.filter(isMarkdown);
-  for (const f of md) add("file:" + f.id, { label: stripMd(baseName(f.name)), kind: "file", ref: f.id });
-  const find = linkResolver(md);
+  const all = files.filter(isMarkdown);
+  const md = all.filter((f) => !fullPath(f).slice(0, -1).some((d) => GRAPH_SKIP.has(d)));
+  // Category (the node's colour): the first folder level where files part ways, so a single synced vault
+  // folder still splits by its subfolders. Files sitting above that level, and quick notes, get their own.
+  const dirs = md.map((f) => fullPath(f).slice(0, -1));
+  let depth = 0;
+  // A file sitting right in that shared folder (say a README beside the course folders) must not stop the
+  // split, or every note ends up in one category: it is named after the shared folder instead.
+  while (dirs.length && dirs.every((d) => d.length > depth && d[depth] === dirs[0][depth])) depth++;
+  // len: rough length in characters for "node size by length" (UTF-8 bytes; CJK text is about 3 a character).
+  md.forEach((f, k) => add("file:" + f.id, { label: stripMd(baseName(f.name)), kind: "file", ref: f.id, group: dirs[k][depth] || dirs[k][depth - 1] || t("未分类"), len: (f.size || 0) / 2, tags: f.tags || [], path: fullPath(f).join("/") }));
+  const find = linkResolver(all);   // every document: a link to a left-out mind map drops, not lands on a namesake
   const resolve = (dir, target) => { const f = find(dir, target); return f ? idx.get("file:" + f.id) : undefined; };
-  const link = (a, b) => { if (b !== undefined && a !== b) edges.add(a < b ? a + "," + b : b + "," + a); };
+  // One edge per pair; its third value says which way the links run (1: low index to high, 2: back, 3: both,
+  // 0: a tag), for the arrows.
+  const link = (a, b, dir = true) => {
+    if (b === undefined || a === b) return;
+    const key = a < b ? a + "," + b : b + "," + a;
+    edges.set(key, (edges.get(key) || 0) | (!dir ? 0 : a < b ? 1 : 2));
+  };
   for (const f of md) {
     const i = idx.get("file:" + f.id), dir = f.name.split("/").slice(0, -1);
     for (const l of f.links || []) link(i, resolve(dir, l));
-    if (withTags) for (const t of f.tags || []) link(i, add("tag:" + t, { label: "#" + t, kind: "tag", ref: t }));
   }
   for (const n of visible()) {
-    const i = add("note:" + n.id, { label: titleOf(n.body), kind: "note", ref: n.id });
     const meta = mdMeta(n.body);
+    const i = add("note:" + n.id, { label: titleOf(n.body), kind: "note", ref: n.id, group: t("随手记"), len: n.body.length, tags: meta.tags, path: "" });
     for (const l of meta.links) link(i, resolve([], l));
-    if (withTags) for (const t of meta.tags) link(i, add("tag:" + t, { label: "#" + t, kind: "tag", ref: t }));
   }
-  return { nodes, edges: [...edges].map((e) => e.split(",").map(Number)) };
+  return { nodes, edges: [...edges].map(([e, dir]) => [...e.split(",").map(Number), dir]) };
 }
 
 function graphKey(p) {
   let latest = "";
   for (const f of files) if ((f.updated_at || "") > latest) latest = f.updated_at;
   const notes = visible();   // newest first: a note edited since (new [[links]], tags) redraws the graph too
-  return ["graph", files.length, latest, notes.length, notes[0]?.updated_at || "", p.graphTags ? 1 : 0].join("@");
+  return ["graph", files.length, latest, notes.length, notes[0]?.updated_at || ""].join("@");
 }
 
 function showGraph(p) {
+  // Rebuilt in place (a note saved beside it, the tag switch): carry the layout and view over, so the graph
+  // does not scatter and settle again from scratch on every save.
+  const prev = p.graph?.state();
   p.graph?.destroy();
-  const data = graphData(p.graphTags);
+  const data = graphData();
   p.meta.textContent = t("关系图谱 · {nodes} 个节点 · {edges} 条链接", { nodes: data.nodes.length, edges: data.edges.length });
   const wrap = document.createElement("div");
   wrap.className = "graph";
   const tools = document.createElement("div");
   tools.className = "graph-tools";
-  const tagBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: p.graphTags ? t("隐藏标签") : t("显示标签") });
-  tagBtn.onclick = () => { p.graphTags = !p.graphTags; p.shown = null; saveLayout(); renderPane(p); };
   const fitBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: t("居中") });
   fitBtn.onclick = () => { p.graphFocus = null; p.graph?.fit(); };
-  tools.append(tagBtn, fitBtn);
+  // 3D by default; the flat graph is one click away and each pane remembers its choice.
+  const dimBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: p.graphFlat ? "3D" : "2D", title: p.graphFlat ? t("切换到立体视图") : t("切换到平面视图") });
+  dimBtn.onclick = () => {
+    p.graphFlat = !p.graphFlat; saveLayout();
+    dimBtn.textContent = p.graphFlat ? "3D" : "2D"; dimBtn.title = p.graphFlat ? t("切换到立体视图") : t("切换到平面视图");
+    p.graph?.setFlat(p.graphFlat);
+  };
+  // Settings: display switches and the forces, in one panel like Obsidian's.
+  const forceBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: t("设置"), title: t("显示选项和力度") });
+  forceBtn.onclick = () => forceBtn.classList.toggle("on", p.graph?.toggleForces());
+  tools.append(dimBtn, forceBtn, fitBtn);
   wrap.append(tools);
   if (!data.nodes.length) wrap.append(Object.assign(document.createElement("p"), { className: "graph-empty", textContent: t("还没有 Markdown 文件或笔记。") }));
   p.preview.classList.remove("doc");
   p.preview.replaceChildren(wrap);
   p.graph = mountGraph(wrap, data, {
+    flat: !!p.graphFlat,
+    prev,
+    hidden: p.graphHidden || [],
+    onHide: (h) => { p.graphHidden = h; saveLayout(); },
+    // Forces are one setting for the device, like a preference, not per pane.
+    forces: (() => { try { return JSON.parse(localStorage.getItem("suiji:graphForces")) || {}; } catch { return {}; } })(),
+    onForces: (f) => { try { localStorage.setItem("suiji:graphForces", JSON.stringify(f)); } catch {} },
     isActive: (n) => n.kind !== "tag" && [...panes.values()].some((x) => x !== p && x.kind === n.kind && x.itemId === n.ref),
     onOpen: (n) => {
       if (n.kind === "tag") { searchTag(n.ref); return; }
@@ -1464,6 +1548,8 @@ function showGraph(p) {
     },
   });
   if (p.graphFocus) p.graph.focus(p.graphFocus);
+  // Rebuilt from inside the settings panel (tag switch): keep it open.
+  if (p.graphPanel) { p.graphPanel = false; forceBtn.classList.toggle("on", p.graph.toggleForces()); }
 }
 
 // ---------- what the assistant can do in the interface ----------
@@ -1483,6 +1569,18 @@ function showItem(kind, id, beside) {
   openIn(focused, kind, id); return focused;
 }
 const norm = (x) => String(x || "").replace(/^#+\s*/, "").replace(/\s+/g, " ").trim().toLowerCase();
+// A heading of the document in pane p, once it has rendered (up to 6 s): the same text or anchor, else the first
+// that contains it. Scrolled to and flashed; null when there is none.
+async function goHeading(p, id, text) {
+  for (let n = 0; n < 60 && !(p.itemId === id && p.shownId === id && p.preview.querySelector(".md-body")); n++) await sleepMs(100);
+  if (p.itemId !== id) return null;
+  const all = [...p.preview.querySelectorAll(".md-body :is(h1, h2, h3, h4, h5, h6)")], want = norm(text), s = slug(text);
+  const h = all.find((x) => norm(x.textContent) === want || slug(x.textContent) === s) || (want && all.find((x) => norm(x.textContent).includes(want)));
+  if (!h) return null;
+  scrollToHeading(p, h);
+  h.classList.remove("ag-flash"); void h.offsetWidth; h.classList.add("ag-flash");
+  return h;
+}
 async function uiOpen({ kind, id, heading, beside }) {
   if (isPhone.matches) toggleAgent(false);
   const p = showItem(kind, id, beside);
@@ -1497,13 +1595,9 @@ async function uiOpen({ kind, id, heading, beside }) {
     ta.scrollTop = Math.max(0, (i / lines.length) * ta.scrollHeight - 40);
     return { opened: true, heading: lines[i] };
   }
-  // A file renders asynchronously; wait for its headings.
-  for (let n = 0; n < 60 && !(p.itemId === id && p.heads.length); n++) await sleepMs(100);
-  const i = p.heads.findIndex((h) => norm(h.textContent).includes(want));
-  if (i < 0) return { opened: true, heading: "not found", headings: p.heads.slice(0, 60).map((h) => h.textContent.trim()) };
-  const h = p.heads[i];
-  scrollToHeading(p, h);
-  h.classList.remove("ag-flash"); void h.offsetWidth; h.classList.add("ag-flash");
+  // A file renders asynchronously; goHeading waits for it.
+  const h = await goHeading(p, id, heading);
+  if (!h) return { opened: true, heading: "not found", headings: [...p.preview.querySelectorAll(".md-body :is(h1, h2, h3, h4)")].slice(0, 60).map((x) => x.textContent.trim()) };
   return { opened: true, heading: h.textContent.trim() };
 }
 async function uiGraph({ ids, query, tag }) {
@@ -1516,8 +1610,7 @@ async function uiGraph({ ids, query, tag }) {
   const pathOf = new Map(files.map((f) => [f.id, fullPath(f).join("/").toLowerCase()]));
   const match = (n) => idSet.has(n.ref)
     || (q && n.kind !== "tag" && (n.label.toLowerCase().includes(q) || (pathOf.get(n.ref) || "").includes(q)))
-    || (tg && n.kind === "tag" && n.ref.toLowerCase() === tg);
-  if (tg && !g.graphTags) { g.graphTags = true; g.shown = null; }
+    || (tg && (n.tags || []).some((x) => String(x).toLowerCase() === tg));
   g.graphFocus = idSet.size || q || tg ? match : null;
   if (g.shown == null) renderPane(g);   // a fresh graph applies graphFocus when it is built
   const labels = g.graphFocus ? g.graph.focus(match) : (g.graph.fit(), []);
@@ -1813,7 +1906,7 @@ function saveLayout() {
     const top = p.restoreTop || (p.kind ? Math.round(scroller(p).scrollTop) : 0);   // still waiting to scroll back: keep that
     if (p.kind && p.hi >= 0) p.hist[p.hi] = { kind: p.kind, id: p.itemId, top };
     const from = Math.max(0, p.hi - 20), h = p.hist.slice(from, from + 30);
-    return { kind: p.kind, id: p.itemId, f: p === focused ? 1 : 0, t: p.graphTags ? 1 : 0, o: p.tocOpen ? 1 : 0, top, h, hi: p.hi - from };
+    return { kind: p.kind, id: p.itemId, f: p === focused ? 1 : 0, g: p.graphFlat ? 1 : 0, x: p.graphHidden?.length ? p.graphHidden : undefined, o: p.tocOpen ? 1 : 0, top, h, hi: p.hi - from };
   };
   const ser = (n) => n.pane ? pane(n.pane) : { dir: n.dir, ratio: n.ratio, a: ser(n.a), b: ser(n.b) };
   try { localStorage.setItem(layoutKey(), JSON.stringify(ser(layout))); } catch {}
@@ -1827,7 +1920,8 @@ function restoreLayout() {
     if (!s || !s.dir) {
       const p = makePane(s && s.kind ? { kind: s.kind, id: s.id } : null);
       if (s && s.f) focused = p;
-      p.graphTags = !!(s && s.t);
+      p.graphFlat = !!(s && s.g);
+      p.graphHidden = Array.isArray(s?.x) ? s.x.filter((x) => typeof x === "string") : [];
       p.tocOpen = s && "o" in s ? s.o !== 0 : tocAuto;   // each pane keeps its own outline open or closed
       if (Array.isArray(s?.h) && s.h[s.hi]?.id === s.id) { p.hist = s.h.filter((x) => x && x.kind); p.hi = Math.min(s.hi, p.hist.length - 1); navState(p); }
       if (s?.top) p.restoreTop = s.top;
@@ -1843,7 +1937,10 @@ function restoreLayout() {
 // Scrolling is saved a moment after it stops, and once more when the page goes away (window closed, app quit).
 let saveSoon = 0;
 const saveLater = () => { clearTimeout(saveSoon); saveSoon = setTimeout(saveLayout, 500); };
-addEventListener("pagehide", () => layout && saveLayout());
+// Quitting the Mac app unloads the page at once: an edit still waiting for its save timer is saved now (notes to
+// this device, a synced file through the app's file bridge). The app keeps the page "visible" while its window
+// is closed, so the visibilitychange save below never runs there.
+addEventListener("pagehide", () => { commitAll(); if (layout) saveLayout(); });
 document.addEventListener("visibilitychange", () => { if (document.hidden && layout) saveLayout(); });
 
 $("newBtn").onclick = () => {
@@ -1863,7 +1960,7 @@ $("graphBtn").onclick = () => {
   openIn(focused, "graph", "all");
 };
 $("foldBtn").onclick = () => {
-  expanded = new Set(expanded.size ? [] : [NOTES_KEY, ...folderKeys()]);
+  expanded = new Set(anyOpen() ? [] : [NOTES_KEY, ...folderKeys()]);
   saveExpanded(); renderList();
 };
 // Phones: the sidebar is a drawer. A tap beside it, Escape or a swipe to the left closes it; a swipe in
@@ -1985,7 +2082,7 @@ function restyled() {
       rm.type = "button"; rm.className = "ghost bordered small"; rm.textContent = t("停止同步");
       const show = document.createElement("button");
       show.type = "button"; show.className = "ghost bordered small"; show.textContent = t("在 Finder 中显示");
-      show.onclick = () => local.macOp("reveal", { path: root }).catch((e) => showNote(e.message || String(e), "err"));
+      show.onclick = () => local.macOp("reveal", { path: root }).catch((e) => showNote(e.message || String(e), "err", "mac"));
       rm.onclick = async () => {
         if (!confirm(t("停止同步「{name}」？云端已有的文件会保留。", { name: root.split("/").pop() }))) return;
         await local.removeFolder(root); fillLocal();
@@ -2035,11 +2132,66 @@ function restyled() {
     $("aiPreset").value = name;
     $("aiBase").readOnly = !(name === "custom" || p.local);
     if (name !== "custom") $("aiBase").value = p.base;
-    $("aiFetch").hidden = !p.local;
     if (!keepModel) $("aiModel").value = p.model || "";
     $("aiModel").placeholder = p.model || p.hint || t("模型名称");
+    showEffort();
   }
-  function aiShow(st) {
+  // Thinking effort: a liquid-glass switch with the levels the service in the form offers. Each level shows
+  // how hard the model thinks as a row of bars instead of words; the details live in the tooltip. A new
+  // service or model pops the switch in again with its own levels; picking one slides the glass lens over.
+  const EFFORT_NAMES = { "": "默认", off: "不思考", low: "低", medium: "中", high: "高", max: "最高", on: "开启" };
+  const EFFORT_BARS = { "": -1, off: 0, low: 1, medium: 2, on: 2, high: 3, max: 4 };   // -1: the model decides
+  const EFFORT_HINTS = {
+    deepseek: "DeepSeek：「不思考」回答最快，「最高」想得最久。",
+    toggle: "这个服务只能打开或关闭思考。",
+    qwen: "通义千问按思考长度给预算：低 2k、中 8k、高 32k tokens。",
+    openrouter: "OpenRouter 会把强度转给所选模型；不会思考的模型会忽略它。",
+    openai: "发送 reasoning_effort。不支持它的模型会报错，那时改回「默认」。",
+  };
+  let effortShown = "";
+  const effortBase = () => { const lc = localModel(); return lc?.magpie ? lc.base : $("aiBase").value.trim(); };
+  const effortModel = () => { const lc = localModel(); return lc?.magpie ? lc.model : $("aiModel").value.trim(); };
+  function placeThumb(moved) {
+    const seg = $("aiEffort"), on = seg.querySelector("[aria-checked=true]"), thumb = seg.querySelector(".effort-thumb");
+    if (!on || !on.offsetWidth) return;
+    thumb.style.width = on.offsetWidth + "px";
+    thumb.style.transform = `translateX(${on.offsetLeft}px)`;
+    seg.style.setProperty("--level", Math.max(0, EFFORT_BARS[on.dataset.level]) / 4);
+    if (moved) { thumb.classList.remove("wobble"); void thumb.offsetWidth; thumb.classList.add("wobble"); }
+  }
+  function effortButton(lv, i) {
+    const b = document.createElement("button");
+    b.type = "button"; b.dataset.level = lv; b.setAttribute("role", "radio"); b.style.setProperty("--i", i);
+    const bars = document.createElement("span"); bars.className = "effort-bars"; bars.setAttribute("aria-hidden", "true");
+    const n = EFFORT_BARS[lv];
+    if (n < 0) bars.classList.add("auto");
+    for (let k = 0; k < 4; k++) { const bar = document.createElement("i"); if (k < n) bar.className = "on"; bars.append(bar); }
+    b.append(bars, Object.assign(document.createElement("span"), { textContent: t(EFFORT_NAMES[lv]) }));
+    b.onclick = () => { if (b.getAttribute("aria-checked") !== "true") { setAiEffort(lv); showEffort(false, true); } };
+    return b;
+  }
+  function showEffort(force, moved) {
+    const base = effortBase(), fam = effortFamily(base), model = effortModel();
+    const key = fam.id + "|" + model, cur = effortFor(base, aiEffort());
+    const seg = $("aiEffort"), row = $("aiEffortRow"), form = $("aiForm");
+    // With the form, just above its Save bar; when Magpie hides the form (it picks the model), on its own.
+    if (form.hidden) { if (row.parentNode === form) form.after(row); }
+    else if (row.nextElementSibling !== form.querySelector(".ai-bar")) form.insertBefore(row, form.querySelector(".ai-bar"));
+    seg.title = (model ? model + "\n" : "") + t(EFFORT_HINTS[fam.id]) + "\n" + t("只保存在这台设备上。");
+    if (key !== effortShown || force) {
+      effortShown = key;
+      seg.querySelectorAll("button").forEach((b) => b.remove());
+      ["", ...fam.levels].forEach((lv, i) => seg.append(effortButton(lv, i)));
+      row.classList.remove("pop"); void row.offsetWidth; row.classList.add("pop");
+    }
+    seg.querySelectorAll("button").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.level === cur)));
+    requestAnimationFrame(() => placeThumb(moved));
+  }
+  addEventListener("resize", () => { if (dlg.open) placeThumb(); });
+  $("aiModel").addEventListener("change", () => showEffort());
+  $("aiBase").addEventListener("change", () => showEffort());
+  function aiShow(st) { aiFill(st); showEffort(); }
+  function aiFill(st) {
     aiLast = st; aiOwn = st.own;
     const lc = localModel();
     $("aiForm").hidden = !!lc?.magpie;
@@ -2080,24 +2232,116 @@ function restyled() {
   }
   $("aiPreset").onchange = () => {
     aiPreset($("aiPreset").value);
-    const local = isLocalPreset($("aiPreset").value);
-    $("aiKey").required = !local && !aiOwn;
+    const local = isLocalPreset($("aiPreset").value), keep = !!aiOwn && aiOwn.base_url.replace(/\/+$/, "") === $("aiBase").value.trim().replace(/\/+$/, "");
+    $("aiKey").required = !local && !keep;
+    if (!local) $("aiKey").placeholder = keep ? t("留空则保留已保存的 key") : "sk-…";
     if (local) $("aiKey").placeholder = localModel()?.key ? t("留空则保留已保存的 key") : t("网关 key（没有可留空）");
   };
-  // The models a local server offers, as suggestions for the model field.
-  $("aiFetch").onclick = async () => {
-    const base = $("aiBase").value.trim().replace(/\/+$/, ""), key = $("aiKey").value.trim() || localModel()?.key || "";
-    aiMsg(t("读取中…"));
-    try {
-      const res = await localHttp(base + "/models", { headers: key ? { authorization: "Bearer " + key } : {} });
-      let body = {}; try { body = JSON.parse(res.text); } catch {}
-      if (res.status < 200 || res.status >= 300) throw new Error(body.error?.message || "HTTP " + res.status);
-      const ids = (body.data || []).map((m) => m.id).filter(Boolean).sort();
-      $("aiModels").replaceChildren(...ids.map((id) => Object.assign(document.createElement("option"), { value: id })));
-      aiMsg(t("找到 {n} 个模型，在「模型」里选一个。", { n: ids.length }));
-      $("aiModel").focus();
-    } catch (err) { aiMsg(localHelp(err), true); }
+  // The model field predicts as you type: the models the service lists (read once per address, from the
+  // server for a cloud API with the saved or typed key, straight from a local server), matched anywhere in the
+  // name or by maker, so "de" brings up DeepSeek and "son" Claude Sonnet. Arrow keys and Enter pick one.
+  const MAKERS = [
+    [/deepseek/, "DeepSeek"], [/claude|anthropic/, "Anthropic"], [/(^|\/)(gpt|o\d|chatgpt|openai)/, "OpenAI"], [/gemini|gemma|google/, "Google"],
+    [/qwen|qwq|alibaba/, "通义千问"], [/glm|zhipu|z-ai/, "智谱"], [/kimi|moonshot/, "Kimi"], [/llama|meta-/, "Meta"],
+    [/mistral|mixtral|codestral/, "Mistral"], [/grok|x-ai/, "xAI"], [/minimax|abab/, "MiniMax"], [/doubao|bytedance|seed/, "豆包"],
+  ];
+  const makerOf = (id) => MAKERS.find(([re]) => re.test(id.toLowerCase()))?.[1] || "";
+  const modelLists = new Map();   // address → [ids]
+  const modelBase = () => $("aiBase").value.trim().replace(/\/+$/, "");
+  const listFor = () => {
+    const p = AI_PRESETS[$("aiPreset").value] || {};
+    return [...new Set([...(modelLists.get(modelBase()) || []), ...[p.model, aiOwn?.base_url === modelBase() && aiOwn.model].filter(Boolean)])];
   };
+  async function loadModels(loud) {
+    const base = modelBase(), key = $("aiKey").value.trim();
+    if (!base || (!loud && modelLists.has(base))) return;
+    if (loud) aiMsg(t("读取中…"));
+    try {
+      let ids;
+      if (isLocalPreset($("aiPreset").value)) {
+        const k = key || localModel()?.key || "";
+        const res = await localHttp(base + "/models", { headers: k ? { authorization: "Bearer " + k } : {} });
+        let body = {}; try { body = JSON.parse(res.text); } catch {}
+        if (res.status < 200 || res.status >= 300) throw new Error(body.error?.message || "HTTP " + res.status);
+        ids = (body.data || []).map((m) => m.id).filter(Boolean).sort();
+      } else ids = (await aiApi("POST", { base_url: base, ...(key ? { api_key: key } : {}) })).models;
+      modelLists.set(base, ids);
+      if (loud) aiMsg(t("找到 {n} 个模型，在「模型」里输入几个字就能找到。", { n: ids.length }));
+      if (document.activeElement === $("aiModel")) suggest();
+    } catch (err) {
+      if (!loud) return;   // quietly: suggestions just stay fewer until a key is there
+      aiMsg(isLocalPreset($("aiPreset").value) ? localHelp(err) : t("读取模型列表失败：{msg}", { msg: err.message }), true);
+    }
+  }
+  $("aiFetch").onclick = () => loadModels(true).then(() => $("aiModel").focus());
+  // Best first: the whole name starts with it, then a part of the name (after / - . :) or the maker does, then
+  // it appears anywhere, then its letters appear in order.
+  function rankModels(q) {
+    q = q.trim().toLowerCase();
+    const out = [];
+    for (const id of listFor()) {
+      const s = id.toLowerCase(), maker = makerOf(id), mk = maker.toLowerCase();
+      let rank = -1, at = -1;
+      if (!q) rank = 0;
+      else if (s.startsWith(q)) { rank = 0; at = 0; }
+      else if ((at = s.split("").findIndex((c, i) => /[\/\-.:_ ]/.test(s[i - 1] || "") && s.startsWith(q, i))) >= 0) rank = 1;
+      else if (mk.startsWith(q)) rank = 1;
+      else if ((at = s.indexOf(q)) >= 0) rank = 2;
+      else if (q.length >= 3) { let j = 0; for (const c of s) if (c === q[j]) j++; if (j === q.length) rank = 3; }
+      if (rank >= 0) out.push({ id, maker, rank, at: rank < 3 ? at : -1, len: q.length });
+    }
+    return out.sort((a, b) => a.rank - b.rank || a.id.length - b.id.length || a.id.localeCompare(b.id)).slice(0, 40);
+  }
+  let sugItems = [], sugAt = -1;
+  function suggest() {
+    const box = $("aiSuggest"), input = $("aiModel");
+    sugItems = rankModels(input.value);
+    if (sugItems.length === 1 && sugItems[0].id === input.value.trim()) sugItems = [];
+    const wasHidden = box.hidden;
+    sugAt = sugItems.length && input.value.trim() ? 0 : -1;
+    box.replaceChildren(...sugItems.map((m, i) => {
+      const row = document.createElement("span");
+      row.className = "sug"; row.id = "aiSug" + i; row.setAttribute("role", "option"); row.style.setProperty("--i", Math.min(i, 8));
+      const name = document.createElement("b");
+      if (m.at >= 0 && m.len) name.append(m.id.slice(0, m.at), Object.assign(document.createElement("mark"), { textContent: m.id.slice(m.at, m.at + m.len) }), m.id.slice(m.at + m.len));
+      else name.textContent = m.id;
+      row.append(name);
+      if (m.maker) row.append(Object.assign(document.createElement("small"), { textContent: m.maker }));
+      row.onmousedown = (e) => { e.preventDefault(); pickModel(m.id); };
+      row.onmousemove = () => { if (sugAt !== i) { sugAt = i; markSug(); } };
+      return row;
+    }));
+    box.hidden = !sugItems.length;
+    input.setAttribute("aria-expanded", String(!box.hidden));
+    if (wasHidden && !box.hidden) { box.classList.remove("pop"); void box.offsetWidth; box.classList.add("pop"); }
+    markSug();
+  }
+  function markSug() {
+    [...$("aiSuggest").children].forEach((r, i) => r.setAttribute("aria-selected", String(i === sugAt)));
+    const on = $("aiSuggest").children[sugAt];
+    $("aiModel").setAttribute("aria-activedescendant", on ? on.id : "");
+    on?.scrollIntoView({ block: "nearest" });
+  }
+  function closeSuggest() { $("aiSuggest").hidden = true; $("aiModel").setAttribute("aria-expanded", "false"); sugAt = -1; }
+  function pickModel(id) {
+    $("aiModel").value = id; closeSuggest();
+    $("aiModel").dispatchEvent(new Event("change"));
+  }
+  $("aiModel").addEventListener("focus", () => { suggest(); loadModels(false); });
+  $("aiModel").addEventListener("input", suggest);
+  $("aiModel").addEventListener("blur", () => setTimeout(closeSuggest, 0));
+  $("aiModel").addEventListener("keydown", (e) => {
+    const open = !$("aiSuggest").hidden;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!open) { suggest(); return; }
+      sugAt = (sugAt + (e.key === "ArrowDown" ? 1 : -1) + sugItems.length) % sugItems.length; markSug();
+    } else if (e.key === "Enter" && open && sugAt >= 0) { e.preventDefault(); pickModel(sugItems[sugAt].id); }
+    else if (e.key === "Tab" && open && sugAt >= 0 && $("aiModel").value.trim()) pickModel(sugItems[sugAt].id);
+    else if (e.key === "Escape" && open) { e.preventDefault(); e.stopPropagation(); closeSuggest(); }
+  });
+  // Another address means another list.
+  $("aiBase").addEventListener("change", () => { if (document.activeElement === $("aiModel")) suggest(); });
   // A page can only reach Magpie once Magpie lists it; say so instead of a bare network error.
   const localHelp = (err) => $("aiPreset").value === "magpie" && local.available
     ? t("连不上 Magpie：{msg}。确认 Magpie 正在运行，再用 magpie gateway-key add suiji 生成一个 key 填进来。", { msg: err.message })
@@ -2114,6 +2358,9 @@ function restyled() {
       aiShow(aiLast); aiMsg(t("已保存（只在这台设备上）"));
       return;
     }
+    // The saved key belongs to the address it was saved for (api/ai-key.js won't send it anywhere else).
+    const base = $("aiBase").value.trim().replace(/\/+$/, "");
+    if (!key && (!aiOwn || aiOwn.base_url.replace(/\/+$/, "") !== base)) { aiMsg(t("换了服务，请填上这个服务的 API key。"), true); $("aiKey").focus(); return; }
     setLocalModel(null);   // a key in the account replaces this device's local model
     $("aiSave").disabled = true; aiMsg(t("保存中…"));
     try {
@@ -2128,7 +2375,7 @@ function restyled() {
     try { aiShow(await aiApi("DELETE")); aiMsg(t("已删除")); } catch (err) { aiMsg(t("删除失败：{msg}", { msg: err.message }), true); }
   };
   openSettings = (sec) => {
-    fill(); if (local.available) fillLocal(); fillAi(); dlg.showModal();
+    fill(); if (local.available) fillLocal(); effortShown = ""; fillAi(); dlg.showModal();
     if (nativeZoom) local.macOp("zoom").then(showZoom, () => {});   // ⌘+ / ⌘− may have changed it
     if (sec) requestAnimationFrame(() => $(sec)?.scrollIntoView({ block: "start" }));
   };
@@ -2173,8 +2420,7 @@ function restyled() {
     if (!b || b.dataset.lang === langChoice) return;
     try { b.dataset.lang ? localStorage.setItem("suiji:lang", b.dataset.lang) : localStorage.removeItem("suiji:lang"); } catch {}
     // Text drawn by the app follows the language from the start, so a reload is simplest; edits are saved first.
-    commitAll();
-    await Promise.all([...panes.values()].map((p) => p.saving));
+    await saveAll();
     location.reload();
   };
   $("tocAuto").onchange = (e) => {
@@ -2206,7 +2452,7 @@ function restyled() {
 }
 $("outBtn").onclick = async () => {
   $("settings").close();
-  commitAll();
+  await saveAll();   // a document being edited is written before the session that may write it goes away
   if (Object.values(store.notes).some((n) => n.dirty)) await sync();
   // Only this device: the default (global) would also sign out the Mac agent and every other device.
   await sb.auth.signOut({ scope: "local" });
@@ -2248,7 +2494,7 @@ function enter(session) {
   $("auth").hidden = !!session; app.hidden = !session;
   if (!session) {
     local.start(sb, null, { onChange: localChanged, onStatus: localStatus }).catch(console.error);
-    store = { notes: {} }; files = []; filesLoaded = filesErr = false; clearTimeout(filesRetry); bodies.clear(); warming = null; rendered.clear(); signed.clear();
+    store = { notes: {} }; files = []; filesLoaded = filesErr = false; clearTimeout(filesRetry); bodies.clear(); warming = null; rendered.clear(); signed.clear(); pathsSig = null;
     resetAgent(); toggleAgent(false);
     // Another account may sign in on this device; its documents must not mix with these.
     caches.delete(FILE_CACHE).catch(() => {}); cacheIndex = null;

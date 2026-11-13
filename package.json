@@ -6,7 +6,9 @@
     "build": "node scripts/build.mjs",
     "db:setup": "node scripts/setup-db.mjs",
     "dev": "node scripts/build.mjs && npx -y serve@14.2.4 public -l 5173",
-    "sync": "node agent/suiji-sync.mjs"
+    "sync": "node agent/suiji-sync.mjs",
+    "check": "for f in public/*.js api/*.js scripts/*.mjs scripts/fixtures/*.mjs; do node --check \"$f\" || exit 1; done",
+    "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "3.0.85",
@@ -14,6 +16,9 @@
     "ai": "7.0.163"
   },
   "devDependencies": {
+    "dompurify": "3.1.6",
+    "katex": "0.16.11",
+    "marked": "12.0.2",
     "pg": "8.13.1"
   }
 }
