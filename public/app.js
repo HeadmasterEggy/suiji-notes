@@ -1456,10 +1456,14 @@ mountAgent({
 // Nodes: Markdown files and notes, never tags (Joey: tags stay out of the graph; a tag is matched through each
 // note's own tags list, for colour groups and the assistant). Edges: [[links]] and relative .md links,
 // resolved the way Obsidian does: relative to the file, then from the vault root, then by unique file name.
+// Folders the graph leaves out, at any depth (Joey: the mind maps would only crowd it). They stay in the sidebar.
+const GRAPH_SKIP = new Set(["思维导图"]);
+
 function graphData() {
   const nodes = [], edges = new Map(), idx = new Map();
   const add = (key, node) => { if (!idx.has(key)) { idx.set(key, nodes.length); nodes.push(node); } return idx.get(key); };
-  const md = files.filter(isMarkdown);
+  const all = files.filter(isMarkdown);
+  const md = all.filter((f) => !fullPath(f).slice(0, -1).some((d) => GRAPH_SKIP.has(d)));
   // Category (the node's colour): the first folder level where files part ways, so a single synced vault
   // folder still splits by its subfolders. Files sitting above that level, and quick notes, get their own.
   const dirs = md.map((f) => fullPath(f).slice(0, -1));
@@ -1469,7 +1473,7 @@ function graphData() {
   while (dirs.length && dirs.every((d) => d.length > depth && d[depth] === dirs[0][depth])) depth++;
   // len: rough length in characters for "node size by length" (UTF-8 bytes; CJK text is about 3 a character).
   md.forEach((f, k) => add("file:" + f.id, { label: stripMd(baseName(f.name)), kind: "file", ref: f.id, group: dirs[k][depth] || dirs[k][depth - 1] || t("未分类"), len: (f.size || 0) / 2, tags: f.tags || [], path: fullPath(f).join("/") }));
-  const find = linkResolver(md);
+  const find = linkResolver(all);   // every document: a link to a left-out mind map drops, not lands on a namesake
   const resolve = (dir, target) => { const f = find(dir, target); return f ? idx.get("file:" + f.id) : undefined; };
   // One edge per pair; its third value says which way the links run (1: low index to high, 2: back, 3: both,
   // 0: a tag), for the arrows.
