@@ -429,7 +429,7 @@ textarea {
 .card { width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 8px; padding: 32px 28px; }
 .card label { font-size: 13px; color: var(--muted); margin-top: 6px; }
 .card .btn-primary { margin-top: 12px; }
-.lede { color: var(--muted); margin: 4px 0 12px; line-height: 1.6; }
+.lede { color: var(--muted); margin: 4px 0 12px; line-height: 1.6; text-wrap: balance; }
 
 /* Motion */
 @keyframes rise { from { opacity: 0; transform: translateY(8px); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
@@ -603,7 +603,7 @@ textarea {
   background: repeating-linear-gradient(transparent 0 2px, rgba(0, 0, 0, .18) 2px 3px);
 }
 :root[data-style="terminal"] .ghost, :root[data-style="terminal"] .btn-primary,
-:root[data-style="terminal"] input[type="search"], :root[data-style="terminal"] .tree-row, :root[data-style="terminal"] .toc-list button, :root[data-style="terminal"] .note { border-radius: 4px; }
+:root[data-style="terminal"] input:is([type="search"], [type="email"], [type="password"]), :root[data-style="terminal"] .tree-row, :root[data-style="terminal"] .toc-list button, :root[data-style="terminal"] .note { border-radius: 4px; }
 :root[data-style="terminal"] .md-body h1::before { content: "# "; color: var(--muted); }
 :root[data-style="terminal"] .md-body h2::before { content: "## "; color: var(--muted); }
 :root[data-style="terminal"] .md-body h3::before { content: "### "; color: var(--muted); }
