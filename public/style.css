@@ -381,7 +381,8 @@ textarea {
 .md-body h1 { font-size: 1.7em; } .md-body h2 { font-size: 1.4em; } .md-body h3 { font-size: 1.18em; }
 .md-head h1:first-child, .md-body > div > :first-child { margin-top: 0; }
 .md-body p, .md-body ul, .md-body ol, .md-body blockquote, .md-body table, .md-body pre { margin: 0 0 1em; }
-.md-body ul, .md-body ol { padding-left: 1.4em; }
+.md-body ul { padding-left: 1.4em; }
+.md-body ol { padding-left: 2em; }   /* room for "10." without the number hanging out of the column */
 .md-body li + li { margin-top: .25em; }
 /* - [ ] tasks: the box stands in for the bullet, in the style's colour */
 .md-body li:has(> input[type=checkbox]) { list-style: none; }
@@ -394,7 +395,7 @@ textarea {
 .md-body li:has(> input[type=checkbox]:checked) { color: var(--muted); }
 .md-body a { color: var(--accent); }
 .md-body img { display: block; max-width: 100%; height: auto; margin: 1em auto; border-radius: 6px; }
-.md-body blockquote > :last-child { margin-bottom: 0; }   /* even space above and below the text */
+.md-body blockquote > :last-child, .md-body li > :last-child:not(ul, ol) { margin-bottom: 0; }   /* even space above and below the text */
 .md-body blockquote { padding: .6em 1em; border-left: 3px solid var(--accent); color: var(--muted); background: var(--bg); border-radius: 0 6px 6px 0; }
 .md-body code { font: .88em var(--font-mono); background: color-mix(in srgb, var(--ink) 7%, transparent); padding: .12em .35em; border-radius: 4px; }
 .md-body pre { background: var(--bg); padding: 14px 16px; border-radius: 8px; overflow-x: auto; white-space: pre; }
