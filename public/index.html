@@ -37,7 +37,6 @@
       <input id="fileInput" type="file" accept=".md,.markdown,text/markdown" multiple hidden>
       <input id="folderInput" type="file" webkitdirectory multiple hidden>
     </div>
-    <div class="chips" id="chips" hidden></div>
     <ul class="list" id="list"></ul>
     <div class="dock" role="toolbar" aria-label="工具">
       <button class="ghost icon" id="newBtn" type="button" title="新建" aria-label="新建"><svg viewBox="0 0 16 16"><path d="M13.5 8.5v4a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h4"/><path d="M11.8 1.7l2.5 2.5L8.5 10H6V7.5z"/></svg></button>
@@ -126,7 +125,7 @@
         <button class="ghost icon p-close" type="button" title="关闭这个窗格" aria-label="关闭这个窗格"><svg viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg></button>
       </div>
     </div>
-    <div class="placeholder p-ph"><div><b>从左边打开一个文件，或新建一条笔记</b><span>新建的笔记放在「随手记」里，第一行是标题，输入后自动保存。把左边的文件拖到窗格的上下左右边缘，就能分屏打开。</span></div></div>
+    <div class="placeholder p-ph"><div><b>从左边打开一个文件，或新建一条笔记</b><span>新建的笔记放在「随手记」里，第一行是标题，输入后自动保存。</span><span class="ph-split">把左边的文件拖到窗格的上下左右边缘，就能分屏打开。</span></div></div>
     <textarea class="p-ta" hidden aria-label="笔记内容" placeholder="第一行是标题…"></textarea>
     <div class="fileview p-fv" hidden><div class="preview p-preview"></div><nav class="toc p-toc glass" hidden aria-label="大纲"></nav></div>
     <div class="p-hint" hidden></div>

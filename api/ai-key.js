@@ -37,10 +37,14 @@ export async function PUT(request) {
   if (api_key !== null && (api_key.length < 8 || api_key.length > 1000 || /\s/.test(api_key))) return json({ error: "that doesn't look like an API key" }, 400);
   const db = admin();
   if (api_key === null) {
-    // Address or model changed, same key.
-    const { data, error } = await db.from("ai_keys").update({ base_url, model, updated_at: new Date().toISOString() }).eq("user_id", user.id).select("user_id");
+    // Model changed, same key. The saved key stays with the address it was saved for: sent to another
+    // service it fails at best, and hands the key to someone else at worst (the model list works the same way).
+    const { data: had, error: e1 } = await db.from("ai_keys").select("base_url").eq("user_id", user.id).maybeSingle();
+    if (e1) return json({ error: e1.message }, 500);
+    if (!had) return json({ error: "enter your API key" }, 400);
+    if (had.base_url.replace(/\/+$/, "") !== base_url) return json({ error: "enter the API key for this address" }, 400);
+    const { error } = await db.from("ai_keys").update({ base_url, model, updated_at: new Date().toISOString() }).eq("user_id", user.id);
     if (error) return json({ error: error.message }, 500);
-    if (!data.length) return json({ error: "enter your API key" }, 400);
   } else {
     const { error } = await db.from("ai_keys").upsert({ user_id: user.id, base_url, model, key_enc: seal(api_key), key_hint: api_key.slice(-4), updated_at: new Date().toISOString() });
     if (error) return json({ error: error.message }, 500);

@@ -227,7 +227,8 @@ async function* serverStream(signal) {
   }
 }
 async function* localStream(cfg, signal) {
-  const url = cfg.base.replace(/\/+$/, "") + "/chat/completions", whole = viaApp(url);
+  // Through the app, the answer comes whole, or piece by piece from apps that can pass it on (Mac 2.5 on).
+  const url = cfg.base.replace(/\/+$/, "") + "/chat/completions", whole = viaApp(url) && !appBridge.stream;
   const headers = { "content-type": "application/json", ...(cfg.key ? { authorization: "Bearer " + cfg.key } : {}) };
   const body = JSON.stringify({
     model: cfg.model, stream: !whole, ...effortBody(cfg.base, aiEffort()),
@@ -252,8 +253,9 @@ async function* localStream(cfg, signal) {
     }
     return;
   }
-  const res = await fetch(url, { method: "POST", signal, headers, body }).catch((e) => { throw unreachable(e); });
-  if (!res.ok) { yield failed(res.status, await res.text()); return; }
+  const res = viaApp(url) ? appStream(url, { method: "POST", headers, body, signal }, unreachable)
+    : await fetch(url, { method: "POST", signal, headers, body }).catch((e) => { throw unreachable(e); });
+  if (res.status && !res.ok) { yield failed(res.status, await res.text()); return; }
   const calls = [];
   for await (const ln of lines(res.body)) {
     if (!ln.startsWith("data:")) continue;
@@ -271,10 +273,28 @@ async function* localStream(cfg, signal) {
       if (c.function?.arguments) x.args += c.function.arguments;
     }
   }
+  const r = res.done?.();
+  if (r && (r.status < 200 || r.status >= 300)) { yield failed(r.status, r.body); return; }
   for (const c of calls.filter(Boolean)) {
     let input = {}; try { input = c.args ? JSON.parse(c.args) : {}; } catch { input = {}; }
     yield { t: "tool", id: c.id || crypto.randomUUID(), name: c.name, input };
   }
+}
+// The app's streamed localHttp as a fetch-like response. Its status is only known at the end, so an error
+// answer shows up there: its text is not SSE and is skipped while streaming, then reported by done().
+function appStream(url, { method, headers, body, signal }, unreachable) {
+  const id = crypto.randomUUID(), enc = new TextEncoder();
+  const abort = () => appBridge.postMessage({ op: "localHttpAbort", id }).catch(() => {});
+  let result;
+  const stream = new ReadableStream({
+    start(c) {
+      signal?.addEventListener("abort", abort, { once: true });
+      appBridge.stream({ url, method, headers, body, id }, (d) => { try { c.enqueue(enc.encode(d)); } catch {} })
+        .then((r) => { result = r; c.close(); }, (e) => c.error(signal?.aborted ? new DOMException("aborted", "AbortError") : unreachable(e)))
+        .finally(() => signal?.removeEventListener("abort", abort));
+    },
+  });
+  return { status: 0, body: stream, done: () => result };
 }
 async function* lines(body) {
   const reader = body.getReader(), dec = new TextDecoder();
@@ -306,21 +326,110 @@ function toOpenAI(msgs) {
   return out;
 }
 
+// ---------- how an answer appears ----------
+// Text is shown as it is written, a few characters a frame, whatever size the pieces arrive in: a model on
+// this computer may hand the whole answer over at once, and a server's stream comes in bursts. The more is
+// waiting, the faster it goes, so a long answer never lags far behind the model.
+function typer(paint) {
+  let full = "", shown = 0, raf = 0, last = 0, ended = false, wake = null;
+  const frame = (now) => {
+    raf = 0;
+    const left = full.length - shown;
+    if (left > 0) {
+      shown += Math.max(2, Math.ceil(left / 24));
+      // Wide characters and emoji stay whole.
+      if (/[\uD800-\uDBFF]/.test(full[shown - 1] || "")) shown++;
+      shown = Math.min(shown, full.length);
+    }
+    // Markdown is parsed again for each paint, so long answers are painted a little less often.
+    if (shown === full.length || now - last > (full.length > 6000 ? 90 : 40)) { last = now; paint(full.slice(0, shown), shown < full.length || !ended); }
+    if (shown < full.length) raf = requestAnimationFrame(frame);
+    else if (ended) { wake?.(); wake = null; }
+  };
+  const kick = () => { if (!raf) raf = requestAnimationFrame(frame); };
+  return {
+    get text() { return full; },
+    add(d) { full += d; kick(); },
+    // Resolves once everything has been shown; now = true skips the rest of the animation (Stop, or a hidden tab).
+    end(now) {
+      ended = true;
+      if (now || document.hidden) { cancelAnimationFrame(raf); raf = 0; shown = full.length; paint(full, false); wake?.(); wake = null; return Promise.resolve(); }
+      return new Promise((res) => { wake = res; kick(); });
+    },
+  };
+}
+// Markdown cut off mid-answer: an open code fence or ** is closed for the paint, so the half-written part
+// already looks the way it will rather than as raw marks.
+function closeOpen(md) {
+  if ((md.match(/^ {0,3}(```|~~~)/gm) || []).length % 2) return md + "\n```";
+  const last = md.slice(md.lastIndexOf("\n") + 1).replace(/`[^`]*`/g, "");
+  if ((last.match(/\*\*/g) || []).length % 2) md += "**";
+  return md;
+}
+// The caret sits after the last word written, inside the paragraph or list item that holds it.
+function caretAt(box) {
+  let n = box;
+  while (n.lastElementChild && !/^(PRE|TABLE|SVG|IMG|HR|BR)$/i.test(n.lastElementChild.tagName) && !n.lastElementChild.classList.contains("katex")) n = n.lastElementChild;
+  if (n !== box || !box.childElementCount) n.append(el("span", "ag-caret"));
+}
+// While the model works and has shown nothing yet: three dots and 思考中, which go when the first word,
+// thought or tool call arrives.
+function waiting() {
+  const w = el("div", "ag-wait");
+  w.append(el("span", "ag-dots"), el("span", null, t("思考中")));
+  w.firstChild.append(el("i"), el("i"), el("i"));
+  return w;
+}
+// What the model thought before answering, as it comes: open while it thinks, folded once the answer starts,
+// and a click away after that.
+function thoughts(bubble, before) {
+  const box = el("details", "ag-think"), head = el("summary"), body = el("div", "ag-think-body"), started = performance.now();
+  const label = el("span", null, t("思考中")); head.append(label);
+  box.append(head, body); box.open = true; box.classList.add("live");
+  bubble.insertBefore(box, before);
+  const ty = typer((s) => { body.textContent = s; if (box.open) body.scrollTop = body.scrollHeight; scroll(); });
+  let ending = null, secs = 0;
+  return {
+    add: (d) => ty.add(d),
+    end(now) {
+      if (ending && !now) return ending;
+      secs ||= Math.max(1, Math.round((performance.now() - started) / 1000));
+      return ending = ty.end(now).then(() => { box.classList.remove("live"); box.open = false; label.textContent = t("已思考 {n} 秒", { n: secs }); });
+    },
+  };
+}
+
 async function step(bubble, signal) {
   await refreshMagpie();
   const cfg = localModel();
-  let text = "", reasoning = "", calls = [], err = null, code = null;
-  const textEl = el("div", "ag-text"); bubble.append(textEl);
-  let paint = 0;
-  const draw = () => { paint = 0; app.markdown(text).then((html) => { textEl.innerHTML = html; scroll(); }); };
-  for await (const m of cfg ? localStream(cfg, signal) : serverStream(signal)) {
-    if (m.t === "text") { text += m.d; if (!paint) paint = setTimeout(draw, 120); }
-    else if (m.t === "reasoning") reasoning += m.d;
-    else if (m.t === "tool") calls.push(m);
-    else if (m.t === "error") { err = m.message; code = m.code || null; }
+  let reasoning = "", calls = [], err = null, code = null, think = null, seq = 0;
+  const textEl = el("div", "ag-text"), wait = waiting();
+  bubble.append(wait, textEl);
+  const quiet = () => wait.remove();
+  const out = typer((md, typing) => {
+    const n = ++seq;
+    app.markdown(typing ? closeOpen(md) : md).then((html) => {
+      if (n !== seq) return;   // a later paint got there first
+      textEl.innerHTML = html;
+      textEl.classList.toggle("typing", typing);
+      if (typing) caretAt(textEl);
+      scroll();
+    }, () => { if (n === seq) textEl.textContent = md; });
+  });
+  try {
+    for await (const m of cfg ? localStream(cfg, signal) : serverStream(signal)) {
+      if (m.t === "text") { quiet(); think?.end(); out.add(m.d); }
+      else if (m.t === "reasoning") { quiet(); reasoning += m.d; (think ||= thoughts(bubble, textEl)).add(m.d); }
+      else if (m.t === "tool") { quiet(); calls.push(m); }
+      else if (m.t === "error") { err = m.message; code = m.code || null; }
+    }
+  } finally {
+    quiet();
+    const stop = signal.aborted;
+    await Promise.all([think?.end(stop), out.end(stop)]);
+    if (!out.text) textEl.remove();
   }
-  clearTimeout(paint);
-  if (text) draw(); else textEl.remove();
+  const text = out.text;
   if (err && !text && !calls.length) throw Object.assign(new Error(err === "not signed in" ? t("请先登录。") : err), { code });
   messages.push({ role: "assistant", content: [...(text ? [{ type: "text", text }] : []), ...calls.map((c) => ({ type: "tool-call", toolCallId: c.id, toolName: c.name, input: c.input }))], ...(reasoning ? { reasoning } : {}) });
   return calls;
@@ -375,7 +484,7 @@ async function send(text) {
   const said = q ? text + "\n\n" + t("引用的内容（来自「{title}」）：", { title: q.title || t("无标题") }) + "\n\"\"\"\n" + q.text + "\n\"\"\"" : text;
   messages.push({ role: "user", content: [{ type: "text", text: said }] });
   const bubble = el("div", "ag-bot"); log.append(bubble);
-  busy = new AbortController(); setBusy(true); scroll();
+  busy = new AbortController(); setBusy(true); scroll(true);
   try {
     for (let n = 0; n < MAX_STEPS; n++) {
       const calls = await step(bubble, busy.signal);
@@ -408,7 +517,9 @@ function setBusy(on) {
   $("agSend").hidden = on; $("agStop").hidden = !on;
   $("agPanel").classList.toggle("busy", on);
 }
-const scroll = () => { const l = $("agLog"); l.scrollTop = l.scrollHeight; };
+// The log follows the answer as it is written, unless the reader has scrolled up to read something earlier.
+let stick = true;
+const scroll = (force) => { const l = $("agLog"); if (force === true) stick = true; if (stick) l.scrollTop = l.scrollHeight; };
 function reset() {
   busy?.abort(); messages = []; setQuote(null);
   $("agLog").replaceChildren(empty());
@@ -455,6 +566,7 @@ export function toggleAgent(force) {
 export function mountAgent(api) {
   app = api;
   $("agLog").append(empty());
+  $("agLog").addEventListener("scroll", (e) => { const l = e.currentTarget; stick = l.scrollHeight - l.scrollTop - l.clientHeight < 40; }, { passive: true });
   const input = $("agInput");
   const go = () => { const v = input.value; input.value = ""; input.style.height = ""; send(v); };
   $("agForm").onsubmit = (e) => { e.preventDefault(); go(); };
@@ -477,13 +589,15 @@ export function mountAgent(api) {
     if (sel.trim()) askAgent(sel); else toggleAgent();
   });
   $("agQuote").querySelector("button").onclick = () => { setQuote(null); input.focus(); };
-  // Links the assistant writes as [title](suiji:ID) open that document.
+  // Links the assistant writes as [title](suiji:ID) open that document. Any other link opens in a new tab:
+  // followed in place it would take the whole app away (a web page, or a path of this site for a relative one).
   $("agLog").addEventListener("click", (e) => {
-    const a = e.target.closest('a[href^="#suiji:"]');
+    const a = e.target.closest("a[href]");
     if (!a) return;
     e.preventDefault();
-    const d = find(a.getAttribute("href").slice(7));
-    if (d) app.open(d.kind, d.id);
+    const href = a.getAttribute("href");
+    if (href.startsWith("#suiji:")) { const d = find(href.slice(7)); if (d) app.open(d.kind, d.id); }
+    else if (/^(https?|mailto):/i.test(href)) window.open(a.href, "_blank", "noopener");
   });
 }
 export const resetAgent = () => app && reset();

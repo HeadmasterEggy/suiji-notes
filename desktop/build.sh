@@ -6,10 +6,10 @@
 # Raise BUILD for every release you publish; installed apps only update to a higher BUILD. The Swift app is at 9.
 # Apple silicon only for now.
 set -e
-VERSION=${VERSION:-2.4}
-BUILD=${BUILD:-14}
+VERSION=${VERSION:-2.5}
+BUILD=${BUILD:-15}
 REPO=HeadmasterEggy/suiji-notes
-NOTES="Fixes: the window no longer opens off screen after a display is unplugged, a folder the app cannot read no longer counts as deleted, and an update left waiting is checked again before it is installed. 修复：拔掉外接显示器后窗口不会再开在屏幕外；读不了的文件夹不再被当成已删除；等到退出时才安装的更新，安装前会再检查一遍。"
+NOTES="The assistant's answers from Magpie or a model on this computer now appear as they are written, instead of all at once at the end. 助手：用 Magpie 或本机模型时，回答会边生成边显示，不用等整段写完。"
 cd "$(dirname "$0")"
 
 [ -d node_modules/electron-builder ] || npm ci
