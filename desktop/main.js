@@ -170,11 +170,11 @@ ipcMain.on("suiji", (e, body) => {
 ipcMain.handle("suijiFs", async (e, body) => {
   try {
     if (!fromApp(e) || !body || typeof body !== "object") throw new Error("not allowed");
-    return { value: await bridge(body) };
+    return { value: await bridge(body, e.sender) };
   } catch (err) { return { error: err.message || String(err) }; }
 });
 
-async function bridge(body) {
+async function bridge(body, sender) {
   switch (body.op) {
     case "addFolder": {
       const r = await dialog.showOpenDialog(win, {
@@ -212,7 +212,7 @@ async function bridge(body) {
       const str = (v) => typeof v === "string" ? v : "";
       return { enabled: j.enabled === true, model: str(j.model), url: str(g.url), key: str(g.key) };
     }
-    case "localHttp": return localHttp(body);
+    case "localHttp": return localHttp(body, body.stream ? sender : null);
     case "localHttpAbort": localHttpRuns.get(body.id)?.abort(new Error("stopped")); return undefined;
     default: {
       const v = local.handle(body);
@@ -224,10 +224,11 @@ async function bridge(body) {
 
 // The assistant's model on this computer (Magpie, Ollama…): the page's https origin can't call http://127.0.0.1
 // in WebKit, and the Swift app makes the request; this does the same here. Only loopback addresses; the answer
-// comes back whole. Gives up after ten minutes without a byte from the server.
+// comes back whole, and with stream: true each piece is also sent to the page as it arrives (localHttpChunk,
+// see preload.js) so the answer can be shown as it is written. Gives up after ten minutes without a byte.
 // Requests still running, by the id the page gave them, so its Stop button can end them (op localHttpAbort).
 const localHttpRuns = new Map();
-async function localHttp(body) {
+async function localHttp(body, sender) {
   let u;
   try { u = new URL(body.url); } catch { u = null; }
   if (!u || !["http:", "https:"].includes(u.protocol) || !["127.0.0.1", "localhost", "[::1]"].includes(u.hostname.toLowerCase())) {
@@ -245,8 +246,11 @@ async function localHttp(body) {
       method: typeof body.method === "string" ? body.method : "GET", headers,
       body: typeof body.body === "string" ? body.body : undefined, signal: ctl.signal, bypassCustomProtocolHandlers: true,
     });
-    const chunks = [];
-    if (res.body) for await (const c of res.body) { chunks.push(c); touch(); }
+    const chunks = [], dec = new TextDecoder();
+    if (res.body) for await (const c of res.body) {
+      chunks.push(c); touch();
+      if (sender && id && !sender.isDestroyed()) sender.send("localHttpChunk", { id, d: dec.decode(c, { stream: true }) });
+    }
     return { status: res.status, body: Buffer.concat(chunks).toString("utf8") };
   } finally { clearTimeout(idle); if (id) localHttpRuns.delete(id); }
 }

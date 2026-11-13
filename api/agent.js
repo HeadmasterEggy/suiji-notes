@@ -2,7 +2,7 @@
 // edits), since it already has the notes and files; this function only streams the model's next step, for a
 // signed-in Suiji user, through the OpenAI-compatible API and key they set in Settings (see _ai.js). Response:
 // one JSON object per line —
-//   {t:"text", d}  {t:"tool", id, name, input}  {t:"error", message, code?}  {t:"done", reason}
+//   {t:"text", d}  {t:"reasoning", d}  {t:"tool", id, name, input}  {t:"error", message, code?}  {t:"done", reason}
 import { streamText, jsonSchema } from "ai";
 import { userOf, modelFor, line, fail } from "./_ai.js";
 import { TOOLS as SPEC_TOOLS, instructions, effortBody } from "../public/agentspec.js";
@@ -42,6 +42,7 @@ export async function POST(request) {
       try {
         for await (const part of result.stream) {
           if (part.type === "text-delta") send({ t: "text", d: part.text });
+          else if (part.type === "reasoning-delta") { if (part.text) send({ t: "reasoning", d: part.text }); }
           else if (part.type === "tool-call") send({ t: "tool", id: part.toolCallId, name: part.toolName, input: part.input });
           else if (part.type === "error") send({ t: "error", message: String(part.error?.message || part.error) });
           else if (part.type === "finish") send({ t: "done", reason: part.finishReason });
