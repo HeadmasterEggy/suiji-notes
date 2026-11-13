@@ -37,7 +37,7 @@ const EN = {
   "更多": "More",
   "全部折叠": "Collapse all",
   "全部展开": "Expand all",
-  "{files} 个文件 · {folders} 个文件夹": "{files} files · {folders} folders",
+  "{files} 个文件 · {folders} 个文件夹": "{files} file{files|s} · {folders} folder{folders|s}",
   "属性": "Properties",
   "左右分屏": "Split left and right",
   "上下分屏": "Split top and bottom",
@@ -154,8 +154,8 @@ const EN = {
   "在 Magpie 的 Agent 页面里换模型或断开。": "Change the model or disconnect on Magpie's Agents page.",
   "只在这台设备上：直接连接 {host}，不经过服务器。": "This device only: connects straight to {host}, not through the server.",
   "网关 key（没有可留空）": "Gateway key (leave empty if none)",
-  "找到 {n} 个模型，在「模型」里选一个。": "Found {n} models; pick one under Model.",
-  "找到 {n} 个模型，在「模型」里输入几个字就能找到。": "Found {n} models; type a few letters under Model to find one.",
+  "找到 {n} 个模型，在「模型」里选一个。": "Found {n} model{n|s}; pick one under Model.",
+  "找到 {n} 个模型，在「模型」里输入几个字就能找到。": "Found {n} model{n|s}; type a few letters under Model to find one.",
   "读取模型列表失败：{msg}": "Couldn't read the model list: {msg}",
   "连不上 Magpie：{msg}。先在 Magpie 的 Settings → Network and sharing → Web pages 里加上 {origin}，再用 magpie gateway-key add suiji 生成一个 key 填进来。": "Can't reach Magpie: {msg}. In Magpie, add {origin} under Settings → Network and sharing → Web pages, then make a key with magpie gateway-key add suiji and enter it here.",
   "连不上 {base}：{msg}": "Can't reach {base}: {msg}",
@@ -293,7 +293,7 @@ const EN = {
   "没能同步到云端，改动已保存在本机，联网后会自动重试。": "Couldn't sync to the cloud. Your changes are saved on this device and will retry once online.",
   "未命名": "Untitled",
   "{names} 超过 50 MB，没有上传。": "{names}: over 50 MB, not uploaded.",
-  "只支持 Markdown（.md）文档，跳过了 {n} 个其他文件。": "Only Markdown (.md) documents are supported; skipped {n} other files.",
+  "只支持 Markdown（.md）文档，跳过了 {n} 个其他文件。": "Only Markdown (.md) documents are supported; skipped {n} other file{n|s}.",
   "上传中 · 剩 {n} 个": "Uploading · {n} left",
   "「{name}」上传失败：{msg}。": "Couldn't upload “{name}”: {msg}.",
   "网络问题": "network problem",
@@ -320,7 +320,7 @@ const EN = {
   "保存中…": "Saving…",
   "保存失败": "Save failed",
   "「{name}」没保存上，请联网后再改一下或点「完成」重试。": "“{name}” wasn't saved. Once online, edit it again or click Done to retry.",
-  "关系图谱 · {nodes} 个节点 · {edges} 条链接": "Graph · {nodes} nodes · {edges} links",
+  "关系图谱 · {nodes} 个节点 · {edges} 条链接": "Graph · {nodes} node{nodes|s} · {edges} link{edges|s}",
   "居中": "Center",
   "切换到平面视图": "Switch to the flat view",
   "切换到立体视图": "Switch to the 3D view",
@@ -344,7 +344,7 @@ const EN = {
   "显示": "Display",
   "标签节点（#标签）": "Tag nodes (#tags)",
   "分类": "Categories",
-  "{n} 条链接": "{n} links",
+  "{n} 条链接": "{n} link{n|s}",
   "再点一次打开": "click again to open",
   "自动旋转": "Auto-rotate",
   "清除拖动过的位置": "Reset dragged positions",
@@ -381,11 +381,11 @@ const EN = {
   "没能载入文件列表，几秒后会自动重试。": "Couldn't load the file list. Trying again in a few seconds.",
   "{name} · 编辑中，自动保存": "{name} · editing, saves automatically",
   // settings, dynamic
-  "{n} 个文档已存在本机": "{n} documents stored on this device",
+  "{n} 个文档已存在本机": "{n} document{n|s} stored on this device",
   " · 共用 {size}": " · {size} in all",
   "，离线也能打开": ", readable offline",
   "侧边栏 {side} · 大纲 {toc}，拖动边缘调整，双击恢复": "Sidebar {side} · outline {toc}. Drag an edge to resize, double-click to reset",
-  "{notes} 条随手记 · {files} 个文件": "{notes} quick notes · {files} files",
+  "{notes} 条随手记 · {files} 个文件": "{notes} quick note{notes|s} · {files} file{files|s}",
   "版本 {v}": "Version {v}",
   "未知": "unknown",
   "已清除，文档会在打开时重新下载": "Cleared. Documents download again when opened",
@@ -403,9 +403,10 @@ const EN = {
   "确认邮件已发到 {email}，点里面的链接后回来登录。": "A confirmation email went to {email}. Click its link, then come back to sign in.",
 };
 
+// In the English text "{n|s}" is a plural ending: "s" unless n is 1, as in "{n} file{n|s}".
 export function t(zh, vars) {
   const s = lang === "en" ? EN[zh] ?? zh : zh;
-  return vars ? s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m)) : s;
+  return vars ? s.replace(/\{(\w+)(?:\|(\w*))?\}/g, (m, k, pl) => !(k in vars) ? m : pl === undefined ? vars[k] : +vars[k] === 1 ? "" : pl) : s;
 }
 
 // Fixed text and the placeholder / aria-label / title attributes of index.html, templates included.
