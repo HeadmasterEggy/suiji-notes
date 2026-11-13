@@ -1456,8 +1456,8 @@ mountAgent({
 // Nodes: Markdown files and notes, never tags (Joey: tags stay out of the graph; a tag is matched through each
 // note's own tags list, for colour groups and the assistant). Edges: [[links]] and relative .md links,
 // resolved the way Obsidian does: relative to the file, then from the vault root, then by unique file name.
-// Folders the graph leaves out, at any depth (Joey: the mind maps would only crowd it). They stay in the sidebar.
-const GRAPH_SKIP = new Set(["思维导图"]);
+// Folders the graph leaves out, at any depth (Joey asked for these two). They stay in the sidebar.
+const GRAPH_SKIP = new Set(["思维导图", "自我修复"]);
 
 function graphData() {
   const nodes = [], edges = new Map(), idx = new Map();
