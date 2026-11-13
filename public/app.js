@@ -1495,6 +1495,9 @@ function graphKey(p) {
 }
 
 function showGraph(p) {
+  // Rebuilt in place (a note saved beside it, the tag switch): carry the layout and view over, so the graph
+  // does not scatter and settle again from scratch on every save.
+  const prev = p.graph?.state();
   p.graph?.destroy();
   const data = graphData(p.graphTags);
   p.meta.textContent = t("关系图谱 · {nodes} 个节点 · {edges} 条链接", { nodes: data.nodes.length, edges: data.edges.length });
@@ -1521,6 +1524,7 @@ function showGraph(p) {
   p.preview.replaceChildren(wrap);
   p.graph = mountGraph(wrap, data, {
     flat: !!p.graphFlat,
+    prev,
     options: [{ label: t("标签节点（#标签）"), checked: p.graphTags, onChange: (on) => { p.graphTags = on; p.shown = null; p.graphPanel = true; saveLayout(); renderPane(p); } }],
     hidden: p.graphHidden || [],
     onHide: (h) => { p.graphHidden = h; saveLayout(); },

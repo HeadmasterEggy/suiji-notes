@@ -31,7 +31,7 @@ const FORCE_SLIDERS = [
   ["dist", "连线距离", 20, 250, 1],
 ];
 
-export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden = [], onHide, forces = {}, onForces, options = [] }) {
+export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden = [], onHide, forces = {}, onForces, options = [], prev = null }) {
   const canvas = document.createElement("canvas");
   canvas.className = "graph-canvas";
   host.prepend(canvas);
@@ -55,6 +55,13 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   for (const n of N) {
     const at = pins[pinKey(n)];
     if (Array.isArray(at) && at.length === 3 && at.every(Number.isFinite)) { n.pin = at; [n.x, n.y, n.z] = [at[0], at[1], flat ? 0 : at[2]]; }
+  }
+  // The same pane's graph before a rebuild (prev, from api.state()): notes start where they were.
+  let carried = 0;
+  if (prev?.pos) for (const n of N) {
+    const at = prev.pos.get(pinKey(n));
+    if (at && !n.pin) { [n.x, n.y, n.z] = [at[0], at[1], flat ? 0 : at[2]]; carried++; }
+    else if (n.pin) carried++;
   }
   const AXIS = { x: "#e5484d", y: "#30a46c", z: "#3e63dd" };
   // Size grows with links but is capped, so one hub note does not cover its neighbours.
@@ -104,7 +111,10 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   const rest = groups.slice(PALETTE.length).reduce((a, [, c]) => a + c, 0);
   if (rest) rows.push({ g: null, key: OTHER, c: rest });
   const allBtn = Object.assign(document.createElement("button"), { type: "button", className: "graph-legend-all" });
-  allBtn.onclick = () => { if (off.size) off.clear(); else for (const r of rows) off.add(r.key); setHidden(); };
+  // Only categories that exist count: a hidden one whose folder has since gone would otherwise keep the
+  // button on "show all" with everything showing.
+  const anyOff = () => rows.some((r) => off.has(r.key));
+  allBtn.onclick = () => { if (anyOff()) off.clear(); else for (const r of rows) off.add(r.key); setHidden(); };
   const legendHead = document.createElement("div");
   legendHead.className = "graph-legend-head";
   const fold = Object.assign(document.createElement("button"), { type: "button", className: "graph-legend-fold" });
@@ -121,7 +131,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   legend.append(legendHead);
   const syncLegend = () => {
     for (const r of rows) { r.el.classList.toggle("on", r === legendPick); r.el.classList.toggle("off", off.has(r.key)); r.box.setAttribute("aria-checked", !off.has(r.key)); }
-    allBtn.textContent = off.size ? t("全部显示") : t("全部隐藏");
+    allBtn.textContent = anyOff() ? t("全部显示") : t("全部隐藏");
   };
   for (const r of rows) {
     const row = document.createElement("div");
@@ -221,6 +231,8 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   // Nodes picked from outside (the assistant): they and their neighbours stay lit and the view frames them.
   let picked = null;   // { core: Set of node indices, near: core plus neighbours }
   applyHidden(); syncLegend();
+  const warm = prev && N.length && carried / N.length > 0.8;   // nearly all known: only a nudge to settle the newcomers
+  if (warm) alpha = 0.3;
 
   // The camera is kept per device ("suiji:graphCam"), so the graph opens turned and zoomed the way it was
   // left. Only a view the user moved by hand is put back exactly; otherwise just the angle, and it frames itself.
@@ -231,6 +243,11 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       if (sv.manual && sv.c?.length === 3) { view.k = sv.k; [cam.cx, cam.cy, cam.cz] = sv.c; userMoved = true; fitPending = false; }
     }
   } catch {}
+  if (warm && prev.flat === flat) {   // a rebuild keeps the view exactly, whether the user moved it or not
+    view.k = prev.k; [cam.cx, cam.cy, cam.cz] = prev.c; cam.yaw = prev.yaw; cam.pitch = prev.pitch;
+    spread = prev.spread; userMoved = prev.userMoved; fitPending = !userMoved;
+    chosen = prev.chosen ? N.find((n) => pinKey(n) === prev.chosen) || null : null;
+  }
   let camSaved = "", camTimer = 0;
   function saveCam() {
     const r = (v) => Math.round(v * 1000) / 1000;
@@ -413,9 +430,11 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     for (const p of shown) {
       const c = 0.012 * F.center * alpha;
       p.vx -= p.x * c; p.vy -= p.y * c; p.vz -= p.z * c;
-      if (p.pin && !p.fixed) { p.x = p.pin[0]; p.y = p.pin[1]; p.z = flat ? 0 : p.pin[2]; p.vx = p.vy = p.vz = 0; continue; }
+      // A pinned note still counts toward how far the layout reaches: the camera stands back by that much, and
+      // a note dragged out past it would end up behind the camera, drawn huge or upside down.
+      if (p.pin && !p.fixed) { p.x = p.pin[0]; p.y = p.pin[1]; p.z = flat ? 0 : p.pin[2]; p.vx = p.vy = p.vz = 0; far = Math.max(far, Math.hypot(p.x, p.y, p.z)); continue; }
       if (flat) { p.vz = 0; p.z *= 0.8; if (Math.abs(p.z) < 0.05) p.z = 0; }
-      if (p.fixed) { p.vx = p.vy = p.vz = 0; continue; }
+      if (p.fixed) { p.vx = p.vy = p.vz = 0; far = Math.max(far, Math.hypot(p.x, p.y, p.z)); continue; }
       p.vx *= 0.6; p.vy *= 0.6; p.vz *= 0.6;
       const v = Math.hypot(p.vx, p.vy, p.vz);
       if (v > 30) { p.vx *= 30 / v; p.vy *= 30 / v; p.vz *= 30 / v; }
@@ -715,7 +734,8 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       const f = `${main ? 600 : 400} ${main ? fs * 1.15 : fz}px ${font}`;
       if (f !== lastFont) { ctx.font = f; lastFont = f; }
       const max = main ? 48 : 22;
-      const text = p.label.length > max ? p.label.slice(0, max - 1) + "…" : p.label;
+      const chars = Array.from(p.label);   // by character, so an emoji is never cut in half
+      const text = chars.length > max ? chars.slice(0, max - 1).join("") + "…" : p.label;
       const w = ctx.measureText(text).width + pad * 2, h = (main ? fs * 1.15 : fz) + pad * 2;
       const x = px - w / 2, y = py + radius(p) * k * p.s + 2;
       if (!main && !free(x, y, w, h)) continue;
@@ -828,12 +848,12 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
       if (gizmoHover === "home") { ctx.globalAlpha = 0.25; ctx.fillStyle = ink; ctx.beginPath(); ctx.arc(ox, oy, 5, 0, Math.PI * 2); ctx.fill(); }
     } else gizmo = null;
 
-    // Nothing left to show (every category hidden, or a local graph with nothing open): say so, not a blank pane.
+    // Nothing left to show (every category hidden, or only orphans with orphans off): say so, not a blank pane.
     if (!shown.length && N.length) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.font = lastFont = `400 13px ${font}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.globalAlpha = 0.8; ctx.fillStyle = muted;
-      ctx.fillText(off.size ? t("所有分类都隐藏了，在右下角重新打开") : S.local ? t("局部图谱：先在旁边的窗格打开一篇笔记") : t("没有可显示的笔记"), W / 2, H / 2);
+      ctx.fillText(anyOff() ? t("所有分类都隐藏了，在右下角重新打开") : t("没有可显示的笔记"), W / 2, H / 2);
     }
 
     // How to move around, in one quiet line at the bottom left (beside the axes in 3D).
@@ -995,7 +1015,7 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
   };
   canvas.addEventListener("pointerup", release);
   canvas.addEventListener("pointercancel", release);
-  canvas.addEventListener("keydown", (e) => { if (e.key === "Escape" && chosen) { chosen = null; kick(); } });
+  canvas.addEventListener("keydown", (e) => { if (e.key === "Escape" && (chosen || picked || legendPick)) api.fit(); });
   canvas.tabIndex = -1;
   // While dragging a note, holding X, Y or Z keeps it on that axis.
   let lockAxis = null;
@@ -1062,6 +1082,10 @@ export function mountGraph(host, data, { onOpen, isActive, flat = false, hidden 
     },
     fit() { picked = null; chosen = null; userMoved = false; fitPending = true; legendPick = null; syncLegend(); kick(); },
     toggleForces() { panel.hidden = !panel.hidden; return !panel.hidden; },
+    // Where everything is, for the next build of this pane's graph (see prev).
+    state() {
+      return { pos: new Map(N.map((n) => [pinKey(n), [n.x, n.y, n.z]])), k: view.k, c: [cam.cx, cam.cy, cam.cz], yaw: cam.yaw, pitch: cam.pitch, spread, userMoved, flat, chosen: chosen && pinKey(chosen) };
+    },
     setFlat(on) {
       if (flat === !!on) return;
       flat = !!on;

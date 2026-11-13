@@ -366,7 +366,6 @@ const EN = {
   "已固定，右键取消": "pinned, right-click to release",
   "已固定，长按取消": "pinned, press and hold to release",
   "所有分类都隐藏了，在右下角重新打开": "Every category is hidden; turn them back on at the bottom right",
-  "局部图谱：先在旁边的窗格打开一篇笔记": "Local graph: open a note in a pane beside it first",
   "没有可显示的笔记": "No notes to show",
   "搜索节点": "Find a note",
   "局部图谱": "Local graph",
