@@ -34,7 +34,7 @@
 :root[data-style="ink"] .md-title::after { content: ""; display: inline-block; width: .42em; height: .42em; margin-left: .4em; vertical-align: .55em; background: var(--accent); border-radius: 2px; }
 :root[data-style="ink"] .md-body blockquote { background: none; border-left: 2px solid var(--ink); border-radius: 0; font-family: var(--font-display); }
 :root[data-style="ink"] .tree-file[aria-current="true"] { background: var(--ink); color: var(--panel); box-shadow: none; }
-:root[data-style="ink"] .btn-primary { border-radius: 4px; }
+:root[data-style="ink"] :is(.btn-primary, .ghost.bordered, input:is([type="search"], [type="email"], [type="password"])) { border-radius: 4px; }
 :root[data-style="ink"] .graph { --g-node: #1d1d1b; --g-edge: rgba(29, 29, 27, .25); --g-edge-w: 1.1; }
 :root[data-style="ink"][data-mode="dark"] {
   --bg: #121210; --panel: #1a1a17; --ink: #e8e3d6; --muted: #918b7d; --line: #2e2d28;
@@ -134,7 +134,7 @@
 }
 :root[data-style="swiss"] body::before, :root[data-style="swiss"] body::after { display: none; }
 :root[data-style="swiss"] .glass { border-radius: 0; border: 0; border-top: 4px solid var(--ink); box-shadow: none; }
-:root[data-style="swiss"] :is(.note, .ghost, .btn-primary, input[type="search"], .tree-row, .toc-list button, .md-tag, .md-chip, .md-prop-list, .settings, .set-styles button, .seg, .seg button) { border-radius: 0; }
+:root[data-style="swiss"] :is(.note, .ghost, .btn-primary, input:is([type="search"], [type="email"], [type="password"]), .tree-row, .toc-list button, .md-tag, .md-chip, .md-prop-list, .settings, .set-styles button, .seg, .seg button) { border-radius: 0; }
 :root[data-style="swiss"] .brand { font-weight: 800; letter-spacing: -.03em; }
 :root[data-style="swiss"] .brand::after { content: "."; color: var(--accent); }
 :root[data-style="swiss"] .md-body :is(h1, h2, h3) { font-weight: 800; letter-spacing: -.02em; }
@@ -210,7 +210,7 @@
 }
 :root[data-style="blueprint"] body::before, :root[data-style="blueprint"] body::after { display: none; }
 :root[data-style="blueprint"] .glass { border-radius: 2px; border: 1px solid var(--rim-low); box-shadow: 4px 4px 0 rgba(0, 0, 0, .15); }
-:root[data-style="blueprint"] :is(.note, .ghost, .btn-primary, input[type="search"], .tree-row, .md-tag, .md-chip, .md-prop-list, .settings, .set-styles button, .seg, .seg button) { border-radius: 2px; }
+:root[data-style="blueprint"] :is(.note, .ghost, .btn-primary, input:is([type="search"], [type="email"], [type="password"]), .tree-row, .md-tag, .md-chip, .md-prop-list, .settings, .set-styles button, .seg, .seg button) { border-radius: 2px; }
 :root[data-style="blueprint"] .brand, :root[data-style="blueprint"] .md-body :is(h1, h2, h3), :root[data-style="blueprint"] .md-title { text-transform: uppercase; letter-spacing: .08em; font-weight: 600; }
 /* headings get a dimension line: |———| under them */
 :root[data-style="blueprint"] .md-body h2 { padding-bottom: .35em; background:
