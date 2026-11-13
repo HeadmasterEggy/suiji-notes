@@ -342,7 +342,6 @@ const EN = {
   "设置": "Settings",
   "显示选项和力度": "Display options and forces",
   "显示": "Display",
-  "标签节点（#标签）": "Tag nodes (#tags)",
   "分类": "Categories",
   "{n} 条链接": "{n} link{n|s}",
   "再点一次打开": "click again to open",
