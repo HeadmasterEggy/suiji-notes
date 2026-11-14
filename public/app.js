@@ -161,7 +161,7 @@ function merge(row) {
 // ---------- sync ----------
 let syncing = false, again = false, channel = null;
 function setSync(state, text) { $("sync").dataset.s = state; $("syncText").textContent = text; }
-// The line under the search box. Each message names its source, and a source clears only its own message, so
+// The notice above the search box. Each message names its source, and a source clears only its own message, so
 // one part of the app doing fine (a sync) no longer hides another's problem (storage full, a failed upload).
 // A click dismisses it; a message that isn't an error goes by itself after a while.
 let noteTimer = 0;
@@ -287,6 +287,7 @@ async function uploadFiles(input) {
   if (tooBig.length) showNote(t("{names} 超过 50 MB，没有上传。", { names: tooBig.map((f) => f.name).join(lang === "en" ? ", " : "、") }), "err", "upload");
   const ok = all.filter((f) => f.size <= MAX_FILE);
   uploading += ok.length;
+  let failed = 0;
   for (const file of ok) {
     setSync("saving", t("上传中 · 剩 {n} 个", { n: uploading }));
     const id = crypto.randomUUID(), ext = extOf(file.name);
@@ -304,11 +305,13 @@ async function uploadFiles(input) {
     } catch (e) {
       console.error(e);
       showNote(t("「{name}」上传失败：{msg}。", { name: file.name, msg: e.message || t("网络问题") }), "err", "upload");
+      failed++;
     } finally {
       uploading--;
     }
   }
-  setSync("ok", t("已同步"));
+  // Another batch may still be going (two drops in a row): it sets the state when it ends.
+  if (!uploading) setSync(failed ? "err" : "ok", failed ? t("上传失败") : t("已同步"));
   await loadFiles();
 }
 
@@ -642,6 +645,7 @@ async function renderMarkdown(src, f) {
   let html = window.DOMPurify.sanitize(window.marked.parse(text, { gfm: true, breaks: false }));
   html = html
     .replace(/<p>KATEXBLOCK(\d+)END<\/p>/g, (_, i) => `<div class="math-block">${math[i]}</div>`)
+    .replace(/KATEXINLINE(\d+)END([，。、；：！？）」』”’,.;:!?)]+)/g, (_, i, punct) => `<span class="math-nb">${math[i]}${punct}</span>`)
     .replace(/KATEX(?:BLOCK|INLINE)(\d+)END/g, (_, i) => math[i]);
 
   const art = document.createElement("article");
@@ -1073,7 +1077,7 @@ function folderKeys() {
 // that have since gone, or sit inside a closed one, and then the button offered to fold with nothing open.
 const anyOpen = () => (expanded.has(NOTES_KEY) && visible().length > 0) || [...buildTree().dirs.keys()].some((k) => expanded.has(k));
 function showCounts() {
-  $("counts").textContent = t("{files} 个文件 · {folders} 个文件夹", { files: files.length, folders: folderKeys().length });
+  $("counts").textContent = $("counts").title = t("{files} 个文件 · {folders} 个文件夹", { files: files.length, folders: folderKeys().length });   // title: a narrow sidebar cuts it off
   const label = anyOpen() ? t("全部折叠") : t("全部展开");
   $("foldBtn").title = label; $("foldBtn").setAttribute("aria-label", label);
 }
@@ -1449,55 +1453,90 @@ mountAgent({
 });
 
 // ---------- graph ----------
-// Nodes: Markdown files and notes (plus tags when switched on). Edges: [[links]] and relative .md links,
+// Nodes: Markdown files and notes, never tags (Joey: tags stay out of the graph; a tag is matched through each
+// note's own tags list, for colour groups and the assistant). Edges: [[links]] and relative .md links,
 // resolved the way Obsidian does: relative to the file, then from the vault root, then by unique file name.
-function graphData(withTags) {
-  const nodes = [], edges = new Set(), idx = new Map();
+// Folders the graph leaves out, at any depth (Joey asked for these two). They stay in the sidebar.
+const GRAPH_SKIP = new Set(["思维导图", "自我修复"]);
+
+function graphData() {
+  const nodes = [], edges = new Map(), idx = new Map();
   const add = (key, node) => { if (!idx.has(key)) { idx.set(key, nodes.length); nodes.push(node); } return idx.get(key); };
-  const md = files.filter(isMarkdown);
-  for (const f of md) add("file:" + f.id, { label: stripMd(baseName(f.name)), kind: "file", ref: f.id });
-  const find = linkResolver(md);
+  const all = files.filter(isMarkdown);
+  const md = all.filter((f) => !fullPath(f).slice(0, -1).some((d) => GRAPH_SKIP.has(d)));
+  // Category (the node's colour): the first folder level where files part ways, so a single synced vault
+  // folder still splits by its subfolders. Files sitting above that level, and quick notes, get their own.
+  const dirs = md.map((f) => fullPath(f).slice(0, -1));
+  let depth = 0;
+  // A file sitting right in that shared folder (say a README beside the course folders) must not stop the
+  // split, or every note ends up in one category: it is named after the shared folder instead.
+  while (dirs.length && dirs.every((d) => d.length > depth && d[depth] === dirs[0][depth])) depth++;
+  // len: rough length in characters for "node size by length" (UTF-8 bytes; CJK text is about 3 a character).
+  md.forEach((f, k) => add("file:" + f.id, { label: stripMd(baseName(f.name)), kind: "file", ref: f.id, group: dirs[k][depth] || dirs[k][depth - 1] || t("未分类"), len: (f.size || 0) / 2, tags: f.tags || [], path: fullPath(f).join("/") }));
+  const find = linkResolver(all);   // every document: a link to a left-out mind map drops, not lands on a namesake
   const resolve = (dir, target) => { const f = find(dir, target); return f ? idx.get("file:" + f.id) : undefined; };
-  const link = (a, b) => { if (b !== undefined && a !== b) edges.add(a < b ? a + "," + b : b + "," + a); };
+  // One edge per pair; its third value says which way the links run (1: low index to high, 2: back, 3: both,
+  // 0: a tag), for the arrows.
+  const link = (a, b, dir = true) => {
+    if (b === undefined || a === b) return;
+    const key = a < b ? a + "," + b : b + "," + a;
+    edges.set(key, (edges.get(key) || 0) | (!dir ? 0 : a < b ? 1 : 2));
+  };
   for (const f of md) {
     const i = idx.get("file:" + f.id), dir = f.name.split("/").slice(0, -1);
     for (const l of f.links || []) link(i, resolve(dir, l));
-    if (withTags) for (const t of f.tags || []) link(i, add("tag:" + t, { label: "#" + t, kind: "tag", ref: t }));
   }
   for (const n of visible()) {
-    const i = add("note:" + n.id, { label: titleOf(n.body), kind: "note", ref: n.id });
     const meta = mdMeta(n.body);
+    const i = add("note:" + n.id, { label: titleOf(n.body), kind: "note", ref: n.id, group: t("随手记"), len: n.body.length, tags: meta.tags, path: "" });
     for (const l of meta.links) link(i, resolve([], l));
-    if (withTags) for (const t of meta.tags) link(i, add("tag:" + t, { label: "#" + t, kind: "tag", ref: t }));
   }
-  return { nodes, edges: [...edges].map((e) => e.split(",").map(Number)) };
+  return { nodes, edges: [...edges].map(([e, dir]) => [...e.split(",").map(Number), dir]) };
 }
 
 function graphKey(p) {
   let latest = "";
   for (const f of files) if ((f.updated_at || "") > latest) latest = f.updated_at;
   const notes = visible();   // newest first: a note edited since (new [[links]], tags) redraws the graph too
-  return ["graph", files.length, latest, notes.length, notes[0]?.updated_at || "", p.graphTags ? 1 : 0].join("@");
+  return ["graph", files.length, latest, notes.length, notes[0]?.updated_at || ""].join("@");
 }
 
 function showGraph(p) {
+  // Rebuilt in place (a note saved beside it, the tag switch): carry the layout and view over, so the graph
+  // does not scatter and settle again from scratch on every save.
+  const prev = p.graph?.state();
   p.graph?.destroy();
-  const data = graphData(p.graphTags);
+  const data = graphData();
   p.meta.textContent = t("关系图谱 · {nodes} 个节点 · {edges} 条链接", { nodes: data.nodes.length, edges: data.edges.length });
   const wrap = document.createElement("div");
   wrap.className = "graph";
   const tools = document.createElement("div");
   tools.className = "graph-tools";
-  const tagBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: p.graphTags ? t("隐藏标签") : t("显示标签") });
-  tagBtn.onclick = () => { p.graphTags = !p.graphTags; p.shown = null; saveLayout(); renderPane(p); };
   const fitBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: t("居中") });
   fitBtn.onclick = () => { p.graphFocus = null; p.graph?.fit(); };
-  tools.append(tagBtn, fitBtn);
+  // 3D by default; the flat graph is one click away and each pane remembers its choice.
+  const dimBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: p.graphFlat ? "3D" : "2D", title: p.graphFlat ? t("切换到立体视图") : t("切换到平面视图") });
+  dimBtn.onclick = () => {
+    p.graphFlat = !p.graphFlat; saveLayout();
+    dimBtn.textContent = p.graphFlat ? "3D" : "2D"; dimBtn.title = p.graphFlat ? t("切换到立体视图") : t("切换到平面视图");
+    p.graph?.setFlat(p.graphFlat);
+  };
+  // Settings: display switches and the forces, in one panel like Obsidian's.
+  const forceBtn = Object.assign(document.createElement("button"), { type: "button", className: "ghost bordered small", textContent: t("设置"), title: t("显示选项和力度") });
+  forceBtn.onclick = () => forceBtn.classList.toggle("on", p.graph?.toggleForces());
+  tools.append(dimBtn, forceBtn, fitBtn);
   wrap.append(tools);
   if (!data.nodes.length) wrap.append(Object.assign(document.createElement("p"), { className: "graph-empty", textContent: t("还没有 Markdown 文件或笔记。") }));
   p.preview.classList.remove("doc");
   p.preview.replaceChildren(wrap);
   p.graph = mountGraph(wrap, data, {
+    flat: !!p.graphFlat,
+    prev,
+    hidden: p.graphHidden || [],
+    onHide: (h) => { p.graphHidden = h; saveLayout(); },
+    // Forces are one setting for the device, like a preference, not per pane.
+    forces: (() => { try { return JSON.parse(localStorage.getItem("suiji:graphForces")) || {}; } catch { return {}; } })(),
+    onForces: (f) => { try { localStorage.setItem("suiji:graphForces", JSON.stringify(f)); } catch {} },
     isActive: (n) => n.kind !== "tag" && [...panes.values()].some((x) => x !== p && x.kind === n.kind && x.itemId === n.ref),
     onOpen: (n) => {
       if (n.kind === "tag") { searchTag(n.ref); return; }
@@ -1509,6 +1548,8 @@ function showGraph(p) {
     },
   });
   if (p.graphFocus) p.graph.focus(p.graphFocus);
+  // Rebuilt from inside the settings panel (tag switch): keep it open.
+  if (p.graphPanel) { p.graphPanel = false; forceBtn.classList.toggle("on", p.graph.toggleForces()); }
 }
 
 // ---------- what the assistant can do in the interface ----------
@@ -1569,8 +1610,7 @@ async function uiGraph({ ids, query, tag }) {
   const pathOf = new Map(files.map((f) => [f.id, fullPath(f).join("/").toLowerCase()]));
   const match = (n) => idSet.has(n.ref)
     || (q && n.kind !== "tag" && (n.label.toLowerCase().includes(q) || (pathOf.get(n.ref) || "").includes(q)))
-    || (tg && n.kind === "tag" && n.ref.toLowerCase() === tg);
-  if (tg && !g.graphTags) { g.graphTags = true; g.shown = null; }
+    || (tg && (n.tags || []).some((x) => String(x).toLowerCase() === tg));
   g.graphFocus = idSet.size || q || tg ? match : null;
   if (g.shown == null) renderPane(g);   // a fresh graph applies graphFocus when it is built
   const labels = g.graphFocus ? g.graph.focus(match) : (g.graph.fit(), []);
@@ -1866,7 +1906,7 @@ function saveLayout() {
     const top = p.restoreTop || (p.kind ? Math.round(scroller(p).scrollTop) : 0);   // still waiting to scroll back: keep that
     if (p.kind && p.hi >= 0) p.hist[p.hi] = { kind: p.kind, id: p.itemId, top };
     const from = Math.max(0, p.hi - 20), h = p.hist.slice(from, from + 30);
-    return { kind: p.kind, id: p.itemId, f: p === focused ? 1 : 0, t: p.graphTags ? 1 : 0, o: p.tocOpen ? 1 : 0, top, h, hi: p.hi - from };
+    return { kind: p.kind, id: p.itemId, f: p === focused ? 1 : 0, g: p.graphFlat ? 1 : 0, x: p.graphHidden?.length ? p.graphHidden : undefined, o: p.tocOpen ? 1 : 0, top, h, hi: p.hi - from };
   };
   const ser = (n) => n.pane ? pane(n.pane) : { dir: n.dir, ratio: n.ratio, a: ser(n.a), b: ser(n.b) };
   try { localStorage.setItem(layoutKey(), JSON.stringify(ser(layout))); } catch {}
@@ -1880,7 +1920,8 @@ function restoreLayout() {
     if (!s || !s.dir) {
       const p = makePane(s && s.kind ? { kind: s.kind, id: s.id } : null);
       if (s && s.f) focused = p;
-      p.graphTags = !!(s && s.t);
+      p.graphFlat = !!(s && s.g);
+      p.graphHidden = Array.isArray(s?.x) ? s.x.filter((x) => typeof x === "string") : [];
       p.tocOpen = s && "o" in s ? s.o !== 0 : tocAuto;   // each pane keeps its own outline open or closed
       if (Array.isArray(s?.h) && s.h[s.hi]?.id === s.id) { p.hist = s.h.filter((x) => x && x.kind); p.hi = Math.min(s.hi, p.hist.length - 1); navState(p); }
       if (s?.top) p.restoreTop = s.top;

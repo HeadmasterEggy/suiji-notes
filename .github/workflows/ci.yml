@@ -1,0 +1,33 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Syntax
+        run: npm run check
+      - name: Playwright
+        run: |
+          npm i --no-save playwright@1.63.0
+          npx playwright install --with-deps chromium
+      - name: Smoke (every style, light and dark, phone)
+        run: npm run smoke -- --shots smoke-shots
+      - name: Bug checks
+        run: for f in scripts/checks/*.mjs; do [ -e "$f" ] || continue; echo "== $f"; node "$f" || exit 1; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-shots
+          path: smoke-shots
+          if-no-files-found: ignore

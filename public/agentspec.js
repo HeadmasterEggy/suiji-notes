@@ -26,7 +26,7 @@ export const TOOLS = {
   show_graph: tool("Open the relationship graph and focus it: the matching documents are highlighted with their direct links and the view zooms to them. Give ids, a query (matched against titles and paths, e.g. a course code or folder name), or a tag; with none, shows the whole graph.", {
     ids: { type: "array", items: { type: "string" } },
     query: { type: "string" },
-    tag: { type: "string", description: "A front-matter tag; turns tags on in the graph" },
+    tag: { type: "string", description: "A front-matter tag; highlights the documents that have it (tags are not nodes in the graph)" },
   }, []),
   show_in_sidebar: tool("Show something in the sidebar file tree: reveal a document (id) or a folder (path from list) by opening the folders above it, or filter the tree with a search (filter; \"\" clears it).", {
     id: { type: "string" }, folder: { type: "string" }, filter: { type: "string" },
