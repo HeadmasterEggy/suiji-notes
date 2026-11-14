@@ -188,6 +188,7 @@ const EN = {
   "点击收起": "Click to show less",
   "复制失败": "Couldn't copy",
   "已思考 {n} 秒": "Thought for {n}s",
+  "思考中 · {n} 秒": "Thinking · {n}s",
   "默认": "Default",
   "不思考": "Off",
   "低": "Low",
