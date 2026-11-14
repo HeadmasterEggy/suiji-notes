@@ -895,7 +895,7 @@ label.set-row { cursor: pointer; }
 .ag-text th { background: var(--accent-soft); font-weight: 600; white-space: nowrap; }
 .ag-text img { max-width: 100%; border-radius: 6px; }
 .ag-code { margin: .6em 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: color-mix(in srgb, var(--ink) 5%, var(--panel)); }
-.ag-text .ag-code pre { margin: 0; border: 0; border-radius: 0; background: none; }
+.ag-text .ag-code pre { margin: 0; border: 0; border-radius: 0; background: none; max-height: 26em; overflow: auto; }
 .ag-code-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 4px 3px 12px; border-bottom: 1px solid var(--line);
   font: 11.5px var(--font-mono); color: var(--muted); }
 .ag-copy { display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border: 0; border-radius: 6px; background: none; color: var(--muted);
@@ -945,6 +945,10 @@ label.set-row { cursor: pointer; }
 .ag-chip.bad .ag-chip-state::before { content: "×"; font: 700 12px/1 system-ui, sans-serif; }
 @keyframes ag-spin { to { transform: rotate(360deg); } }
 .ag-err { margin: 0; color: var(--danger); font-size: 13px; }
+.ag-fail { display: flex; align-items: flex-start; gap: 10px; padding: 8px 8px 8px 12px; border-radius: 10px; overflow-wrap: anywhere;
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent); background: color-mix(in srgb, var(--danger) 7%, transparent); }
+.ag-fail .ag-err { flex: 1; min-width: 0; padding-top: 3px; line-height: 1.5; }
+.ag-fail button { flex: none; }
 .ag-card { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); }
 .ag-card-head { display: flex; flex-direction: column; gap: 1px; padding: 8px 12px; font-size: 13px; border-bottom: 1px solid var(--line); min-width: 0; }
 .ag-card-name { color: var(--ink); font-weight: 600; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -982,7 +986,7 @@ a.ag-card-name:hover { text-decoration: underline; }
 @keyframes ag-flash { 0%, 30% { background: color-mix(in srgb, var(--accent) 22%, transparent); } 100% { background: transparent; } }
 @keyframes sheet { from { transform: translateY(40%); opacity: 0; } to { transform: none; opacity: 1; } }
 :root[data-style="blocks"] .agent { border-radius: 0; }
-:root:is([data-style="terminal"], [data-style="swiss"], [data-style="eink"], [data-style="blueprint"]) :is(.ag-card, .ag-user, .ag-form textarea, .ag-code) { border-radius: 4px; }
+:root:is([data-style="terminal"], [data-style="swiss"], [data-style="eink"], [data-style="blueprint"]) :is(.ag-card, .ag-user, .ag-form textarea, .ag-code, .ag-fail) { border-radius: 4px; }
 
 /* ===================== Phones =====================
    The open document fills the screen with its buttons floating over the top of it. The sidebar is a drawer

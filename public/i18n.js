@@ -183,6 +183,7 @@ const EN = {
   "思考强度": "Thinking effort",
   "思考中": "Thinking",
   "已复制": "Copied",
+  "重试": "Retry",
   "复制失败": "Couldn't copy",
   "已思考 {n} 秒": "Thought for {n}s",
   "默认": "Default",
