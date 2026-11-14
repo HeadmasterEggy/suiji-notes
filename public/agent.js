@@ -522,7 +522,14 @@ async function send(text) {
   const log = $("agLog");
   $("agEmpty")?.remove();
   const mine = el("div", "ag-user");
-  if (q) mine.append(el("blockquote", "ag-cite", q.text.length > 400 ? q.text.slice(0, 400) + "…" : q.text));
+  if (q) {
+    // The quoted passage shows its first few lines; a click on it shows the rest.
+    const cite = el("blockquote", "ag-cite", q.text.length > 2000 ? q.text.slice(0, 2000) + "…" : q.text);
+    cite.title = t("点击展开");
+    cite.onclick = () => { cite.classList.toggle("open"); cite.title = cite.classList.contains("open") ? t("点击收起") : t("点击展开"); };
+    mine.append(cite);
+    requestAnimationFrame(() => { if (cite.scrollHeight <= cite.clientHeight + 1) { cite.onclick = null; cite.removeAttribute("title"); } });
+  }
   mine.append(text);
   log.append(mine);
   // The quoted passage goes to the model in full, with where it is from.
