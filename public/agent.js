@@ -552,7 +552,20 @@ async function send(text) {
       const p = el("p", "ag-err", t("先在「设置 → 助手」里填上你的 API key，就可以开始用了。") + " "), b = el("button", "ghost bordered small", t("去设置"));
       b.type = "button"; b.onclick = () => app.openSettings("aiSec");
       p.append(b); bubble.append(p);
-    } else if (e.name !== "AbortError") bubble.append(el("p", "ag-err", t("出错了：{msg}", { msg: e.message || e })));
+    } else if (e.name !== "AbortError") {
+      // A failed answer says what went wrong in a box of its own, with a button that asks again.
+      const box = el("div", "ag-fail"), again = el("button", "ghost bordered small", t("重试"));
+      again.type = "button";
+      again.onclick = () => {
+        if (busy) return;
+        const input = $("agInput");
+        if (!input.value.trim()) { input.value = text; if (q) setQuote(q); }
+        again.disabled = true;
+        $("agForm").requestSubmit();
+      };
+      box.append(el("p", "ag-err", t("出错了：{msg}", { msg: e.message || e })), again);
+      bubble.append(box);
+    }
     // An unanswered tool call would make the next request invalid, so the turn is dropped back to the question.
     while (messages.length && messages.at(-1).role !== "user") messages.pop();
     if (messages.at(-1)?.role === "user") messages.pop();
