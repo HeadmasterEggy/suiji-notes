@@ -375,10 +375,19 @@ function caretAt(box) {
 // While the model works and has shown nothing yet: three dots and 思考中, which go when the first word,
 // thought or tool call arrives.
 function waiting() {
-  const w = el("div", "ag-wait");
-  w.append(el("span", "ag-dots"), el("span", null, t("思考中")));
+  const w = el("div", "ag-wait"), label = el("span", null, t("思考中"));
+  w.append(el("span", "ag-dots"), label);
   w.firstChild.append(el("i"), el("i"), el("i"));
+  clock(label, performance.now(), () => w.isConnected);
   return w;
+}
+// A slow model shows how long it has been at it: after two seconds 思考中 becomes 思考中 · 5 秒.
+function clock(label, started, live) {
+  const tick = setInterval(() => {
+    if (!live()) return clearInterval(tick);
+    const n = Math.floor((performance.now() - started) / 1000);
+    if (n >= 2) label.textContent = t("思考中 · {n} 秒", { n });
+  }, 1000);
 }
 // What the model thought before answering, as it comes: open while it thinks, folded once the answer starts,
 // and a click away after that.
@@ -387,6 +396,7 @@ function thoughts(bubble, before) {
   const label = el("span", null, t("思考中")); head.append(label);
   box.append(head, body); box.open = true; box.classList.add("live");
   bubble.insertBefore(box, before);
+  clock(label, started, () => box.isConnected && box.classList.contains("live"));
   const ty = typer((s) => { body.textContent = s; if (box.open) body.scrollTop = body.scrollHeight; scroll(); });
   let ending = null, secs = 0;
   return {

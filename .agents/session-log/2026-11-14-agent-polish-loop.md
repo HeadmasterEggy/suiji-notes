@@ -6,7 +6,8 @@
   - 第 2 轮：连续的工具调用排在同一行；每个工具标签运行时转圈，完成后显示 ✓，失败显示 ✕，悬停能看到失败原因；去掉了一条从来没生效的「…」样式。（PR #26）
   - 第 3 轮：出错时错误放进一个浅红色的框，旁边有「重试」按钮，点了用同一个问题再问一次；很长的代码块限制高度，在框内滚动。
   - 第 4 轮：助手回答里指向用户自己文档的链接（`suiji:ID`）显示成带文档图标的小标签，和网页链接区分开。
-  - 第 5 轮：提问时引用的长段落在问题气泡里只显示前 5 行，点一下展开；输入框上方的引用预览底部渐隐，不再被生硬截断。
-- Checked: 用 `scripts/harness.mjs` 打开应用、拦截 `/api/agent` 返回两步工具调用加一段完整 Markdown，在默认、终端、纸张、笔记本、霓虹等风格（亮/暗、桌面和 390px 手机宽度）截图检查；新增 `scripts/checks/assistant-answer-tools.mjs`（第 1 轮）、`assistant-tool-chips.mjs`（第 2 轮）、`assistant-retry.mjs`（第 3 轮）、`assistant-doc-links.mjs`（第 4 轮）和 `assistant-quote-fold.mjs`（第 5 轮），redgreen 在旧代码上红、修复后绿；`npm run check`、`npm run smoke` 和所有 checks 通过。没有在真实模型上试。
+  - 第 5 轮：提问时引用的长段落在问题气泡里只显示前 5 行，点一下展开；输入框上方的引用预览底部渐隐，不再被生硬截断。（PR #29）
+  - 第 6 轮：模型慢的时候，「思考中」两秒后开始计秒（「思考中 · 5 秒」），等待提示和思考过程的标题都会计时。
+- Checked: 用 `scripts/harness.mjs` 打开应用、拦截 `/api/agent` 返回两步工具调用加一段完整 Markdown，在默认、终端、纸张、笔记本、霓虹等风格（亮/暗、桌面和 390px 手机宽度）截图检查；新增 `scripts/checks/assistant-answer-tools.mjs`（第 1 轮）、`assistant-tool-chips.mjs`（第 2 轮）、`assistant-retry.mjs`（第 3 轮）、`assistant-doc-links.mjs`（第 4 轮）、`assistant-quote-fold.mjs`（第 5 轮）和 `assistant-wait-clock.mjs`（第 6 轮），redgreen 在旧代码上红、修复后绿；`npm run check`、`npm run smoke` 和所有 checks 通过。没有在真实模型上试。
 - Open: 后续轮次继续找问题（工具调用显示、间距、长对话等）。
 - Learned: 探查脚本思路：`openApp()` 后 `page.route("**/api/agent")` 按请求次数返回不同的 NDJSON，就能模拟多步工具调用；`propose_edit` 等工具会在页面里真的执行。
