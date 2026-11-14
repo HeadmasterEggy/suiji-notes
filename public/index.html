@@ -113,6 +113,7 @@
       <div class="p-acts">
         <button class="ghost icon p-split-r" type="button" title="左右分屏" aria-label="左右分屏"><svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2.5"/><path d="M8 2.5v11"/></svg></button>
         <button class="ghost icon p-split-d" type="button" title="上下分屏" aria-label="上下分屏"><svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2.5"/><path d="M1.5 8h13"/></svg></button>
+        <button class="ghost icon p-findbtn" type="button" hidden title="在文中查找（⌘F）" aria-label="在文中查找"><svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5l3 3"/></svg></button>
         <button class="ghost icon p-outline" type="button" hidden title="大纲" aria-label="大纲" aria-pressed="false"><svg viewBox="0 0 16 16"><path d="M2.5 4h11M5 8h8.5M7.5 12h6"/></svg></button>
         <button class="ghost p-edit" type="button" hidden title="编辑"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path class="pen" d="M10.5 2.5l3 3-8 8H2.5v-3z"/><path class="tick" d="M3 8.5l3 3 7-7"/></svg><span class="lbl">编辑</span></button>
         <button class="ghost icon p-more" type="button" title="更多" aria-label="更多" aria-expanded="false"><svg viewBox="0 0 16 16"><circle cx="3.5" cy="8" r=".9"/><circle cx="8" cy="8" r=".9"/><circle cx="12.5" cy="8" r=".9"/></svg></button>
@@ -124,6 +125,14 @@
         </div>
         <button class="ghost icon p-close" type="button" title="关闭这个窗格" aria-label="关闭这个窗格"><svg viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg></button>
       </div>
+    </div>
+    <div class="findbar p-find" hidden role="search">
+      <svg class="find-ico" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5l3 3"/></svg>
+      <input class="p-find-q" type="text" placeholder="在文中查找" aria-label="在文中查找" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <span class="p-find-n" aria-live="polite"></span>
+      <button class="ghost icon p-find-prev" type="button" title="上一个（⇧↵）" aria-label="上一个"><svg viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></button>
+      <button class="ghost icon p-find-next" type="button" title="下一个（↵）" aria-label="下一个"><svg viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></button>
+      <button class="ghost icon p-find-x" type="button" title="关闭（Esc）" aria-label="关闭查找"><svg viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg></button>
     </div>
     <div class="placeholder p-ph"><div><b>从左边打开一个文件，或新建一条笔记</b><span>新建的笔记放在「随手记」里，第一行是标题，输入后自动保存。</span><span class="ph-split">把左边的文件拖到窗格的上下左右边缘，就能分屏打开。</span></div></div>
     <textarea class="p-ta" hidden aria-label="笔记内容" placeholder="第一行是标题…"></textarea>
