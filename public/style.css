@@ -890,9 +890,20 @@ label.set-row { cursor: pointer; }
 .ag-text blockquote { margin: .6em 0; padding: .1em 0 .1em .9em; border-left: 3px solid var(--line); color: var(--muted); }
 .ag-text hr { border: 0; border-top: 1px solid var(--line); margin: 1em 0; }
 .ag-text table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: .6em 0; font-size: .93em; }
-.ag-text :is(th, td) { border: 1px solid var(--line); padding: 4px 9px; text-align: left; vertical-align: top; }
-.ag-text th { background: var(--accent-soft); font-weight: 600; }
+.ag-text :is(th, td) { border: 1px solid var(--line); padding: 4px 9px; vertical-align: top; }
+.ag-text :is(th, td):not([align]) { text-align: left; }   /* :---: and ---: columns keep their alignment */
+.ag-text th { background: var(--accent-soft); font-weight: 600; white-space: nowrap; }
 .ag-text img { max-width: 100%; border-radius: 6px; }
+.ag-code { margin: .6em 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: color-mix(in srgb, var(--ink) 5%, var(--panel)); }
+.ag-text .ag-code pre { margin: 0; border: 0; border-radius: 0; background: none; }
+.ag-code-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 4px 3px 12px; border-bottom: 1px solid var(--line);
+  font: 11.5px var(--font-mono); color: var(--muted); }
+.ag-copy { display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border: 0; border-radius: 6px; background: none; color: var(--muted);
+  font: inherit; font-size: 12px; cursor: pointer; }
+.ag-copy:hover { background: var(--accent-soft); color: var(--ink); }
+.ag-copy svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.ag-actions { display: flex; gap: 4px; margin: -2px 0 0 -7px; opacity: .75; transition: opacity .15s; }
+.ag-bot:hover .ag-actions, .ag-actions:focus-within { opacity: 1; }
 .ag-text .katex-display { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
 /* The caret at the end of the answer while it is being written. */
 .ag-caret { display: inline-block; width: .5em; height: 1.05em; margin-left: 2px; vertical-align: -.15em; border-radius: 1px; background: var(--accent); animation: ag-blink 1s steps(1) infinite; }
@@ -965,7 +976,7 @@ a.ag-card-name:hover { text-decoration: underline; }
 @keyframes ag-flash { 0%, 30% { background: color-mix(in srgb, var(--accent) 22%, transparent); } 100% { background: transparent; } }
 @keyframes sheet { from { transform: translateY(40%); opacity: 0; } to { transform: none; opacity: 1; } }
 :root[data-style="blocks"] .agent { border-radius: 0; }
-:root:is([data-style="terminal"], [data-style="swiss"], [data-style="eink"], [data-style="blueprint"]) :is(.ag-card, .ag-user, .ag-form textarea) { border-radius: 4px; }
+:root:is([data-style="terminal"], [data-style="swiss"], [data-style="eink"], [data-style="blueprint"]) :is(.ag-card, .ag-user, .ag-form textarea, .ag-code) { border-radius: 4px; }
 
 /* ===================== Phones =====================
    The open document fills the screen with its buttons floating over the top of it. The sidebar is a drawer
