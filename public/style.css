@@ -226,6 +226,36 @@ textarea {
   flex: 1; width: 100%; border: 0; resize: none; background: transparent; color: var(--ink);
   padding: 22px 24px; font: calc(var(--doc-size, 16px) + 1px)/1.75 var(--font-body); outline: none;
 }
+/* Find in the document (find.js): a bar under the toolbar, marks over the text. */
+.findbar { display: flex; align-items: center; gap: 4px; padding: 6px 10px 6px 14px; border-bottom: 1px solid var(--rim-low); background: var(--glass-strong); }
+.findbar[hidden] { display: none; }
+.findbar .find-ico { flex: none; width: 15px; height: 15px; fill: none; stroke: var(--muted); stroke-width: 1.4; stroke-linecap: round; }
+.findbar input { flex: 1; min-width: 0; max-width: 360px; padding: 5px 12px; border: 1px solid var(--rim-low); border-radius: 999px;
+  background: var(--glass); color: var(--ink); font: inherit; font-size: 14px; outline: none; }
+.findbar input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.findbar.none input { border-color: var(--danger); }
+.p-find-n { flex: none; min-width: 3.5em; margin-right: auto; font: 11px var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.findbar.none .p-find-n { color: var(--danger); }
+.findbar .ghost.icon { width: 28px; height: 28px; padding: 0; display: inline-grid; place-items: center; }
+.findbar .ghost.icon svg { stroke-linejoin: round; }
+.findbar .ghost:disabled { opacity: .35; pointer-events: none; }
+.find-mirror { position: absolute; z-index: 1; overflow: hidden; pointer-events: none; box-sizing: border-box; margin: 0; border: 0;
+  white-space: pre-wrap; color: transparent; }
+.find-mirror[hidden] { display: none; }
+.find-mirror mark { color: transparent; background: rgba(255, 204, 0, .38); border-radius: 2px; }
+.find-mirror mark.cur { color: #1a1a1a; background: #ffb52e; }
+::highlight(suiji-find) { background-color: rgba(255, 204, 0, .38); }
+::highlight(suiji-find-cur) { background-color: #ffb52e; color: #1a1a1a; }
+/* Square styles: a square find bar. */
+:root:is([data-style="terminal"], [data-style="swiss"], [data-style="eink"], [data-style="blueprint"]) :is(.findbar, .findbar input) { border-radius: 4px; }
+.tree-reading { margin: 8px 8px 0; font-size: 12px; color: var(--muted); }
+/* A search result found by its text: the line the word is on, under its name. */
+.tree-file.has-snip { flex-wrap: wrap; row-gap: 1px; }
+.tree-snip { flex: 0 0 100%; order: 3; min-width: 0; font-size: 12px; line-height: 1.45; color: var(--muted);
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.tree-snip mark { background: var(--accent-soft); color: var(--ink); border-radius: 3px; padding: 0 1px; }
+.tree-file[aria-current="true"] .tree-snip { color: inherit; opacity: .75; }
+.tree-file[aria-current="true"] .tree-snip mark { background: color-mix(in srgb, var(--bg) 25%, transparent); color: inherit; }
 .placeholder { flex: 1; display: grid; place-items: center; color: var(--muted); text-align: center; padding: 24px; line-height: 1.7; }
 .placeholder b { font-family: var(--font-display); font-size: 22px; color: var(--ink); display: block; }
 .placeholder span { display: block; }
@@ -348,7 +378,7 @@ textarea {
   box-shadow: var(--shadow);
   background: color-mix(in srgb, var(--panel) 96%, transparent);   /* nested glass does not blur the text under it */
 }
-.p-outline[aria-pressed="true"] { color: var(--ink); background: color-mix(in srgb, var(--ink) 9%, transparent); }
+.p-outline[aria-pressed="true"], .p-findbtn[aria-pressed="true"] { color: var(--ink); background: color-mix(in srgb, var(--ink) 9%, transparent); }
 @media (prefers-reduced-motion: reduce) { .toc-ink, .toc-bar > i { transition: none; } }
 .preview { flex: 1; min-height: 0; display: grid; place-items: center; background: transparent; overflow: auto; }
 .preview img, .preview video { max-width: 100%; max-height: 100%; object-fit: contain; }
@@ -1057,6 +1087,15 @@ a.ag-card-name:hover { text-decoration: underline; }
   :root .ebar .p-extra :is(.p-web, .p-dl, .p-del)[hidden] { display: none; }
   :root .ebar .p-extra :is(.p-web, .p-dl, .p-del) .ico { display: block; width: 18px; height: 18px; }
   :root .ebar .p-extra :is(.p-web, .p-dl, .p-del) .lbl { display: inline; }
+  /* The find bar floats under the buttons, like them. */
+  .findbar { position: absolute; z-index: 6; top: 58px; left: max(12px, env(safe-area-inset-left, 0px)); right: max(12px, env(safe-area-inset-right, 0px));
+    padding: 4px 4px 4px 12px; border: 1px solid var(--rim-low); border-radius: 999px; box-shadow: 0 4px 18px rgba(0, 0, 0, .12);
+    -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6); }
+  .findbar input { font-size: 16px; max-width: none; border: 0; background: none; box-shadow: none; padding-inline: 4px; }   /* 16px: iOS zooms into smaller inputs */
+  .findbar input:focus { box-shadow: none; }
+  .editor.finding .md-body { padding-top: 118px; }
+  .editor.finding textarea { padding-top: 118px; }
+  .findbar .ghost.icon { width: 36px; height: 36px; }
   /* Room at the top for the floating buttons. */
   .md-body { padding: 70px max(16px, env(safe-area-inset-right, 0px)) 40px max(16px, env(safe-area-inset-left, 0px)); }
   .preview:not(.doc) { padding-top: 58px; }
@@ -1065,6 +1104,7 @@ a.ag-card-name:hover { text-decoration: underline; }
   .toc.overlay { top: 60px; }
   :root[data-style="blocks"] .preview.doc { margin-top: 60px; }
   :root[data-style="blocks"] .preview.doc .md-body { padding-top: 18px; }
+  :root[data-style="blocks"] .editor.finding .preview.doc .md-body { padding-top: 70px; }
   :root[data-style="blocks"] .p-acts { background: none; border: 0; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; gap: 4px; padding: 0; }
   :root[data-style="blocks"] .p-acts .p-extra { border-radius: 0; border: var(--px) solid #1e1e1e; box-shadow: var(--bevel); }
   :root[data-style="blocks"] .p-acts .p-extra .ghost { border: 0; box-shadow: none; background: none; }

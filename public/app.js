@@ -9,6 +9,7 @@ import * as local from "./localsync.js";
 import { mountAgent, toggleAgent, resetAgent, localModel, setLocalModel, localHttp, refreshMagpie, askAgent, aiEffort, setAiEffort } from "./agent.js";
 import { effortFamily, effortFor } from "./agentspec.js";
 import { mountMenu } from "./ctxmenu.js";
+import { makeFind, snippet } from "./find.js";
 
 translatePage();
 
@@ -355,10 +356,18 @@ function loadCacheIndex(store) {
 }
 const inflight = new Map();   // version -> Promise<text>
 const bodies = new Map();     // id -> lowercased text of every text file read so far, for search
+const texts = new Map();      // id -> the same text as written, for the line a search result shows
 function fileText(f) {
   const v = versionOf(f);
-  if (!inflight.has(v)) inflight.set(v, readText(f).then((text) => { bodies.set(f.id, text.toLowerCase()); return text; }).finally(() => inflight.delete(v)));
+  if (!inflight.has(v)) inflight.set(v, readText(f).then((text) => { bodies.set(f.id, text.toLowerCase()); texts.set(f.id, text); relistSoon(); return text; }).finally(() => inflight.delete(v)));
   return inflight.get(v);
+}
+// While a search shows, documents read in the background join its results as they arrive (not while the
+// keyboard is in the list, which a rebuild would throw out of its row).
+let relisting = 0;
+function relistSoon() {
+  if (relisting || !search.value.trim()) return;
+  relisting = setTimeout(() => { relisting = 0; if (search.value.trim() && !list.contains(document.activeElement)) renderList(); }, 400);
 }
 // Search also looks inside text files: the first search reads every one this device already has (cached
 // copies, the Mac app's files on disk) without downloading anything, then shows the results again.
@@ -413,7 +422,7 @@ let prefetching = false, prefetchTimer = null;
 function schedulePrefetch(ms = 3000) { clearTimeout(prefetchTimer); prefetchTimer = setTimeout(prefetchDocs, ms); }
 async function prefetchDocs() {
   if (prefetching || !uid || !navigator.onLine || navigator.connection?.saveData) return;
-  prefetching = true;
+  prefetching = true; relistSoon();
   try {
     const store = await caches.open(FILE_CACHE), index = await loadCacheIndex(store);
     const have = new Set([...index.values()].map((k) => decodeURIComponent(k.url.split("__files/")[1] || "")));
@@ -424,7 +433,7 @@ async function prefetchDocs() {
       for (let j = 0; j < batch.length && uid; j += 4) await Promise.all(batch.slice(j, j + 4).map((f) => fileText(f).catch(() => {})));
     }
   } catch (e) { console.error(e); }
-  prefetching = false;
+  prefetching = false; relistSoon();
 }
 
 // Rendered Markdown kept in memory for a while (its images use signed URLs that expire after an hour).
@@ -951,7 +960,7 @@ function shortName(name, parent) {
 
 // An item row: click opens it in the focused pane, ⌘/Ctrl-click opens it in a new pane on the right,
 // and it can be dragged onto any edge of a pane to split there.
-function itemRow(kind, id, label, depth, metaText, title) {
+function itemRow(kind, id, label, depth, metaText, title, snip) {
   const b = document.createElement("button");
   b.type = "button"; b.className = "tree-row tree-file";
   b.style.setProperty("--depth", depth);
@@ -960,6 +969,11 @@ function itemRow(kind, id, label, depth, metaText, title) {
   b.title = title;
   b.append(Object.assign(document.createElement("span"), { className: "tree-name", textContent: label }));
   if (metaText) b.append(Object.assign(document.createElement("span"), { className: "tree-meta", textContent: metaText }));
+  if (snip) {
+    const s = Object.assign(document.createElement("span"), { className: "tree-snip" });
+    s.append(snip[0], Object.assign(document.createElement("mark"), { textContent: snip[1] }), snip[2]);
+    b.append(s); b.classList.add("has-snip");
+  }
   b.dataset.kind = kind; b.dataset.id = id;
   if (kind === "file") b.onpointerenter = b.ontouchstart = () => {
     const f = files.find((x) => x.id === id);
@@ -970,6 +984,7 @@ function itemRow(kind, id, label, depth, metaText, title) {
   b.onclick = (e) => {
     if ((e.metaKey || e.ctrlKey) && !isPhone.matches) split(focused, "row", false, { kind, id });
     else openIn(focused, kind, id);
+    findResult(focused, kind, id);
   };
   return b;
 }
@@ -979,13 +994,22 @@ function editLabel(p, text, on) {
 }
 // In search results metaText is the file's folder path; the row shows only the nearest folder, where the
 // name differs, and the tooltip gives the whole path.
-function fileRow(f, depth, metaText) {
+function fileRow(f, depth, metaText, snip) {
   const name = baseName(f.name), parent = fullPath(f).slice(-2, -1)[0];
   return itemRow("file", f.id, metaText ? name : shortName(name, parent), depth, metaText && metaText.split("/").pop(),
-    `${name}\n${metaText ? metaText + "\n" : ""}${fmtSize(f.size)} · ${fmt(f.updated_at || f.created_at)}`);
+    `${name}\n${metaText ? metaText + "\n" : ""}${fmtSize(f.size)} · ${fmt(f.updated_at || f.created_at)}`, snip);
 }
-function noteRow(n, depth, metaText) {
-  return itemRow("note", n.id, titleOf(n.body), depth, n.dirty ? t("未同步") : metaText, t("修改于 {time}", { time: fmt(n.updated_at) }));
+function noteRow(n, depth, metaText, snip) {
+  return itemRow("note", n.id, titleOf(n.body), depth, n.dirty ? t("未同步") : metaText, t("修改于 {time}", { time: fmt(n.updated_at) }), snip);
+}
+// The word typed in the sidebar's search box, when it searches text (not a #tag).
+const textQuery = () => { const q = search.value.trim().toLowerCase(); return q && !q.startsWith("#") ? q : ""; };
+// Opening a search result marks the word in it and goes to its first place, when the word is in the text.
+function findResult(p, kind, id) {
+  const q = textQuery();
+  if (!q || !p || p.kind !== kind || p.itemId !== id) return;
+  const body = kind === "note" ? store.notes[id]?.body.toLowerCase() : bodies.get(id);
+  if (body?.includes(q)) p.find.open(search.value.trim(), { focus: false });
 }
 
 // A folder row plus its drawer; children are built the first time it opens.
@@ -1053,11 +1077,16 @@ function renderList() {
   const li = document.createElement("li");
   li.className = "tree";
   if (q) {
-    for (const n of hitNotes) li.append(noteRow(n, 0, t("随手记")));
+    // A result found by its text shows the line the word is on (a note whose title has it needs none).
+    const tq = textQuery();
+    for (const n of hitNotes) li.append(noteRow(n, 0, t("随手记"), tq && !titleOf(n.body).toLowerCase().includes(tq) ? snippet(n.body, tq) : null));
     // Files whose path matches come before those that only mention the word inside.
     const byPath = (f) => fullPath(f).join("/").toLowerCase().includes(q);
     const ranked = orderFiles(hitFiles);
-    for (const f of [...ranked.filter(byPath), ...ranked.filter((f) => !byPath(f))]) li.append(fileRow(f, 0, fullPath(f).slice(0, -1).join("/")));
+    for (const f of [...ranked.filter(byPath), ...ranked.filter((f) => !byPath(f))])
+      li.append(fileRow(f, 0, fullPath(f).slice(0, -1).join("/"), tq && !byPath(f) && texts.has(f.id) ? snippet(texts.get(f.id), tq) : null));
+    const unread = prefetching ? files.filter((f) => isTextish(f) && !bodies.has(f.id)).length : 0;
+    if (unread) li.append(Object.assign(document.createElement("p"), { className: "tree-reading", textContent: t("还在读取 {n} 篇文档的内容…", { n: unread }) }));
   } else {
     if (notes.length) folderRow(li, NOTES_KEY, t("随手记"), notes.length, 0, (inner) => { for (const n of notes) inner.append(noteRow(n, 1)); });
     renderNode(buildTree(), [], 0, li);
@@ -1199,8 +1228,15 @@ function makePane(item) {
     kind: item?.kind || null, itemId: item?.id || null, shown: null, token: 0,
     editing: false, editTimer: null,
     hist: item?.kind ? [{ kind: item.kind, id: item.id, top: 0 }] : [], hi: item?.kind ? 0 : -1,
-    prev: q("p-prev"), next: q("p-next"),
+    prev: q("p-prev"), next: q("p-next"), findBtn: q("p-findbtn"),
   };
+  p.find = makeFind({
+    el, ta: p.ta, preview: p.preview, t, zoom: uiZoom,
+    inText: () => p.kind === "note" || (p.kind === "file" && p.fileEdit),
+    canFind: () => p.kind === "note" || p.kind === "file",
+    ready: () => p.kind === "note" || p.fileEdit || p.shownId === p.itemId,
+  });
+  p.findBtn.onclick = () => { if (p.find.isOpen()) p.find.close(); else p.find.open(selectedText()); };
   if (p.kind === "note") p.ta.value = store.notes[p.itemId]?.body || "";
   panes.set(p.id, p);
   el.classList.add("fresh");
@@ -1637,6 +1673,11 @@ async function uiSidebar({ kind, id, folder, filter }) {
 }
 
 function renderPane(p) {
+  showPane(p);
+  const view = `${p.kind}:${p.itemId}:${p.fileEdit}`;
+  if (p.findView !== view) { p.findView = view; p.find.retarget(); }
+}
+function showPane(p) {
   if (p.kind === "note" && !(store.notes[p.itemId] && !store.notes[p.itemId].deleted)) p.kind = p.itemId = null;
   if (p.kind === "file" && filesLoaded && !files.some((f) => f.id === p.itemId)) p.kind = p.itemId = null;
   p.el.classList.toggle("empty", !p.kind);
@@ -1645,6 +1686,8 @@ function renderPane(p) {
   const file = p.kind === "file" && files.find((f) => f.id === p.itemId);
   const waiting = p.kind === "file" && !file;   // files list not loaded yet
   if (p.kind !== "graph" && p.graph) { p.graph.destroy(); p.graph = null; }
+  p.findBtn.hidden = !(p.kind === "note" || p.kind === "file");
+  if (!p.kind || p.kind === "graph") p.find.close({ toText: false });
   if (p.kind === "graph") {
     p.ta.hidden = true; p.ph.hidden = true; p.fv.hidden = false; p.dl.hidden = true; p.edit.hidden = true; p.web.hidden = true;
     setToc(p, null);
@@ -1677,6 +1720,23 @@ function renderPane(p) {
   if (p.shown !== key) { p.shown = key; showFile(file, p); }
 }
 function render() { renderList(); panes.forEach(renderPane); }
+// The text selected in the focused pane, if it is short and on one line: what ⌘F looks for first.
+function selectedText() {
+  const ta = focused?.ta, s = ta && document.activeElement === ta ? ta.value.slice(ta.selectionStart, ta.selectionEnd) : String(getSelection() || "");
+  return s && s.length <= 200 && !s.includes("\n") ? s : null;
+}
+// ⌘F / Ctrl+F finds in the focused pane's document (with nothing open, it goes to the sidebar's search);
+// ⌘G / ⇧⌘G step through the matches; ⇧⌘F searches all documents from the sidebar.
+document.addEventListener("keydown", (e) => {
+  if (!(e.metaKey || e.ctrlKey) || e.altKey || $("settings").open) return;
+  const k = e.key.toLowerCase();
+  if (k === "f") {
+    e.preventDefault();
+    if (!e.shiftKey && focused?.find.open(selectedText())) return;
+    if (isPhone.matches) app.dataset.view = "list";
+    search.focus(); search.select();
+  } else if (k === "g" && focused?.find.isOpen()) { e.preventDefault(); focused.find.step(e.shiftKey ? -1 : 1); }
+});
 // Moves the tree highlight without rebuilding the tree (rebuilding makes it flicker).
 function markCurrent() {
   for (const b of list.querySelectorAll(".tree-file[data-id]")) {
@@ -2005,7 +2065,8 @@ window.addEventListener("paste", (e) => {
   const fl = e.clipboardData?.files;
   if (fl && fl.length) { e.preventDefault(); uploadFiles(fl); }
 });
-search.addEventListener("input", () => { renderList(); if (search.value.trim() && filesLoaded) warmBodies(); });
+// A search also starts reading the documents not downloaded yet, so it finds words in all of them.
+search.addEventListener("input", () => { renderList(); if (search.value.trim() && filesLoaded) warmBodies().then(() => prefetchDocs()); });
 // From the keyboard: Enter in the search box opens the first hit, ↓ moves into the list, and ↑ / ↓ step
 // through the rows that are showing (↑ from the top row goes back to the search box).
 const shownRows = () => [...list.querySelectorAll(".tree-row")].filter((r) => !r.closest(".drawer:not(.open)"));
@@ -2494,7 +2555,7 @@ function enter(session) {
   $("auth").hidden = !!session; app.hidden = !session;
   if (!session) {
     local.start(sb, null, { onChange: localChanged, onStatus: localStatus }).catch(console.error);
-    store = { notes: {} }; files = []; filesLoaded = filesErr = false; clearTimeout(filesRetry); bodies.clear(); warming = null; rendered.clear(); signed.clear(); pathsSig = null;
+    store = { notes: {} }; files = []; filesLoaded = filesErr = false; clearTimeout(filesRetry); bodies.clear(); texts.clear(); warming = null; rendered.clear(); signed.clear(); pathsSig = null;
     resetAgent(); toggleAgent(false);
     // Another account may sign in on this device; its documents must not mix with these.
     caches.delete(FILE_CACHE).catch(() => {}); cacheIndex = null;
