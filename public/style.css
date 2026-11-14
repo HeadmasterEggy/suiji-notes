@@ -884,6 +884,13 @@ label.set-row { cursor: pointer; }
 .ag-text strong { font-weight: 650; color: var(--ink); }
 .ag-text a { color: var(--accent); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
 .ag-text a:hover { border-bottom-color: var(--accent); }
+/* Links to the user's own documents ([title](suiji:ID)) read as a document chip, not a web link. */
+.ag-text a[href^="#suiji:"] { display: inline-flex; align-items: baseline; gap: 3px; padding: 0 6px 0 4px; margin: 0 1px; border: 0; border-radius: 5px;
+  background: var(--accent-soft); color: var(--accent); font-weight: 500; text-decoration: none; }
+.ag-text a[href^="#suiji:"]::before { content: ""; align-self: center; width: 11px; height: 12px; flex: none; background: currentColor; opacity: .8;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 14' fill='none' stroke='black' stroke-width='1.4' stroke-linejoin='round'%3E%3Cpath d='M2 1h5l3 3v9H2z'/%3E%3Cpath d='M7 1v3h3M4 7.5h4M4 10h4' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 14' fill='none' stroke='black' stroke-width='1.4' stroke-linejoin='round'%3E%3Cpath d='M2 1h5l3 3v9H2z'/%3E%3Cpath d='M7 1v3h3M4 7.5h4M4 10h4' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat; }
+.ag-text a[href^="#suiji:"]:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
 .ag-text code { font: .88em var(--font-mono); background: var(--accent-soft); padding: .1em .35em; border-radius: 4px; }
 .ag-text pre { overflow-x: auto; background: color-mix(in srgb, var(--ink) 5%, var(--panel)); border: 1px solid var(--line); padding: 10px 12px; border-radius: 8px; margin: .6em 0; line-height: 1.5; }
 .ag-text pre code { background: none; padding: 0; border-radius: 0; font-size: 12.5px; white-space: pre; }
