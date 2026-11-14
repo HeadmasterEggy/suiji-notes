@@ -1089,8 +1089,10 @@ a.ag-card-name:hover { text-decoration: underline; }
 /* The passage attached to the next message, and in a sent one. */
 .ag-quote { display: flex; align-items: flex-start; gap: 6px; margin: 0 12px; padding: 8px 6px 8px 10px; border-left: 3px solid var(--accent);
   border-radius: 8px; background: var(--accent-soft); }
-.ag-quote blockquote { flex: 1; margin: 0; max-height: 84px; overflow: hidden; font-size: 12.5px; line-height: 1.5; color: var(--muted); white-space: pre-wrap; }
-.ag-cite { margin: 0 0 6px; padding-left: 8px; border-left: 2px solid currentColor; opacity: .75; font-size: 12.5px; white-space: pre-wrap; }
+.ag-quote blockquote { flex: 1; margin: 0; max-height: 84px; overflow: hidden; -webkit-mask: linear-gradient(#000 60px, transparent 84px); mask: linear-gradient(#000 60px, transparent 84px); font-size: 12.5px; line-height: 1.5; color: var(--muted); white-space: pre-wrap; }
+.ag-cite { margin: 0 0 6px; padding-left: 8px; border-left: 2px solid currentColor; opacity: .75; font-size: 12.5px; line-height: 1.5; white-space: pre-wrap;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; line-clamp: 5; overflow: hidden; cursor: pointer; }
+.ag-cite.open { display: block; -webkit-line-clamp: unset; line-clamp: none; }
 
 /* Settings → Assistant → thinking effort: a liquid-glass switch (the other styles restyle it in themes.css). A glass lens slides to the chosen level; each
    level shows how hard the model thinks as four bars, and the lens glows warmer the higher it goes. The switch
