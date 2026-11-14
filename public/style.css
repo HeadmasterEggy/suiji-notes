@@ -931,13 +931,19 @@ label.set-row { cursor: pointer; }
 @keyframes ag-pulse { 50% { opacity: .35; transform: scale(.85); } }
 .ag-think-body { margin: 4px 0 2px 6px; padding: 2px 0 2px 12px; border-left: 2px solid var(--line); white-space: pre-wrap; line-height: 1.6; max-height: 220px; overflow-y: auto; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) {
-  .ag-caret, .ag-dots i, .ag-wait > span:last-child, .ag-think.live summary::before, .ag-think.live summary > span { animation: none; }
+  .ag-chip.run .ag-chip-state, .ag-caret, .ag-dots i, .ag-wait > span:last-child, .ag-think.live summary::before, .ag-think.live summary > span { animation: none; }
   .ag-wait > span:last-child, .ag-think.live summary > span { color: var(--muted); background: none; }
 }
-.ag-chip { align-self: flex-start; max-width: 100%; font-size: 12px; color: var(--muted); padding: 2px 10px; border-radius: 999px; background: var(--accent-soft);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ag-steps { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.ag-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; min-width: 0; font-size: 12px; color: var(--muted); padding: 2px 10px 2px 7px;
+  border-radius: 999px; background: var(--accent-soft); }
+.ag-chip > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ag-chip-state { flex: none; width: 10px; height: 10px; display: grid; place-items: center; }
+.ag-chip.run .ag-chip-state { border: 1.5px solid color-mix(in srgb, currentColor 30%, transparent); border-top-color: var(--accent); border-radius: 50%; animation: ag-spin .7s linear infinite; }
+.ag-chip.ok .ag-chip-state::before { content: ""; width: 6px; height: 3px; margin-top: -2px; border: solid var(--accent); border-width: 0 0 1.5px 1.5px; transform: rotate(-45deg); }
 .ag-chip.bad { color: var(--danger); }
-.agent.busy .ag-bot:last-child .ag-chip:last-of-type::after { content: " …"; }
+.ag-chip.bad .ag-chip-state::before { content: "×"; font: 700 12px/1 system-ui, sans-serif; }
+@keyframes ag-spin { to { transform: rotate(360deg); } }
 .ag-err { margin: 0; color: var(--danger); font-size: 13px; }
 .ag-card { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); }
 .ag-card-head { display: flex; flex-direction: column; gap: 1px; padding: 8px 12px; font-size: 13px; border-bottom: 1px solid var(--line); min-width: 0; }

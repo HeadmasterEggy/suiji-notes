@@ -495,18 +495,22 @@ const CHIP = {
   show_in_sidebar: (i) => i.filter != null ? t("在侧边栏筛选「{q}」", { q: i.filter }) : t("在侧边栏中定位"),
 };
 async function runTool(c, bubble) {
-  const chip = el("div", "ag-chip", CHIP[c.name]?.(c.input || {}) || c.name); chip.title = chip.textContent;
-  bubble.append(chip);
+  // Tool calls in a row share one line of chips; each shows a spinner while it runs, then ✓ or ✕.
+  const label = el("span", null, CHIP[c.name]?.(c.input || {}) || c.name);
+  const chip = el("div", "ag-chip run"); chip.append(el("i", "ag-chip-state"), label); chip.title = label.textContent;
+  const row = bubble.lastElementChild?.classList.contains("ag-steps") ? bubble.lastElementChild : bubble.appendChild(el("div", "ag-steps"));
+  row.append(chip);
+  const settled = (bad, why) => { chip.classList.remove("run"); chip.classList.add(bad ? "bad" : "ok"); chip.title = label.textContent + (why ? " — " + why : ""); };
   try {
     const i = c.input || {};
     const out = c.name === "search" ? await search(i) : c.name === "list" ? list(i) : c.name === "read" ? await read(i)
       : c.name === "propose_edit" ? await proposeEdit(i, bubble) : c.name === "propose_note" ? proposeNote(i, bubble)
       : c.name in UI ? await UI[c.name](i) : { error: "unknown tool" };
-    if (c.name === "search" && !out.error) chip.textContent += " · " + t("{n} 条", { n: out.total });
-    if (out.error) chip.classList.add("bad");
+    if (c.name === "search" && !out.error) label.textContent += " · " + t("{n} 条", { n: out.total });
+    settled(!!out.error, out.error);
     return out;
   } catch (e) {
-    chip.classList.add("bad");
+    settled(true, e.message || String(e));
     return { error: e.message || String(e) };
   }
 }
