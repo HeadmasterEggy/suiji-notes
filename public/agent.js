@@ -399,6 +399,38 @@ function thoughts(bubble, before) {
   };
 }
 
+// Copies text and says so on the button for a moment.
+function copyButton(label, text, cls = "ag-copy") {
+  const b = el("button", cls); b.type = "button";
+  const set = (s) => { b.replaceChildren(icon(s === label ? "copy" : "check"), el("span", null, s)); };
+  set(label);
+  b.onclick = async () => {
+    try { await navigator.clipboard.writeText(text()); set(t("已复制")); }
+    catch { set(t("复制失败")); }
+    clearTimeout(b.timer); b.timer = setTimeout(() => set(label), 1600);
+  };
+  return b;
+}
+const ICONS = {
+  copy: '<rect x="5.5" y="5.5" width="8" height="8" rx="1.6"/><path d="M10.5 5.5V3.6c0-.6-.5-1.1-1.1-1.1H3.6c-.6 0-1.1.5-1.1 1.1v5.8c0 .6.5 1.1 1.1 1.1h1.9"/>',
+  check: '<path d="M3.5 8.5l3 3 6-7"/>',
+};
+function icon(name) {
+  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  s.setAttribute("viewBox", "0 0 16 16"); s.setAttribute("aria-hidden", "true"); s.innerHTML = ICONS[name];
+  return s;
+}
+// A finished code block gets a bar on top: its language, and a button that copies the code.
+function codeBars(box) {
+  for (const pre of box.querySelectorAll("pre")) {
+    if (pre.parentElement.classList.contains("ag-code")) continue;
+    const code = pre.querySelector("code"), lang = /language-([\w+#.-]+)/.exec(code?.className || "")?.[1] || "";
+    const wrap = el("div", "ag-code"), bar = el("div", "ag-code-bar");
+    bar.append(el("span", null, lang), copyButton(t("复制"), () => (code || pre).textContent.replace(/\n$/, "")));
+    pre.replaceWith(wrap); wrap.append(bar, pre);
+  }
+}
+
 async function step(bubble, signal) {
   await refreshMagpie();
   const cfg = localModel();
@@ -412,7 +444,7 @@ async function step(bubble, signal) {
       if (n !== seq) return;   // a later paint got there first
       textEl.innerHTML = html;
       textEl.classList.toggle("typing", typing);
-      if (typing) caretAt(textEl);
+      if (typing) caretAt(textEl); else codeBars(textEl);
       scroll();
     }, () => { if (n === seq) textEl.textContent = md; });
   });
@@ -428,7 +460,7 @@ async function step(bubble, signal) {
     quiet();
     const stop = signal.aborted;
     await Promise.all([think?.end(stop), out.end(stop)]);
-    if (!out.text) textEl.remove();
+    if (!out.text) textEl.remove(); else textEl.md = out.text;
   }
   const text = out.text;
   // A turn that brings nothing back used to leave an empty bubble with no word of why. Say what happened:
@@ -502,6 +534,13 @@ async function send(text) {
       for (const c of calls) results.push({ type: "tool-result", toolCallId: c.id, toolName: c.name, output: { type: "json", value: await runTool(c, bubble) } });
       messages.push({ role: "tool", content: results });
       scroll();
+    }
+    // Under a finished answer: copy it, as the Markdown the model wrote.
+    const said = [...bubble.querySelectorAll(".ag-text")].map((x) => x.md).filter(Boolean);
+    if (said.length && !busy.signal.aborted) {
+      const bar = el("div", "ag-actions");
+      bar.append(copyButton(t("复制"), () => said.join("\n\n")));
+      bubble.append(bar);
     }
   } catch (e) {
     if (e.code === "no_key") {
