@@ -30,6 +30,8 @@ export async function POST(request) {
     instructions: instructions(body.context || {}),
     messages,
     tools: TOOLS,
+    // The page's last step of a turn: answer now with what the tools found, no more tool calls.
+    ...(body.final === true ? { toolChoice: "none" } : {}),
     // Thinking effort from Settings, as the request fields this service understands ("suiji" is the
     // provider's name in _ai.js, so these pass straight into the request body).
     providerOptions: { suiji: effortBody(picked.base, typeof body.effort === "string" ? body.effort : "") },

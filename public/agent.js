@@ -4,7 +4,7 @@
 import { t, lang } from "./i18n.js";
 import { TOOLS, instructions, effortBody } from "./agentspec.js";
 
-const MAX_STEPS = 10, READ_CHUNK = 30000, SEARCH_TEXT_FILES = 400;
+const MAX_STEPS = 10, MAX_MORE = 3, READ_CHUNK = 30000, SEARCH_TEXT_FILES = 400;
 let app = null;            // what app.js hands over in mountAgent()
 let messages = [];         // the conversation, as AI SDK model messages
 let busy = null;           // AbortController of the running turn
@@ -213,11 +213,11 @@ export async function localHttp(url, { method = "GET", headers = {}, body, signa
 // The steps of one model turn, as {t:"text"|"reasoning", d} / {t:"tool", id, name, input} / {t:"error", message, code}.
 // The server answers in NDJSON, errors included; anything else (no network, a host's HTML error page, a
 // timeout) is said in words rather than as a JSON parse error.
-async function* serverStream(signal) {
+async function* serverStream(signal, final) {
   const res = await fetch("/api/agent", {
     method: "POST", signal,
     headers: { "content-type": "application/json", authorization: "Bearer " + await app.token() },
-    body: JSON.stringify({ messages: messages.map(({ reasoning, ...m }) => m), context: { lang, open: app.context() }, effort: aiEffort() }),
+    body: JSON.stringify({ messages: messages.map(({ reasoning, ...m }) => m), context: { lang, open: app.context() }, effort: aiEffort(), ...(final ? { final: true } : {}) }),
   }).catch((e) => { throw e.name === "AbortError" ? e : new Error(t("连不上助手服务，检查一下网络。")); });
   const down = () => new Error(t("助手服务没有正常回应（HTTP {status}），稍后再试。", { status: res.status }));
   if (!res.body || !/ndjson/.test(res.headers.get("content-type") || "")) throw down();
@@ -226,7 +226,7 @@ async function* serverStream(signal) {
     yield m;
   }
 }
-async function* localStream(cfg, signal) {
+async function* localStream(cfg, signal, final) {
   // Through the app, the answer comes whole, or piece by piece from apps that can pass it on (Mac 2.5 on).
   const url = cfg.base.replace(/\/+$/, "") + "/chat/completions", whole = viaApp(url) && !appBridge.stream;
   const headers = { "content-type": "application/json", ...(cfg.key ? { authorization: "Bearer " + cfg.key } : {}) };
@@ -234,6 +234,7 @@ async function* localStream(cfg, signal) {
     model: cfg.model, stream: !whole, ...effortBody(cfg.base, aiEffort()),
     messages: [{ role: "system", content: instructions({ lang, open: app.context() }) }, ...toOpenAI(messages)],
     tools: Object.entries(TOOLS).map(([name, x]) => ({ type: "function", function: { name, description: x.description, parameters: x.parameters } })),
+    ...(final ? { tool_choice: "none" } : {}),
   });
   const unreachable = (e) => new Error(t("连不上本机的模型服务（{base}）：{msg}", { base: cfg.base, msg: e.message || e }));
   const failed = (status, text) => {
@@ -244,25 +245,28 @@ async function* localStream(cfg, signal) {
     const r = await localHttp(url, { method: "POST", headers, body, signal }).catch((e) => { throw signal.aborted ? new DOMException("aborted", "AbortError") : unreachable(e); });
     if (signal.aborted) throw new DOMException("aborted", "AbortError");
     if (r.status < 200 || r.status >= 300) { yield failed(r.status, r.text); return; }
-    const m = JSON.parse(r.text).choices?.[0]?.message || {};
+    const choice = JSON.parse(r.text).choices?.[0] || {}, m = choice.message || {};
     if (m.reasoning_content || m.reasoning) yield { t: "reasoning", d: m.reasoning_content || m.reasoning };
     if (m.content) yield { t: "text", d: m.content };
     for (const c of m.tool_calls || []) {
       let input = {}; try { input = c.function?.arguments ? JSON.parse(c.function.arguments) : {}; } catch {}
       yield { t: "tool", id: c.id || crypto.randomUUID(), name: c.function?.name, input };
     }
+    if (choice.finish_reason) yield { t: "done", reason: choice.finish_reason };
     return;
   }
   const res = viaApp(url) ? appStream(url, { method: "POST", headers, body, signal }, unreachable)
     : await fetch(url, { method: "POST", signal, headers, body }).catch((e) => { throw unreachable(e); });
   if (res.status && !res.ok) { yield failed(res.status, await res.text()); return; }
   const calls = [];
+  let finish = null;
   for await (const ln of lines(res.body)) {
     if (!ln.startsWith("data:")) continue;
     const data = ln.slice(5).trim();
     if (data === "[DONE]") break;
     const m = JSON.parse(data);
     if (m.error) { yield { t: "error", message: m.error.message || String(m.error) }; continue; }
+    if (m.choices?.[0]?.finish_reason) finish = m.choices[0].finish_reason;
     const d = m.choices?.[0]?.delta || {};
     if (d.reasoning_content || d.reasoning) yield { t: "reasoning", d: d.reasoning_content || d.reasoning };
     if (d.content) yield { t: "text", d: d.content };
@@ -279,6 +283,7 @@ async function* localStream(cfg, signal) {
     let input = {}; try { input = c.args ? JSON.parse(c.args) : {}; } catch { input = {}; }
     yield { t: "tool", id: c.id || crypto.randomUUID(), name: c.name, input };
   }
+  if (finish) yield { t: "done", reason: finish };
 }
 // The app's streamed localHttp as a fetch-like response. Its status is only known at the end, so an error
 // answer shows up there: its text is not SSE and is skipped while streaming, then reported by done().
@@ -350,6 +355,8 @@ function typer(paint) {
   return {
     get text() { return full; },
     add(d) { full += d; kick(); },
+    // Writing goes on after an end: a reply cut off by the model's length limit is carried on in the same text.
+    resume() { ended = false; },
     // Resolves once everything has been shown; now = true skips the rest of the animation (Stop, or a hidden tab).
     end(now) {
       ended = true;
@@ -441,14 +448,16 @@ function codeBars(box) {
   }
 }
 
-async function step(bubble, signal) {
+// One model turn. carry is the text of a reply that was cut off: the turn writes on in the same place, so the
+// answer reads as one piece. final asks for an answer with no more tool calls.
+async function step(bubble, signal, { carry, final } = {}) {
   await refreshMagpie();
   const cfg = localModel();
   let reasoning = "", calls = [], err = null, code = null, think = null, seq = 0, done = null;
-  const textEl = el("div", "ag-text"), wait = waiting();
-  bubble.append(wait, textEl);
+  const textEl = carry?.textEl || el("div", "ag-text"), wait = waiting();
+  if (carry && textEl.isConnected) bubble.insertBefore(wait, textEl.nextSibling); else bubble.append(wait, textEl);
   const quiet = () => wait.remove();
-  const out = typer((md, typing) => {
+  const out = carry?.out || typer((md, typing) => {
     const n = ++seq;
     app.markdown(typing ? closeOpen(md) : md).then((html) => {
       if (n !== seq) return;   // a later paint got there first
@@ -458,8 +467,10 @@ async function step(bubble, signal) {
       scroll();
     }, () => { if (n === seq) textEl.textContent = md; });
   });
+  const before = out.text.length;
+  if (carry) { out.resume(); if (!textEl.isConnected) bubble.append(textEl); }
   try {
-    for await (const m of cfg ? localStream(cfg, signal) : serverStream(signal)) {
+    for await (const m of cfg ? localStream(cfg, signal, final) : serverStream(signal, final)) {
       if (m.t === "text") { quiet(); think?.end(); out.add(m.d); }
       else if (m.t === "reasoning") { quiet(); reasoning += m.d; (think ||= thoughts(bubble, textEl)).add(m.d); }
       else if (m.t === "tool") { quiet(); calls.push(m); }
@@ -472,7 +483,7 @@ async function step(bubble, signal) {
     await Promise.all([think?.end(stop), out.end(stop)]);
     if (!out.text) textEl.remove(); else textEl.md = out.text;
   }
-  const text = out.text;
+  const text = out.text.slice(before);
   // A turn that brings nothing back used to leave an empty bubble with no word of why. Say what happened:
   // the stream cut off before it finished, or the model finished without a reply (only thinking, a length
   // or content-filter stop, an empty answer). Local models send no "done", so only their empty answer counts.
@@ -483,7 +494,10 @@ async function step(bubble, signal) {
   }
   if (err && !text && !calls.length) throw Object.assign(new Error(err === "not signed in" ? t("请先登录。") : err), { code });
   messages.push({ role: "assistant", content: [...(text ? [{ type: "text", text }] : []), ...calls.map((c) => ({ type: "tool-call", toolCallId: c.id, toolName: c.name, input: c.input }))], ...(reasoning ? { reasoning } : {}) });
-  return calls;
+  // The answer stopped partway: the model hit its output limit ("length"), or the server's stream ended
+  // without saying it was done (the connection or the function's time ran out). Either way it can go on.
+  const cut = !!text && !calls.length && !signal.aborted && (done === "length" || done === "error" || !!err || (!cfg && !done));
+  return { calls, cut, out, textEl };
 }
 // Tools that act in the interface right away: they only show things, never change a document.
 const UI = {
@@ -548,9 +562,22 @@ async function send(text) {
   const bubble = el("div", "ag-bot"); log.append(bubble);
   busy = new AbortController(); setBusy(true); scroll(true);
   try {
-    for (let n = 0; n < MAX_STEPS; n++) {
-      const calls = await step(bubble, busy.signal);
-      if (!calls.length) break;
+    let more = 0, carry = null;
+    for (let n = 0; ; ) {
+      // The last step answers with what the tools found so far, rather than ending on a tool call with no answer.
+      const { calls, cut, out, textEl } = await step(bubble, busy.signal, { carry, final: n >= MAX_STEPS - 1 });
+      carry = null;
+      if (cut) {
+        if (more++ < MAX_MORE) {
+          // Asked to go on from where it stopped; the answer keeps writing into the same text.
+          messages.push({ role: "user", content: [{ type: "text", text: t("（回答在中途被截断了。请从断开的地方直接接着写，不要重复已经写过的内容，也不要加开场白。）") }] });
+          carry = { out, textEl };
+          continue;
+        }
+        bubble.append(el("p", "ag-note", t("回答太长，已经接着写了 {n} 次，仍未写完。可以说「继续」让它接着写。", { n: MAX_MORE })));
+        break;
+      }
+      if (!calls.length || n++ >= MAX_STEPS - 1) break;
       const results = [];
       for (const c of calls) results.push({ type: "tool-result", toolCallId: c.id, toolName: c.name, output: { type: "json", value: await runTool(c, bubble) } });
       messages.push({ role: "tool", content: results });
