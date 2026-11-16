@@ -48,6 +48,13 @@ export async function writeLocal(f, text) {
   kick(300);
 }
 
+// A file put beside a document (an image pasted while editing it): on disk, so the sync uploads it like any other.
+export async function writeBeside(f, name, bytes) {
+  const doc = localPath(f);
+  await diskFs.write(doc.slice(0, doc.lastIndexOf("/") + 1) + name, bytes);
+  kick(300);
+}
+
 export const listFolders = () => folders.slice();
 export async function addFolder() {
   const r = await call("addFolder");
