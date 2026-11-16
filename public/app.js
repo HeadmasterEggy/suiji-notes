@@ -6,6 +6,7 @@ import { mdMeta } from "./mdmeta.js";
 import { mountGraph } from "./graph.js";
 import { t, lang, langChoice, translatePage } from "./i18n.js";
 import * as local from "./localsync.js";
+import { IMAGE_EXTS, mimeOf } from "./syncengine.js";
 import { mountAgent, toggleAgent, resetAgent, localModel, setLocalModel, localHttp, refreshMagpie, askAgent, aiEffort, setAiEffort } from "./agent.js";
 import { effortFamily, effortFor } from "./agentspec.js";
 import { mountMenu } from "./ctxmenu.js";
@@ -230,6 +231,8 @@ let files = [], allFiles = [], filesLoaded = false, filesErr = false, filesRetry
 const isImage = (f) => f.mime.startsWith("image/");
 const extOf = (name) => { const m = /\.([a-z0-9]{1,6})$/i.exec(name); return m ? m[1].toLowerCase() : ""; };
 const isMarkdown = (f) => ["md", "markdown"].includes(extOf(f.name)) || f.mime === "text/markdown";
+// Images are kept (uploaded, synced) so documents can show them, but only Markdown is listed.
+const isImageFile = (name) => IMAGE_EXTS.includes(extOf(name));
 function fmtSize(n) {
   if (n < 1024) return n + " B";
   if (n < 1024 * 1024) return (n / 1024).toFixed(0) + " KB";
@@ -281,9 +284,10 @@ let uploading = 0;
 async function uploadFiles(input) {
   if (!uid) return;
   const picked = [...input].filter((f) => !baseName(f.webkitRelativePath || f.name).startsWith("."));
-  // Only Markdown documents are uploaded; anything else picked (or inside a picked folder) is left out.
-  const all = picked.filter((f) => isMarkdown({ name: f.name, mime: f.type || "" }));
-  if (picked.length > all.length) showNote(t("只支持 Markdown（.md）文档，跳过了 {n} 个其他文件。", { n: picked.length - all.length }), all.length ? "" : "err", "upload");
+  // Markdown documents are uploaded, and images so the documents can show them (a picked folder brings its
+  // pictures along); anything else is left out.
+  const all = picked.filter((f) => isMarkdown({ name: f.name, mime: f.type || "" }) || isImageFile(f.name));
+  if (picked.length > all.length) showNote(t("只支持 Markdown（.md）文档和图片，跳过了 {n} 个其他文件。", { n: picked.length - all.length }), all.length ? "" : "err", "upload");
   const tooBig = all.filter((f) => f.size > MAX_FILE);
   if (tooBig.length) showNote(t("{names} 超过 50 MB，没有上传。", { names: tooBig.map((f) => f.name).join(lang === "en" ? ", " : "、") }), "err", "upload");
   const ok = all.filter((f) => f.size <= MAX_FILE);
@@ -293,14 +297,14 @@ async function uploadFiles(input) {
     setSync("saving", t("上传中 · 剩 {n} 个", { n: uploading }));
     const id = crypto.randomUUID(), ext = extOf(file.name);
     const path = `${uid}/${id}${ext ? "." + ext : ""}`;
-    const mime = file.type || "text/markdown";   // browsers often give .md files no type; only Markdown is uploaded
+    const mime = file.type || (isImageFile(file.name) ? mimeOf(file.name) : "text/markdown");   // browsers often give .md files no type
     const { folder, name } = placeOf(file);
     try {
       const up = await sb.storage.from("files").upload(path, file, { contentType: mime });
       if (up.error) throw up.error;
       // Links and tags too, as the Mac sync and a save in the editor store them: else an uploaded document
       // stays out of the graph and a #tag search until it is next edited.
-      const meta = mdMeta(await file.text());
+      const meta = isImageFile(file.name) ? { links: [], tags: [] } : mdMeta(await file.text());
       const ins = await sb.from("files").insert({ id, user_id: uid, name, folder, path, size: file.size, mime, ...meta });
       if (ins.error) { await sb.storage.from("files").remove([path]); throw ins.error; }
     } catch (e) {
@@ -313,9 +317,55 @@ async function uploadFiles(input) {
   }
   // Another batch may still be going (two drops in a row): it sets the state when it ends.
   if (!uploading) setSync(failed ? "err" : "ok", failed ? t("上传失败") : t("已同步"));
+  // Images on their own are not listed, so say where they went.
+  if (!failed && ok.length && ok.every((f) => isImageFile(f.name))) showNote(t("图片已上传，在文档里写 ![[{name}]] 就能显示。", { name: baseName(ok[0].name) }), "", "upload");
   await loadFiles();
 }
 
+// Images pasted or dropped while editing a document: saved beside it (on disk in the Mac app, where the sync
+// uploads them; else in the cloud) and linked at the cursor as ![](name), so the preview shows them.
+const imagesIn = (list) => [...(list || [])].filter((x) => x.type.startsWith("image/") || isImageFile(x.name));
+const imageEditor = () => [...panes.values()].find((p) => p.ta === document.activeElement && p.kind === "file" && p.fileEdit);
+const linkPath = (n) => n.replace(/[%\s()<>]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0"));
+async function insertImages(p, imgs) {
+  const f = files.find((x) => x.id === p.itemId);
+  if (!f || !uid) return;
+  const dir = f.name.slice(0, f.name.lastIndexOf("/") + 1);
+  const taken = new Set(allFiles.filter((x) => x.folder === f.folder).map((x) => x.name.toLowerCase()));
+  const d = new Date(), pad = (n) => String(n).padStart(2, "0");
+  const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  const links = [];
+  setSync("saving", t("上传中 · 剩 {n} 个", { n: imgs.length }));
+  for (const img of imgs) {
+    const ext = extOf(img.name) || ({ "image/jpeg": "jpg", "image/svg+xml": "svg" }[img.type] || img.type.split("/")[1] || "png");
+    // A screenshot from the clipboard is called image.png every time; it gets a dated name instead.
+    const base = img.name && !/^image\.\w+$/i.test(img.name) ? img.name.replace(/\.[^.]*$/, "") : "Pasted image " + stamp;
+    let name = `${base}.${ext}`;
+    for (let i = 2; taken.has((dir + name).toLowerCase()); i++) name = `${base} ${i}.${ext}`;
+    taken.add((dir + name).toLowerCase());
+    try {
+      if (img.size > MAX_FILE) throw new Error(t("超过 50 MB"));
+      if (local.localPath(f)) await local.writeBeside(f, name, new Uint8Array(await img.arrayBuffer()));
+      else {
+        const id = crypto.randomUUID(), path = `${uid}/${id}.${ext}`, mime = img.type || mimeOf(name);
+        const up = await sb.storage.from("files").upload(path, img, { contentType: mime });
+        if (up.error) throw up.error;
+        const ins = await sb.from("files").insert({ id, user_id: uid, name: dir + name, folder: f.folder, path, size: img.size, mime, links: [], tags: [] });
+        if (ins.error) { await sb.storage.from("files").remove([path]); throw ins.error; }
+      }
+      links.push(`![](${linkPath(name)})`);
+    } catch (e) {
+      console.error(e);
+      showNote(t("「{name}」上传失败：{msg}。", { name, msg: e.message || t("网络问题") }), "err", "upload");
+    }
+  }
+  setSync("ok", t("已同步"));
+  if (!links.length) return;
+  const ta = p.ta, at = ta.selectionStart, before = ta.value.slice(0, at);
+  ta.setRangeText((before && !before.endsWith("\n") ? "\n" : "") + links.join("\n") + "\n", at, ta.selectionEnd, "end");
+  ta.dispatchEvent(new Event("input"));   // saved like any typing
+  loadFiles();
+}
 
 // ---------- file content cache ----------
 // Opening a document used to cost two signed-URL requests plus a download every time. Signed URLs are
@@ -2058,10 +2108,16 @@ window.addEventListener("dragleave", (e) => { if (!hasFiles(e)) return; if (--dr
 window.addEventListener("drop", (e) => {
   if (!hasFiles(e)) return;
   e.preventDefault(); dragDepth = 0; $("dropzone").hidden = true;
+  // Pictures dropped on a document being edited go into it; anything else is uploaded as before.
+  const p = [...panes.values()].find((x) => x.ta === e.target && x.kind === "file" && x.fileEdit), imgs = imagesIn(e.dataTransfer.files);
+  if (p && imgs.length) { p.ta.focus(); insertImages(p, imgs); return; }
   if (e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files);
 });
 window.addEventListener("paste", (e) => {
-  if (!uid || document.activeElement?.tagName === "TEXTAREA") return;
+  if (!uid) return;
+  const p = imageEditor(), imgs = p && imagesIn(e.clipboardData?.files);
+  if (imgs?.length) { e.preventDefault(); insertImages(p, imgs); return; }
+  if (document.activeElement?.tagName === "TEXTAREA") return;
   const fl = e.clipboardData?.files;
   if (fl && fl.length) { e.preventDefault(); uploadFiles(fl); }
 });

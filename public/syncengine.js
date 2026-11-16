@@ -16,7 +16,7 @@ import { mdMeta } from "./mdmeta.js";
 
 export const MAX_FILE = 50 * 1024 * 1024;
 const MIME = { txt: "text/plain", md: "text/markdown", csv: "text/csv", json: "application/json", pdf: "application/pdf",
-  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", heic: "image/heic", svg: "image/svg+xml",
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", heic: "image/heic", svg: "image/svg+xml", bmp: "image/bmp", avif: "image/avif",
   mp4: "video/mp4", mov: "video/quicktime", mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav",
   doc: "application/msword", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   xls: "application/vnd.ms-excel", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -24,6 +24,10 @@ const MIME = { txt: "text/plain", md: "text/markdown", csv: "text/csv", json: "a
   zip: "application/zip", html: "text/html", py: "text/plain", js: "text/plain", ts: "text/plain" };
 const extOf = (n) => (/\.([a-z0-9]{1,6})$/i.exec(n)?.[1] || "").toLowerCase();
 const isMd = (n) => ["md", "markdown"].includes(extOf(n));
+// Images are synced too, so a document's ![](pic.png) and ![[pic.png]] can show them; the app lists only Markdown.
+export const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif", "heic"];
+export const mimeOf = (n) => MIME[extOf(n)] || "application/octet-stream";
+const isSynced = (n) => isMd(n) || IMAGE_EXTS.includes(extOf(n));
 const metaOf = (rel, bytes) => isMd(rel) ? mdMeta(new TextDecoder().decode(bytes)) : { links: [], tags: [] };
 const baseName = (p) => p.slice(p.lastIndexOf("/") + 1);
 export const keyOf = (root, rel) => root + "::" + rel;
@@ -51,9 +55,9 @@ export function syncEngine({ sb, fs, log }) {
     const synced = Object.keys(state).filter((k) => k.startsWith(root + "::") && state[k].path).length;
     if (!listing.length && synced) { log(`「${folder}」里一个文件都没读到，为了安全没有删除云端的 ${synced} 个文件`); unreadable.push(""); }
     const keep = (rel) => unreadable.some((u) => u === "" || rel.startsWith(u + "/"));
-    // Only Markdown documents are synced. Other files are not read; ones synced earlier keep their cloud
-    // copy (hidden by the app) rather than being deleted as if they were gone from disk.
-    for (const f of listing.filter((f) => !f.unreadable && isMd(f.rel))) {
+    // Only Markdown documents and images are synced. Other files are not read; ones synced earlier keep their
+    // cloud copy (hidden by the app) rather than being deleted as if they were gone from disk.
+    for (const f of listing.filter((f) => !f.unreadable && isSynced(f.rel))) {
       const key = keyOf(root, f.rel), abs = root + "/" + f.rel;
       seen.add(key);
       const prev = state[key];
@@ -86,7 +90,7 @@ export function syncEngine({ sb, fs, log }) {
       }
     }
     for (const [key, v] of Object.entries(state)) {
-      if (!key.startsWith(root + "::") || seen.has(key) || !isMd(key.slice(root.length + 2)) || keep(key.slice(root.length + 2))) continue;
+      if (!key.startsWith(root + "::") || seen.has(key) || !isSynced(key.slice(root.length + 2)) || keep(key.slice(root.length + 2))) continue;
       if (v.path) {
         const r1 = await sb.storage.from("files").remove([v.path]);
         const r2 = await sb.from("files").delete().eq("id", v.id);

@@ -43,7 +43,14 @@ class Query {
   constructor(table) { this.table = table; this.write = false; }
   select() { return this; } order() { return this; } limit() { return this; } eq() { return this; } in() { return this; }
   match() { return this; } neq() { return this; } gt() { return this; } lt() { return this; } is() { return this; }
-  insert() { this.write = true; return this; } upsert() { this.write = true; return this; }
+  // Rows inserted are kept in window.__suiji.written ({ table, row }) for checks to read, and added to the
+  // table too when the vault says keepInserts.
+  insert(r) {
+    this.write = true;
+    for (const row of [].concat(r)) { (fx().written ||= []).push({ table: this.table, row }); if (fx().keepInserts) (fx().tables[this.table] ||= []).push(row); }
+    return this;
+  }
+  upsert() { this.write = true; return this; }
   update() { this.write = true; return this; } delete() { this.write = true; return this; }
   single() { this.one = true; return this; } maybeSingle() { this.one = true; return this; }
   then(ok, bad) {
@@ -52,7 +59,7 @@ class Query {
   }
 }
 const bucket = {
-  upload: async () => ({ data: {}, error: null }), remove: async () => ({ data: [], error: null }),
+  upload: async (p) => { (fx().uploaded ||= []).push(p); return { data: {}, error: null }; }, remove: async () => ({ data: [], error: null }),
   createSignedUrl: async (p) => ({ data: { signedUrl: "${ORIGIN}/__blob/" + p + "?token=t" }, error: null }),
   createSignedUrls: async (ps) => ({ data: ps.map((p) => ({ path: p, signedUrl: "${ORIGIN}/__blob/" + p + "?token=t" })), error: null }),
   download: async (p) => ({ data: new Blob([fx().blobs[p] || ""]), error: null }),
