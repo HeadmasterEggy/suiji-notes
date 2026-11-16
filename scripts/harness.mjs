@@ -64,7 +64,8 @@ const bucket = {
   createSignedUrls: async (ps) => ({ data: ps.map((p) => ({ path: p, signedUrl: "${ORIGIN}/__blob/" + p + "?token=t" })), error: null }),
   download: async (p) => ({ data: new Blob([fx().blobs[p] || ""]), error: null }),
 };
-const channel = { on() { return channel; }, subscribe() { return channel; }, send() {}, unsubscribe() {} };
+// Realtime handlers are kept in window.__suiji.realtime, so a check can play a change arriving from elsewhere.
+const channel = { on(_e, _f, fn) { (fx().realtime ||= []).push(fn); return channel; }, subscribe() { return channel; }, send() {}, unsubscribe() {} };
 export function createClient() {
   return {
     auth: {

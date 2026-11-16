@@ -219,7 +219,7 @@ function subscribe() {
     .on("postgres_changes", { event: "*", schema: "public", table: "notes", filter: "user_id=eq." + uid }, (p) => {
       if (p.new && p.new.id && merge(p.new)) { persist(); render(); }
     })
-    .on("postgres_changes", { event: "*", schema: "public", table: "files", filter: "user_id=eq." + uid }, () => loadFiles())
+    .on("postgres_changes", { event: "*", schema: "public", table: "files", filter: "user_id=eq." + uid }, () => loadFilesSoon())
     .subscribe();
 }
 
@@ -239,7 +239,11 @@ function fmtSize(n) {
   return (n / 1024 / 1024).toFixed(1) + " MB";
 }
 
+// A folder sync uploads file after file, each one a change event: a burst is read once, when it settles.
+let filesSoon = null;
+function loadFilesSoon() { clearTimeout(filesSoon); filesSoon = setTimeout(loadFiles, 800); }
 async function loadFiles() {
+  clearTimeout(filesSoon);
   if (!uid || !navigator.onLine) return;
   clearTimeout(filesRetry);
   let data, error;
@@ -738,6 +742,8 @@ async function renderMarkdown(src, f) {
     if (e) { if (e.width) img.width = e.width; return findEmbed(e); }
     return byPath.get(resolveRel(dir, src)) ?? byPath.get(resolveRel(assets, src));
   });
+  // What the document's pictures and links point at; a redraw that finds the same files leaves the page alone.
+  const refs = targets.map((x) => x ? x.id + "@" + x.path : "-");
   const paths = [...new Set(targets.filter(Boolean).map((t) => t.path))];
   const urls = paths.length ? await signedUrls(paths) : new Map();
   imgs.forEach((img, i) => {
@@ -760,6 +766,7 @@ async function renderMarkdown(src, f) {
   for (const a of content.querySelectorAll('a[href^="#suiji-wiki-"]')) {
     const w = wiki[+a.getAttribute("href").slice(12)] || { file: "", heading: "" };
     const target = w.file ? find(wdir, w.file) : w.heading ? f : null;
+    refs.push(target ? target.id + "@" + target.name : "-");
     if (!target) { missing(a, t("没有找到这篇笔记")); continue; }
     a.dataset.open = target.id; a.href = "#"; a.title = w.file ? target.name : w.heading; a.classList.add("wikilink");
     if (w.heading) a.dataset.heading = w.heading;
@@ -772,6 +779,7 @@ async function renderMarkdown(src, f) {
     if (!isRel(href)) { a.target = "_blank"; a.rel = "noopener"; continue; }
     // A relative link is never followed as written: it would load a page of this site in place of the app.
     const target = byPath.get(resolveRel(dir, href));
+    refs.push(target ? target.id + "@" + target.path : "-");
     if (!target) missing(a, t("没有找到这个文件"));
     else if (isMarkdown(target)) { a.dataset.open = target.id; if (hash) a.dataset.heading = hash; }
     else attach.push([a, target]);   // a PDF or picture beside the document opens in a new tab
@@ -780,6 +788,7 @@ async function renderMarkdown(src, f) {
     const urls = await signedUrls([...new Set(attach.map(([, x]) => x.path))]).catch(() => new Map());
     for (const [a, x] of attach) { const u = urls.get(x.path); if (u) Object.assign(a, { href: u, target: "_blank", rel: "noopener" }); else missing(a, t("没有找到这个文件")); }
   }
+  art.dataset.refs = fnv(refs.join("\n"));
   return art;
 }
 
@@ -859,10 +868,11 @@ function fnv(text) {
   for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
   return h >>> 0;
 }
-// The files a drawing could point at count too: its links and pictures are looked up among them.
-function drawKey(text) {
+// The files its links and pictures were found as count too (renderMarkdown's refs); other files arriving in the
+// account do not, so a folder of pictures syncing in does not redraw every open document.
+function drawKey(text, refs = "") {
   const d = document.documentElement.dataset;
-  return [d.mode, d.style || "", lang, text.length, fnv(text), pathsSig].join(":");
+  return [d.mode, d.style || "", lang, text.length, fnv(text), refs].join(":");
 }
 const sameDrawing = (a, b) => !!a.dataset?.src && a.dataset.src === b.dataset?.src;
 async function showFile(f, p) {
@@ -905,7 +915,7 @@ async function showFile(f, p) {
         const [text] = await Promise.all([fileText(f), loadMarkdownLibs()]);
         if (token !== p.token) return;
         el = await renderMarkdown(text, f);
-        el.dataset.src = drawKey(text);
+        el.dataset.src = drawKey(text, el.dataset.refs);
         if (!staleIds.has(f.id)) keepRender(f, el);
       }
       if (el.dataset.web) { p.web.href = el.dataset.web; p.web.hidden = false; }
@@ -2152,7 +2162,7 @@ function localChanged(keys) {
     const f = p.kind === "file" && files.find((x) => x.id === p.itemId);
     if (f && keys.has(f.local_key) && !p.fileEdit) { p.shown = null; renderPane(p); }
   }
-  loadFiles();
+  loadFilesSoon();
 }
 const LOCAL_STATUS = { syncing: "同步中…", ok: "已同步", offline: "离线 · 联网后同步", error: "同步出错，稍后重试" };
 let localState = "";
