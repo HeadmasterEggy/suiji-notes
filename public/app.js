@@ -1322,6 +1322,7 @@ function makePane(item) {
     if (a) {
       e.preventDefault();
       if (a.dataset.open !== p.itemId) openIn(p, "file", a.dataset.open);
+      else if (a.dataset.heading) markPlace(p);   // a jump within the document: Back returns to here
       if (a.dataset.heading) goHeading(p, a.dataset.open, a.dataset.heading);
     }
     const tag = e.target.closest("[data-tag]");
@@ -1856,6 +1857,16 @@ const scroller = (p) => p.kind === "note" || p.fileEdit ? p.ta : p.preview;
 const here = (p) => ({ kind: p.kind, id: p.itemId, top: scroller(p).scrollTop });
 const exists = (h) => h.kind === "note" ? store.notes[h.id] && !store.notes[h.id].deleted : h.kind === "file" ? files.some((f) => f.id === h.id) : true;
 function navState(p) { p.prev.disabled = !p.hist.slice(0, p.hi).some(exists); p.next.disabled = !p.hist.slice(p.hi + 1).some(exists); }
+// A link to a heading of the same document is a step in the history too, as in a browser: the place it left
+// is kept, and the entry after it is filled in with where the jump landed when Back leaves it.
+function markPlace(p) {
+  if (!p.kind || p.hi < 0) return;
+  p.hist[p.hi] = here(p);
+  p.hist.splice(p.hi + 1, Infinity, { kind: p.kind, id: p.itemId, top: 0 });
+  if (p.hist.length > 100) p.hist.shift();
+  p.hi = p.hist.length - 1;
+  navState(p);
+}
 async function goHist(p, d) {
   let i = p.hi + d;
   while (p.hist[i] && !exists(p.hist[i])) i += d;   // skip documents deleted since
@@ -1863,6 +1874,11 @@ async function goHist(p, d) {
   if (!to) return;
   if (p.kind && p.hi >= 0) p.hist[p.hi] = p.restoreTop ? { kind: p.kind, id: p.itemId, top: p.restoreTop } : here(p);
   p.hi = i;
+  if (to.kind === p.kind && to.id === p.itemId) {   // another place in the document already open
+    navState(p);
+    scroller(p).scrollTo({ top: to.top, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    return;
+  }
   openIn(p, to.kind, to.id, true);
   scrollBack(p, to.id, to.top);
 }
