@@ -443,6 +443,7 @@ textarea {
 .md-body th { background: var(--bg); }
 .md-body hr { border: 0; border-top: 1px solid var(--line); margin: 2em 0; }
 .md-body .math-block { overflow-x: auto; overflow-y: hidden; margin: 0 0 1em; }
+.md-body span.math-block { display: block; margin: .3em 0; }   /* a $$display$$ formula on a list item's line */
 .md-body .katex { font-size: 1.05em; }
 .md-missing { color: var(--muted); font-size: 13px; }
 .md-body mark { background: color-mix(in srgb, #ffd54a 45%, transparent); color: inherit; padding: 0 .15em; border-radius: 3px; }
@@ -1330,6 +1331,10 @@ a.ag-card-name:hover { text-decoration: underline; }
 .mm-text a { color: inherit; text-decoration-color: color-mix(in srgb, var(--c, var(--accent)) 60%, transparent); text-underline-offset: 3px; }
 .mm-text a:hover { color: var(--c, var(--accent)); }
 .mm-text code { font-size: .88em; }
+/* Formulas in a node: a $$display$$ one centred on its own line, without the document's block margins. */
+.mm-text .math-block { margin: .2em 0; overflow: visible; }
+.mm-text .katex-display { margin: 0; }
+.mm-text .katex { font-size: 1.08em; }
 .mm-text img { max-width: 100%; margin: 4px 0; }
 .mm-text input[type=checkbox] { margin: 0 .35em 0 0; vertical-align: -.1em; }
 

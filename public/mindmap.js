@@ -252,15 +252,18 @@ export function addMindmap(art, content, { id, mindmap }) {
   });
   view.addEventListener("click", (e) => { if (e.target === view || e.target === stage) lit(null); });
 
+  // Formula fonts (KaTeX) arrive after the first layout; once they are in, nodes are measured again so a
+  // formula never spills over its neighbour.
+  const settleFonts = () => document.fonts?.ready.then(() => { if (art.isConnected) layout(); });
   const on = (yes) => {
     art.classList.toggle("mm-on", yes);
     toggle.setAttribute("aria-pressed", String(yes));
-    if (yes && !laid && view.clientWidth) { laid = true; layout(true); }
+    if (yes && !laid && view.clientWidth) { laid = true; layout(true); settleFonts(); }
   };
   // Laid out once the map has a width (it is built off screen, and a cached document may be shown again later).
   new ResizeObserver(() => {
     if (!art.classList.contains("mm-on") || !view.clientWidth) return;
-    if (!laid) { laid = true; layout(true); }
+    if (!laid) { laid = true; layout(true); settleFonts(); }
     else if ((view.clientWidth < 560) !== narrow) { layout(); fitWidth(); }   // turned the phone, or resized the window
   }).observe(view);
 
