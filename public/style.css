@@ -1278,7 +1278,7 @@ a.ag-card-name:hover { text-decoration: underline; }
 :root[data-width="center"] .md-body.mm-on { max-width: none; }
 .mm { margin: 0 -8px; }
 .mm-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; font-size: 13px; color: var(--muted); }
-.mm-btn { min-width: 30px; height: 28px; padding: 0 10px; border: 0; border-radius: min(8px, var(--mm-r)); font: inherit; color: var(--muted);
+.mm-btn { flex: none; white-space: nowrap; min-width: 30px; height: 28px; padding: 0 10px; border: 0; border-radius: min(8px, var(--mm-r)); font: inherit; color: var(--muted);
   background: color-mix(in srgb, var(--ink) 5%, transparent); cursor: pointer; transition: background .15s, color .15s, transform .15s; }
 .mm-btn:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 10%, transparent); }
 .mm-btn:active { transform: scale(.94); }
@@ -1334,9 +1334,14 @@ a.ag-card-name:hover { text-decoration: underline; }
 .mm-text input[type=checkbox] { margin: 0 .35em 0 0; vertical-align: -.1em; }
 
 /* Hover lifts a node; a click lights its branch and dims the rest. */
-.mm-node:hover > .mm-text, .mm-node:focus-visible > .mm-text { transform: translateY(-1px) scale(1.035); }
-.mm-node:is([data-depth="1"], [data-depth="2"]):hover > .mm-text { box-shadow: var(--mm-shadow-up), inset 0 0 0 1.5px var(--c); }
-.mm-node[data-depth="3"]:hover > .mm-text { background: color-mix(in srgb, var(--c) 10%, transparent); }
+@media (hover: hover) {
+  .mm-node:hover > .mm-text { transform: translateY(-1px) scale(1.035); }
+  .mm-node:is([data-depth="1"], [data-depth="2"]):hover > .mm-text { box-shadow: var(--mm-shadow-up), inset 0 0 0 1.5px var(--c); }
+  .mm-node[data-depth="3"]:hover > .mm-text { background: color-mix(in srgb, var(--c) 10%, transparent); }
+}
+.mm-node:focus-visible > .mm-text { transform: translateY(-1px) scale(1.035); }
+/* A tap gives a short press-in, since a finger has no hover. */
+.mm-node:active > .mm-text { transform: scale(.97); transition-duration: .08s; }
 .mm-node:focus-visible > .mm-text { outline: 2px solid var(--c, var(--accent)); outline-offset: 3px; }
 .mm.focus .mm-node:not(.lit) > .mm-text { opacity: .28; }
 .mm.focus .mm-link:not(.lit) { opacity: .15 !important; }
@@ -1357,3 +1362,33 @@ a.ag-card-name:hover { text-decoration: underline; }
 @media (hover: none) { .mm-node.has-kids > .mm-fold { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .mm-text, .mm-fold, .mm-link, .mm-canvas.zooming { transition: none; } .mm-node.sel > .mm-text, .md-body.mm-on > .mm { animation: none; } }
 .mm.focus .mm-node:not(.lit) > .mm-fold { opacity: .28; }
+
+/* The full-screen button and full-screen map. */
+.mm-full { margin-left: auto; display: grid; place-items: center; }
+.mm-full svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.mm-full[aria-pressed="true"] svg { transform: rotate(180deg); }
+.mm-view { -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; touch-action: pan-x pan-y; }
+.mm.full {
+  position: fixed; inset: 0; z-index: 1000; margin: 0; display: flex; flex-direction: column; background: var(--bg);
+  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  animation: mm-full-in .28s var(--ease);
+}
+@keyframes mm-full-in { from { opacity: 0; transform: scale(.97); } }
+.mm.full .mm-view { flex: 1; min-height: 0; overflow: auto; }
+html.mm-locked, html.mm-locked body { overflow: hidden; }
+/* Phones: bigger targets, a toolbar that stays at the top of the screen while the map scrolls under it, and a
+   map no wider than the screen. */
+@media (max-width: 700px) {
+  .mm { margin: 0 -10px; }
+  .mm-bar { position: sticky; top: 0; z-index: 2; gap: 6px; padding: 6px 2px; margin-bottom: 4px; background: var(--panel);
+    overflow-x: auto; scrollbar-width: none; }
+  .mm.full .mm-bar { position: static; background: none; }
+  .mm-btn { min-width: 38px; height: 36px; border-radius: min(10px, var(--mm-r)); font-size: 14px; }
+  .mm-pct { min-width: 40px; }
+  .mm-full { order: -1; margin: 0 4px 0 0; }   /* first, so the way out of full screen is never scrolled away */
+  .mm-node { max-width: 210px; }
+  .mm-node[data-depth="0"] > .mm-text { max-width: 240px; font-size: 17px; padding: 10px 16px; }
+  .mm-text { font-size: 14.5px; }
+  .mm-fold { min-width: 22px; height: 22px; margin-top: -11px; border-radius: 11px; font-size: 11px; }
+  .mm-node[data-depth="3"] > .mm-fold { margin-top: -6px; }
+}

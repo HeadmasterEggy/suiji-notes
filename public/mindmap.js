@@ -64,6 +64,8 @@ export function addMindmap(art, content, { id, mindmap }) {
   const out = btn("mm-out", t("缩小"), "−"), pct = el("span", "mm-pct", "100%"); bar.append(pct);
   const inn = btn("mm-in", t("放大"), "+"), fit = btn("mm-fit", t("适应宽度"), t("适应"));
   const all = btn("mm-all", t("全部展开"), t("展开")), fold = btn("mm-fold-all", t("收起到第一层"), t("折叠"));
+  const full = btn("mm-full", t("全屏查看"), "");
+  full.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg>';
   const box = el("section", "mm");
   box.append(bar, view);
   content.before(box);
@@ -91,6 +93,9 @@ export function addMindmap(art, content, { id, mindmap }) {
   make(root, 0, 0, null);
   const byEl = new Map(nodes.map((n) => [n.el, n]));
 
+  let narrow = false;
+  // What scrolls the map up and down: the document, or the map itself when it fills the screen.
+  const scroller = () => box.classList.contains("full") ? view : view.closest(".preview") || document.scrollingElement;
   let zoom = 1, laid = false, origin = { x: 0, y: 0 }, anim = 0, focus = null;
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const setZoom = (z, keep) => {
@@ -101,7 +106,8 @@ export function addMindmap(art, content, { id, mindmap }) {
     stage.style.width = canvas.offsetWidth * zoom + "px"; stage.style.height = canvas.offsetHeight * zoom + "px";
     if (keep) view.scrollLeft = (view.scrollLeft + keep) * zoom / before - keep;
   };
-  const fitWidth = () => setZoom(Math.min(1, Math.max(.5, (view.clientWidth - 2) / canvas.offsetWidth)));
+  // On a phone the text stays readable (never under 75%) and the rest scrolls sideways.
+  const fitWidth = () => setZoom(Math.min(1, Math.max(view.clientWidth < 560 ? .75 : .5, (view.clientWidth - 2) / canvas.offsetWidth)));
   const shown = (n) => n.open || !n.depth ? n.kids : [];
   // Boxes (the title and the first two levels) join at their middle; deeper nodes sit on a line and join at it.
   const anchor = (n, x, y, outward, dir) => [outward ? (dir > 0 ? x + n.w : x) : (dir > 0 ? x : x + n.w), n.depth >= 3 ? y + n.h : y + n.h / 2];
@@ -138,8 +144,10 @@ export function addMindmap(art, content, { id, mindmap }) {
     const ks = root.kids;
     ks.forEach(span);
     const totalH = ks.reduce((s, k) => s + k.sh, 0);
+    // A narrow screen (a phone held upright) keeps every branch on the right: tall and narrow fits it better.
+    narrow = view.clientWidth < 560;
     let cut = ks.length;
-    if (ks.length >= 4) { let acc = 0; cut = 0; while (cut < ks.length && acc + ks[cut].sh / 2 < totalH / 2) acc += ks[cut++].sh; cut = Math.max(1, cut); }
+    if (ks.length >= 4 && !narrow) { let acc = 0; cut = 0; while (cut < ks.length && acc + ks[cut].sh / 2 < totalH / 2) acc += ks[cut++].sh; cut = Math.max(1, cut); }
     const right = ks.slice(0, cut), left = ks.slice(cut);
     const height = (g) => g.reduce((s, k) => s + k.sh, 0) + GAP_Y * Math.max(0, g.length - 1);
     root.tx = 0; root.ty = -root.h / 2; root.dir = 1;
@@ -174,7 +182,7 @@ export function addMindmap(art, content, { id, mindmap }) {
     }
     if (!first) setZoom(zoom);
     // The map keeps still on screen while it grows or shrinks around what is there.
-    const page = view.closest(".preview");
+    const page = scroller();
     view.scrollLeft += (old.x - origin.x) * zoom;
     if (page && !first) page.scrollTop += (old.y - origin.y) * zoom;
 
@@ -231,6 +239,9 @@ export function addMindmap(art, content, { id, mindmap }) {
   canvas.addEventListener("click", (e) => {
     const node = e.target.closest(".mm-node");
     if (!node) { lit(null); return; }
+    // A link to another note, clicked full screen: back into the document first, where the pane opens it.
+    const link = e.target.closest("a[data-open]");
+    if (link && box.classList.contains("full")) { e.preventDefault(); e.stopPropagation(); setFull(false); link.click(); return; }
     if (e.target.closest("a, input")) return;
     press(byEl.get(node));
   });
@@ -247,7 +258,11 @@ export function addMindmap(art, content, { id, mindmap }) {
     if (yes && !laid && view.clientWidth) { laid = true; layout(true); }
   };
   // Laid out once the map has a width (it is built off screen, and a cached document may be shown again later).
-  new ResizeObserver(() => { if (art.classList.contains("mm-on") && view.clientWidth && !laid) { laid = true; layout(true); } }).observe(view);
+  new ResizeObserver(() => {
+    if (!art.classList.contains("mm-on") || !view.clientWidth) return;
+    if (!laid) { laid = true; layout(true); }
+    else if ((view.clientWidth < 560) !== narrow) { layout(); fitWidth(); }   // turned the phone, or resized the window
+  }).observe(view);
 
   const smooth = (fn) => { canvas.classList.add("zooming"); fn(); setTimeout(() => canvas.classList.remove("zooming"), 260); };
   out.onclick = () => smooth(() => setZoom(zoom / 1.2, view.clientWidth / 2));
@@ -264,7 +279,7 @@ export function addMindmap(art, content, { id, mindmap }) {
   // Dragging the empty space moves the map: sideways inside it, up and down with the page.
   view.addEventListener("pointerdown", (e) => {
     if (e.button !== 0 || e.pointerType === "touch" || e.target.closest(".mm-node, a, button")) return;
-    const page = view.closest(".preview") || document.scrollingElement;
+    const page = scroller();
     let x = e.clientX, y = e.clientY;
     view.setPointerCapture(e.pointerId); view.classList.add("dragging");
     const move = (ev) => { view.scrollLeft -= ev.clientX - x; page.scrollTop -= ev.clientY - y; x = ev.clientX; y = ev.clientY; };
@@ -272,6 +287,48 @@ export function addMindmap(art, content, { id, mindmap }) {
     view.addEventListener("pointermove", move);
     view.addEventListener("pointerup", up, { once: true }); view.addEventListener("pointercancel", up, { once: true });
   });
+
+  // Two fingers pinch to zoom around the point between them; one finger scrolls as usual (the browser's own
+  // scrolling, with its momentum).
+  const zoomAt = (z, cx, cy) => {
+    const page = scroller(), r = stage.getBoundingClientRect(), before = zoom;
+    const y = cy - r.top;
+    setZoom(z, cx - view.getBoundingClientRect().left);
+    page.scrollTop += y * (zoom / before - 1);
+  };
+  let pinch = null;
+  const gap = (ts) => Math.hypot(ts[0].clientX - ts[1].clientX, ts[0].clientY - ts[1].clientY);
+  view.addEventListener("touchstart", (e) => {
+    if (e.touches.length === 2) pinch = { d: gap(e.touches), z: zoom };
+  }, { passive: true });
+  view.addEventListener("touchmove", (e) => {
+    if (!pinch || e.touches.length !== 2) return;
+    e.preventDefault();
+    const [a, b] = e.touches;
+    zoomAt(pinch.z * gap(e.touches) / pinch.d, (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
+  }, { passive: false });
+  view.addEventListener("touchend", (e) => { if (e.touches.length < 2) pinch = null; });
+  // Double-tap (or double-click) the empty space: zoom in there, or back to fit when already close.
+  view.addEventListener("dblclick", (e) => {
+    if (e.target.closest(".mm-node")) return;
+    smooth(() => zoomAt(zoom < .95 ? Math.min(1.2, zoom * 1.6) : (view.clientWidth - 2) / canvas.offsetWidth, e.clientX, e.clientY));
+  });
+
+  // Full screen: the map alone over the app, scrolling both ways, for a big map or a small screen.
+  // It moves to <body> while full screen: inside the glass pane, position: fixed would fill only the pane.
+  const spot = document.createComment("mind map");
+  const setFull = (yes) => {
+    if (yes && !spot.parentNode) { box.before(spot); document.body.append(box); }
+    if (!yes && spot.parentNode) { spot.replaceWith(box); }
+    box.classList.toggle("full", yes);
+    full.title = yes ? t("退出全屏") : t("全屏查看"); full.setAttribute("aria-label", full.title);
+    full.setAttribute("aria-pressed", String(yes));
+    document.documentElement.classList.toggle("mm-locked", yes);
+    requestAnimationFrame(() => { fitWidth(); view.scrollLeft = Math.max(0, (root.tx - origin.x + root.w / 2) * zoom - view.clientWidth / 2);
+      if (yes) view.scrollTop = Math.max(0, (root.ty - origin.y + root.h / 2) * zoom - view.clientHeight / 2); });
+  };
+  full.onclick = () => { setFull(!box.classList.contains("full")); full.focus(); };
+  box.addEventListener("keydown", (e) => { if (e.key === "Escape" && box.classList.contains("full")) { e.stopPropagation(); setFull(false); } });
 
   const toggle = el("button", "md-mm-toggle");
   toggle.type = "button";
