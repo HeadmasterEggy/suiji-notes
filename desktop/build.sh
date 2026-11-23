@@ -6,10 +6,10 @@
 # Raise BUILD for every release you publish; installed apps only update to a higher BUILD. The Swift app is at 9.
 # Apple silicon only for now.
 set -e
-VERSION=${VERSION:-2.5}
-BUILD=${BUILD:-15}
+VERSION=${VERSION:-2.6}
+BUILD=${BUILD:-16}
 REPO=HeadmasterEggy/suiji-notes
-NOTES="The assistant's answers from Magpie or a model on this computer now appear as they are written, instead of all at once at the end. 助手：用 Magpie 或本机模型时，回答会边生成边显示，不用等整段写完。"
+NOTES="Mind maps: notes from the 思维导图 folder open as an interactive mind map, in every style, on phones and with formulas; the app now loads the newest version every time it starts. 思维导图：思维导图文件夹里的笔记直接显示成可点击、带动画的导图，跟随风格，支持手机和公式；应用每次启动都会加载最新版本。"
 cd "$(dirname "$0")"
 
 [ -d node_modules/electron-builder ] || npm ci
