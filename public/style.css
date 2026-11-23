@@ -1210,3 +1210,64 @@ a.ag-card-name:hover { text-decoration: underline; }
 .sug[aria-selected=true] small { background: color-mix(in srgb, var(--on-accent) 18%, transparent); }
 @media (prefers-reduced-motion: reduce) { .suggest.pop, .suggest.pop .sug { animation: none; } }
 .ai-form label:has(.combo) { position: relative; z-index: 6; }   /* the suggestions lie over the rows below */
+
+/* Mind map (mindmap.js): a document's headings and lists as a tree, the title in the middle. Each first-level
+   branch takes one of these colours, mixed toward the text colour so they hold up in light and dark. */
+:root {
+  --mm-c0: color-mix(in oklab, #e8590c 80%, var(--ink)); --mm-c1: color-mix(in oklab, #1c7ed6 80%, var(--ink));
+  --mm-c2: color-mix(in oklab, #2f9e44 80%, var(--ink)); --mm-c3: color-mix(in oklab, #ae3ec9 80%, var(--ink));
+  --mm-c4: color-mix(in oklab, #0c8599 80%, var(--ink)); --mm-c5: color-mix(in oklab, #d6336c 80%, var(--ink));
+  --mm-c6: color-mix(in oklab, #f08c00 80%, var(--ink));
+}
+:root:is([data-style="eink"], [data-style="ink"]) { --mm-c0: var(--ink); --mm-c1: var(--ink); --mm-c2: var(--ink); --mm-c3: var(--ink); --mm-c4: var(--ink); --mm-c5: var(--ink); --mm-c6: var(--ink); }
+.md-mm-toggle {
+  display: inline-flex; align-items: center; gap: 6px; margin: 0 0 12px; padding: 3px 12px 3px 9px; border: 0; border-radius: 999px;
+  font: inherit; font-size: .88em; line-height: 1.6; color: var(--muted); background: color-mix(in srgb, var(--ink) 6%, transparent); cursor: pointer;
+}
+.md-mm-toggle svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; }
+.md-mm-toggle:hover { color: var(--ink); }
+.md-mm-toggle[aria-pressed="true"] { color: var(--on-accent); background: var(--accent); }
+.md-head .md-web + .md-mm-toggle { margin-left: 10px; }
+.md-body.mm-on > .md-text, .md-body:not(.mm-on) > .mm { display: none; }
+:root[data-width="center"] .md-body.mm-on { max-width: none; }
+.mm { margin: 0 -8px; }
+.mm-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; font-size: 13px; color: var(--muted); }
+.mm-btn { min-width: 30px; height: 28px; padding: 0 9px; border: 0; border-radius: 8px; font: inherit; color: var(--muted); background: color-mix(in srgb, var(--ink) 5%, transparent); cursor: pointer; }
+.mm-btn:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 10%, transparent); }
+.mm-pct { min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
+.mm-fit { margin-left: 6px; }
+.mm-view { overflow-x: auto; overflow-y: hidden; border-radius: 14px; background: color-mix(in srgb, var(--ink) 2.5%, transparent); cursor: grab; }
+.mm-view.dragging { cursor: grabbing; user-select: none; -webkit-user-select: none; }
+.mm-stage { position: relative; }
+.mm-canvas { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.mm-links { position: absolute; left: 0; top: 0; overflow: visible; }
+.mm-links path { fill: none; stroke-width: 1.6; stroke-linecap: round; }
+.mm-node {
+  position: absolute; left: 0; top: 0; max-width: 280px; width: max-content; padding: 2px 4px 3px; cursor: auto;
+  font-size: 14px; line-height: 1.45; color: var(--ink); border-bottom: 1.6px solid var(--c, var(--mm-line));
+}
+.mm-node[data-depth="0"] {
+  max-width: 320px; padding: 10px 20px; border: 0; border-radius: 14px; font: 600 18px/1.35 var(--font-display);
+  color: var(--on-accent); background: var(--accent);
+}
+.mm-node[data-depth="0"] a { color: inherit; }
+.mm-node[data-depth="1"] {
+  padding: 6px 13px; border: 1.6px solid var(--c); border-radius: 10px; font-weight: 600; font-size: 15px;
+  background: color-mix(in srgb, var(--c) 9%, var(--panel));
+}
+.mm-node[data-depth="3"] { font-size: 13px; color: color-mix(in srgb, var(--ink) 82%, transparent); }
+.mm-text { overflow-wrap: anywhere; }
+.mm-text :is(p, ul, ol) { margin: 0; }
+.mm-text code { font-size: .88em; }
+.mm-text img { max-width: 100%; margin: 4px 0; }
+.mm-text input[type=checkbox] { margin: 0 .35em 0 0; vertical-align: -.1em; }
+.mm-fold {
+  position: absolute; top: 100%; width: 16px; height: 16px; margin-top: -8px; padding: 0; border: 1.6px solid var(--c); border-radius: 50%;
+  font: 600 9px/13px var(--font-body); color: var(--c); background: var(--panel); cursor: pointer; opacity: 0; transition: opacity .15s;
+}
+.mm-node[data-depth="1"] > .mm-fold { top: 50%; }
+.mm-node[data-dir="1"] > .mm-fold { left: 100%; margin-left: -2px; }
+.mm-node[data-dir="-1"] > .mm-fold { right: 100%; margin-right: -2px; }
+.mm-node:hover > .mm-fold, .mm-node.closed > .mm-fold, .mm-fold:focus-visible { opacity: 1; }
+.mm-node.closed > .mm-fold { min-width: 16px; width: auto; padding: 0 3px; border-radius: 8px; }
+@media (hover: none) { .mm-fold { opacity: 1; } }
