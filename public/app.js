@@ -686,7 +686,14 @@ function obsidianSyntax(part, wiki, embeds) {
 const MATH = [[/\$\$([\s\S]+?)\$\$/g, true], [/\\\[([\s\S]+?)\\\]/g, true], [/\\\(([\s\S]+?)\\\)/g, false],
   [/(?<![\\$\w])\$(?!\s)([^\n$]+?)(?<![\s\\])\$(?!\d)/g, false]];
 const outsideCode = (text, fn) => text.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]+`)/g).map((part, i) => i % 2 ? part : fn(part)).join("");
-function pullMath(part, put) { for (const [re, display] of MATH) part = part.replace(re, (_, tex) => put(tex, display)); return part; }
+// put(tex, display, inList): inList when a display formula sits on a list item's line ("- $$x^2$$"), where breaking
+// out into its own block would cut the list (and a mind map's branch) in two.
+const LIST_LINE = /^[ \t]*(?:[-*+]|\d+[.)])[ \t]/;
+function pullMath(part, put) {
+  for (const [re, display] of MATH)
+    part = part.replace(re, (_, tex, off, str) => put(tex, display, display && LIST_LINE.test(str.slice(str.lastIndexOf("\n", off - 1) + 1, off))));
+  return part;
+}
 const katexHtml = (tex, display) => window.katex.renderToString(tex.trim(), { displayMode: display, throwOnError: false, output: "html" });
 // GitHub-style heading anchors ("#my-heading") and Obsidian's ("#My Heading") both compare equal under this.
 const slug = (s) => String(s).trim().toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, "").replace(/\s+/g, "-");
@@ -699,9 +706,10 @@ async function renderMarkdown(src, f) {
     .replace(/^\s*\{%[^%]*%\}\s*$/gm, "");
 
   const math = [];
-  const keep = (tex, display) => {
+  const keep = (tex, display, inList) => {
     math.push(katexHtml(tex, display));
-    return display ? `\n\nKATEXBLOCK${math.length - 1}END\n\n` : `KATEXINLINE${math.length - 1}END`;
+    // A display formula in a list item stays on the item's line, shown as a centred block inside it.
+    return display && !inList ? `\n\nKATEXBLOCK${math.length - 1}END\n\n` : `KATEX${display ? "DISP" : "INLINE"}${math.length - 1}END`;
   };
   const wiki = [], embeds = [];
   text = outsideCode(text, (part) => obsidianSyntax(pullMath(part, keep), wiki, embeds));
@@ -710,6 +718,7 @@ async function renderMarkdown(src, f) {
   html = html
     .replace(/<p>KATEXBLOCK(\d+)END<\/p>/g, (_, i) => `<div class="math-block">${math[i]}</div>`)
     .replace(/KATEXINLINE(\d+)END([，。、；：！？）」』”’,.;:!?)]+)/g, (_, i, punct) => `<span class="math-nb">${math[i]}${punct}</span>`)
+    .replace(/KATEXDISP(\d+)END/g, (_, i) => `<span class="math-block">${math[i]}</span>`)
     .replace(/KATEX(?:BLOCK|INLINE)(\d+)END/g, (_, i) => math[i]);
 
   const art = document.createElement("article");

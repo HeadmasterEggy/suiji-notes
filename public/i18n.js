@@ -340,6 +340,8 @@ const EN = {
   "收起到第一层": "Collapse to the first level",
   "折叠": "Collapse",
   "点击折叠": "Click to collapse",
+  "全屏查看": "Full screen",
+  "退出全屏": "Exit full screen",
   "点击展开": "Click to expand",
   "在文中查找": "Find in document",
   "在文中查找（⌘F）": "Find in document (⌘F)",
