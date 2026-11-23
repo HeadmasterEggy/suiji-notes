@@ -1058,7 +1058,7 @@ function itemRow(kind, id, label, depth, metaText, title, snip) {
 }
 // The Edit button's label (also its tooltip, for narrow panes that show only its icon); "on" swaps the pencil for a tick.
 function editLabel(p, text, on) {
-  p.edit.querySelector(".lbl").textContent = text; p.edit.title = text; p.edit.classList.toggle("on", on);
+  p.edit.querySelector(".lbl").textContent = text; p.edit.title = text + " (⌘E)"; p.edit.classList.toggle("on", on);
 }
 // In search results metaText is the file's folder path; the row shows only the nearest folder, where the
 // name differs, and the tooltip gives the whole path.
@@ -1804,6 +1804,14 @@ document.addEventListener("keydown", (e) => {
     if (isPhone.matches) app.dataset.view = "list";
     search.focus(); search.select();
   } else if (k === "g" && focused?.find.isOpen()) { e.preventDefault(); focused.find.step(e.shiftKey ? -1 : 1); }
+});
+// ⌘S / Ctrl+S saves what is being typed now (it saves by itself anyway), instead of the browser's "Save Page As"
+// downloading the app's HTML; ⌘E (as in Obsidian) switches the focused document between reading and editing.
+document.addEventListener("keydown", (e) => {
+  if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || !uid || $("settings").open) return;
+  const k = e.key.toLowerCase();
+  if (k === "s") { e.preventDefault(); saveAll().then(() => scheduleSync(0)); }
+  else if (k === "e" && focused?.kind === "file" && !focused.edit.hidden && !focused.edit.disabled) { e.preventDefault(); focused.edit.click(); }
 });
 // Moves the tree highlight without rebuilding the tree (rebuilding makes it flicker).
 function markCurrent() {
