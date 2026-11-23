@@ -50,6 +50,48 @@ function block(ta, text, caret) {
   ta.setSelectionRange(at, at);
 }
 
+// Lists while typing, as in most Markdown editors. Enter after a list item starts the next one (numbers count
+// up, a task starts unticked); Enter on an item with nothing in it ends the list. Tab / ⇧Tab move the list
+// lines the selection touches in and out a level. Not inside a ``` code block.
+const ITEM = /^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]+)(\[[ xX]\][ \t]+)?/;
+const inFence = (v, at) => (v.slice(0, at).match(/^[ \t]*(```|~~~)/gm) || []).length % 2 === 1;
+const indentOf = (row) => /^[ \t]*/.exec(row)[0].replace(/\t/g, "    ").length;
+function listEnter(ta) {
+  const { selectionStart: s, selectionEnd: e, value: v } = ta;
+  if (s !== e) return false;
+  const ls = v.lastIndexOf("\n", s - 1) + 1, m = ITEM.exec(v.slice(ls, s));
+  if (!m || inFence(v, ls)) return false;
+  const le = (v.indexOf("\n", s) + 1 || v.length + 1) - 1;
+  if (s - ls === m[0].length && !v.slice(s, le).trim()) { ta.setSelectionRange(ls, le); put(ta, ""); return true; }
+  const n = /^\d/.test(m[2]) ? +m[2].slice(0, -1) + 1 + m[2].slice(-1) : m[2];
+  put(ta, "\n" + m[1] + n + m[3] + (m[4] ? "[ ] " : ""));
+  return true;
+}
+function listIndent(ta, out) {
+  const v = ta.value, { selectionStart: ss, selectionEnd: se } = ta;
+  const s = v.lastIndexOf("\n", ss - 1) + 1;
+  let e = v.indexOf("\n", Math.max(se - (se > ss && v[se - 1] === "\n" ? 1 : 0), s));
+  if (e < 0) e = v.length;
+  const rows = v.slice(s, e).split("\n");
+  if (!rows.some((r) => ITEM.test(r)) || !rows.every((r) => !r.trim() || ITEM.test(r)) || inFence(v, s)) return false;
+  // One level is the width of the parent item's marker ("- " is 2, "1. " is 3), found on the lines above.
+  const first = indentOf(rows[0]), above = v.slice(0, Math.max(0, s - 1)).split("\n").reverse().filter((r) => r.trim());
+  let step = 0;
+  for (const r of above) {
+    const m = ITEM.exec(r), at = indentOf(r);
+    if (!m) break;
+    if (out ? at < first : at === first) { step = out ? first - at : m[2].length + m[3].replace(/\t/g, "    ").length; break; }
+  }
+  if (out && !step) step = first;
+  if (!step) return true;   // the first item of a list has nothing to go under: stay put
+  const moved = rows.map((r) => !r.trim() ? r : out ? r.replace(new RegExp(`^ {0,${step}}`), "") : " ".repeat(step) + r).join("\n");
+  const delta = moved.split("\n")[0].length - rows[0].length;
+  ta.setSelectionRange(s, e);
+  if (ss === se && rows.length === 1) put(ta, moved, Math.max(s, ss + delta));
+  else put(ta, moved, s, s + moved.length);
+  return true;
+}
+
 function editorItems(ta, sel) {
   const f = (label, fn, key) => ({ label, key, run: () => fn(ta) });
   return [
@@ -178,6 +220,12 @@ export function mountMenu(a) {
   addEventListener("blur", close);
   addEventListener("resize", close);
   document.addEventListener("scroll", () => { if (menu) close(); }, true);   // every scroll event: only when a menu is open
+  // Enter, Tab and ⇧Tab in lists (not while an input method is composing: Enter there picks the characters).
+  document.addEventListener("keydown", (e) => {
+    const ta = e.target.closest?.("textarea.p-ta");
+    if (!ta || e.isComposing || e.keyCode === 229 || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === "Enter" && !e.shiftKey ? listEnter(ta) : e.key === "Tab" && listIndent(ta, e.shiftKey)) e.preventDefault();
+  });
   // ⌘B / ⌘I / ⌘K in the editor.
   document.addEventListener("keydown", (e) => {
     const ta = e.target.closest?.("textarea.p-ta");
