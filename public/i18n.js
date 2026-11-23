@@ -355,6 +355,7 @@ const EN = {
   "读取文件失败，请检查网络。": "Couldn't read the file. Check your connection.",
   "保存中…": "Saving…",
   "保存失败": "Save failed",
+  "这个待办没法在阅读视图里勾选，请点「编辑」修改。": "This task can’t be ticked in the reading view; use Edit to change it.",
   "「{name}」没保存上，请联网后再改一下或点「完成」重试。": "“{name}” wasn't saved. Once online, edit it again or click Done to retry.",
   "关系图谱 · {nodes} 个节点 · {edges} 条链接": "Graph · {nodes} node{nodes|s} · {edges} link{edges|s}",
   "居中": "Center",
