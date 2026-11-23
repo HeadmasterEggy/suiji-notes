@@ -758,6 +758,8 @@ async function renderMarkdown(src, f) {
   content.append(frag);
   // Obsidian's Enhancing Mindmap plugin marks its documents with this; they open as a mind map (see mindmap.js).
   if (fm["mindmap-plugin"]) art.dataset.mindmap = "1";
+  // Task boxes can be ticked in the reading view (see tickTask), in documents this app can save.
+  if (isEditable(f)) for (const box of content.querySelectorAll("li > input[type=checkbox]")) box.disabled = false;
   art.append(content);
   // A document that opens with its own # heading: that heading is the title, above the properties.
   const first = content.firstElementChild;
@@ -1327,6 +1329,8 @@ function makePane(item) {
     }
     const tag = e.target.closest("[data-tag]");
     if (tag) searchTag(tag.dataset.tag);
+    const box = e.target.closest?.(".md-text li > input[type=checkbox]");
+    if (box) tickTask(p, box);
   });
   // A narrow pane cuts the file's details short; hovering them shows the whole line.
   p.meta.onpointerenter = () => { p.meta.title = p.meta.scrollWidth > p.meta.clientWidth ? p.meta.textContent : ""; };
@@ -1494,6 +1498,41 @@ async function writeFileText(f, text) {
   Object.assign(f, { size: blob.size, updated_at: now }, meta);
   forgetUrls(f.path);
   await cacheText(f, text);   // the preview shows exactly what was saved, without downloading it again
+}
+
+// Ticking a task in the reading view writes [x] or [ ] into the file. The box is the n-th task box of the
+// document, which is the n-th task line of its text outside code blocks; when the two counts differ (a task
+// written in a way this can't follow), nothing is written and the box goes back.
+const TASK_LINE = /^((?:[ \t]*>)*[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\[)([ xX])(\])/;
+function toggleTask(text, n, on) {
+  const lines = text.split("\n");
+  let fence = false, k = 0, at = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^[ \t]*(```|~~~)/.test(lines[i])) { fence = !fence; continue; }
+    if (fence || !TASK_LINE.test(lines[i])) continue;
+    if (k++ === n) at = i;
+  }
+  return { text: at < 0 ? null : (lines[at] = lines[at].replace(TASK_LINE, `$1${on ? "x" : " "}$3`), lines.join("\n")), count: k };
+}
+function tickTask(p, box) {
+  const f = p.kind === "file" && files.find((x) => x.id === p.itemId), art = box.closest(".md-text");
+  if (!f || !art || p.fileEdit) return;
+  const boxes = [...art.querySelectorAll("li > input[type=checkbox]")], n = boxes.indexOf(box), on = box.checked;
+  box.toggleAttribute("checked", on);   // the attribute too, so a redraw that comes out the same keeps the box as it is
+  p.ticking = (p.ticking || Promise.resolve()).then(async () => {
+    try {
+      const done = toggleTask(await fileText(f), n, on);
+      if (done.count !== boxes.length || done.text == null) throw new Error(t("这个待办没法在阅读视图里勾选，请点「编辑」修改。"));
+      setSync("saving", t("保存中…"));
+      await writeFileText(f, done.text);
+      p.shown = local.localPath(f) ? null : versionOf(f);
+      p.meta.textContent = `${baseName(f.name)} · ${fmtSize(f.size)} · ${fmt(f.updated_at || f.created_at)}`;
+      setSync("ok", t("已同步")); clearNote("file");
+    } catch (e) {
+      box.checked = !on; box.toggleAttribute("checked", !on);
+      setSync("err", t("保存失败")); showNote(e.message, "err", "file");
+    }
+  });
 }
 
 async function saveFile(p) {

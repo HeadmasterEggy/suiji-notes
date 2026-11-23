@@ -59,7 +59,8 @@ class Query {
   }
 }
 const bucket = {
-  upload: async (p) => { (fx().uploaded ||= []).push(p); return { data: {}, error: null }; }, remove: async () => ({ data: [], error: null }),
+  // Uploaded bodies are kept in window.__suiji.bodies (path -> Blob) for checks to read.
+  upload: async (p, body) => { (fx().uploaded ||= []).push(p); (fx().bodies ||= {})[p] = body; return { data: {}, error: null }; }, remove: async () => ({ data: [], error: null }),
   createSignedUrl: async (p) => ({ data: { signedUrl: "${ORIGIN}/__blob/" + p + "?token=t" }, error: null }),
   createSignedUrls: async (ps) => ({ data: ps.map((p) => ({ path: p, signedUrl: "${ORIGIN}/__blob/" + p + "?token=t" })), error: null }),
   download: async (p) => ({ data: new Blob([fx().blobs[p] || ""]), error: null }),
