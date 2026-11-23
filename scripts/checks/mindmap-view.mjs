@@ -42,10 +42,13 @@ for (const [id, name, body] of [["mm1", "思维导图/深度学习.md", map], ["
 
 const app = await openApp({ vault });
 const { page } = app, bad = [];
-const nodes = () => page.$$eval(".md-body .mm-node:not([hidden])", (e) => e.map((x) => x.textContent.trim()));
+// Nodes glide into place; read the map once it has settled.
+const settled = () => page.waitForSelector(".md-body.mm-on .mm:not([data-moving])", { timeout: 5000 });
+const nodes = () => page.$$eval(".md-body .mm-node:not([hidden]) > .mm-text", (e) => e.map((x) => x.textContent.trim()));
 try {
   await app.openDoc("Notes/思维导图/深度学习.md");
   await page.waitForSelector(".md-body.mm-on .mm-node", { timeout: 8000 }).catch(() => bad.push("the 思维导图 document did not open as a mind map"));
+  await settled();
   if (await page.isVisible(".md-body .md-text")) bad.push("the text shows under the map");
   const want = ["深度学习", "基础", "AI", "第二周", "子项一", "子项二", "孙项", "加粗", "模型", "Transformer", "RNN", "训练", "优化器", "评估", "指标"];
   const got = await nodes();
@@ -66,14 +69,22 @@ try {
     .catch(() => bad.push("a [[wiki link]] in a node did not open the note"));
   await app.openDoc("Notes/思维导图/深度学习.md");
   await page.waitForSelector(".md-body.mm-on .mm-node");
+  await settled();
 
-  const branch = page.locator(".mm-node", { hasText: "第二周" }).first();
+  const branch = page.locator(".mm-node", { hasText: "子项二" }).first();   // no link in it: a click on the text folds
   await branch.hover();
-  await branch.locator(".mm-fold").click();
+  await branch.locator(".mm-text").click();
+  await settled();
   const folded = await nodes();
-  if (folded.includes("子项一") || folded.includes("孙项")) bad.push("folding a branch left its items showing");
+  if (folded.includes("孙项") || !folded.includes("子项一")) bad.push("folding a branch should hide just what is under it: " + folded.join(", "));
   const n = (await branch.locator(".mm-fold").textContent()).trim();
-  if (n !== "3") bad.push(`a folded branch should say 3 items are under it, says "${n}"`);
+  if (n !== "1") bad.push(`a folded branch should say 1 item is under it, says "${n}"`);
+  // The click also lit the branch: its way back to the title stays bright, other branches dim.
+  const lit = await page.$$eval(".mm.focus .mm-node.lit:not([hidden]) > .mm-text", (e) => e.map((x) => x.textContent.trim()));
+  if (lit.join("|") !== "深度学习|基础|第二周|子项二") bad.push("clicking a node should light its branch, lit: " + lit.join(", "));
+  await branch.locator(".mm-text").click();
+  await settled();
+  if (!(await nodes()).includes("孙项")) bad.push("clicking the folded node again did not unfold it");
 
   await page.click(".md-mm-toggle");
   if (!(await page.isVisible(".md-body .md-text")) || await page.isVisible(".md-body .mm")) bad.push("the switch did not turn the map back into text");
@@ -82,6 +93,7 @@ try {
   await page.waitForSelector(".md-body .md-mm-toggle", { timeout: 5000 }).catch(() => bad.push("an ordinary document has no mind map switch"));
   if (await page.isVisible(".md-body .mm")) bad.push("an ordinary document opened as a map");
   await page.click(".md-mm-toggle");
+  await settled();
   const plainNodes = await nodes();
   if (plainNodes.join("|") !== "普通笔记|一|a|b|二") bad.push("an ordinary document's map: " + plainNodes.join(", "));
   if (app.errors.length) bad.push("errors: " + app.errors.join("; "));
