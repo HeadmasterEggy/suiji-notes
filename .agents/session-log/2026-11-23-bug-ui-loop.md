@@ -10,3 +10,11 @@
 - 手机 ⋯ 菜单顶部的文件信息，时间会被挤到第二行。现在文件名单独一行，大小和时间在第二行。
 - 改动文件：`public/find.js`、`public/app.js`、`public/style.css`；新增检查 `scripts/checks/find-skips-hidden-text.mjs`、`scripts/checks/tree-arrow-keys.mjs`。
 - 测试：两个新检查用 `redgreen.mjs` 验证过（旧代码红、修复后绿）；`npm run check`、`npm run smoke`（27 项）和 `scripts/checks/` 全部通过。手机菜单是截图确认的，没有写检查（只是排版）。
+- PR：#37（已合并）。
+
+## 第 2 轮
+
+- 在网页版编辑时按 ⌘S / Ctrl+S，会弹出浏览器的「网页另存为」，把应用本身的 HTML 下载下来。现在 ⌘S 会立刻保存正在编辑的内容并同步，不再弹窗（本来就会自动保存，这样只是提前保存）。
+- 新快捷键 ⌘E（和 Obsidian 一样）：在阅读和编辑之间切换当前文档。「编辑」按钮的提示里写了这个快捷键。
+- 改动文件：`public/app.js`；新增检查 `scripts/checks/save-and-edit-keys.mjs`（用 redgreen 验证过：旧代码红、修复后绿）。
+- Mac 应用的菜单没有占用 ⌘S 和 ⌘E，不冲突。
