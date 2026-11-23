@@ -16,8 +16,12 @@ export const findRe = (q) => new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 // in bold still matches) but not from one block into the next.
 export function rangesIn(root, q) {
   const re = findRe(q), out = [];
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode: (n) => n.parentElement?.closest(SKIP) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+  // Hidden parts are left out with all they hold: a document's mind map while the text shows (and the text while
+  // the map does), folded map branches. Text in a closed <details> still counts: its elements keep their display,
+  // and reveal() opens it.
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => n.nodeType === Node.TEXT_NODE ? NodeFilter.FILTER_ACCEPT
+      : n.matches(SKIP) || n.hidden || getComputedStyle(n).display === "none" ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP,
   });
   let nodes = [], starts = [], text = "", block;
   const flush = () => {

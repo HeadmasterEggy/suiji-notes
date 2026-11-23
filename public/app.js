@@ -1331,7 +1331,7 @@ function makePane(item) {
   p.meta.onpointerenter = () => { p.meta.title = p.meta.scrollWidth > p.meta.clientWidth ? p.meta.textContent : ""; };
   // Phones keep the file's details, Web and Download in a menu under ⋯.
   p.more.onclick = () => {
-    p.info.textContent = p.meta.textContent;
+    p.info.textContent = p.meta.textContent.replace(" · ", "\n");   // the name on its own line, size and time under it
     p.more.setAttribute("aria-expanded", String(p.acts.classList.toggle("menu")));
   };
   p.acts.addEventListener("click", (e) => { if (e.target.closest(".p-extra a")) closeMenu(p); });
@@ -2142,7 +2142,9 @@ window.addEventListener("paste", (e) => {
 // A search also starts reading the documents not downloaded yet, so it finds words in all of them.
 search.addEventListener("input", () => { renderList(); if (search.value.trim() && filesLoaded) warmBodies().then(() => prefetchDocs()); });
 // From the keyboard: Enter in the search box opens the first hit, ↓ moves into the list, and ↑ / ↓ step
-// through the rows that are showing (↑ from the top row goes back to the search box).
+// through the rows that are showing (↑ from the top row goes back to the search box). As in Finder's list:
+// → opens a folder (then goes into it), ← closes it (or goes up to the folder a row is in); Home / End go to
+// the first and last rows.
 const shownRows = () => [...list.querySelectorAll(".tree-row")].filter((r) => !r.closest(".drawer:not(.open)"));
 search.addEventListener("keydown", (e) => {
   if (e.isComposing) return;
@@ -2150,10 +2152,21 @@ search.addEventListener("keydown", (e) => {
   else if (e.key === "ArrowDown") { e.preventDefault(); shownRows()[0]?.focus(); }
 });
 list.addEventListener("keydown", (e) => {
-  if (e.key !== "ArrowDown" && e.key !== "ArrowUp" || !e.target.closest(".tree-row")) return;
+  const row = e.target.closest?.(".tree-row");
+  if (!row || e.metaKey || e.ctrlKey || e.altKey) return;
+  const rows = shownRows(), open = row.getAttribute("aria-expanded");
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    const i = rows.indexOf(row) + (e.key === "ArrowDown" ? 1 : -1);
+    (i < 0 ? search : rows[Math.min(i, rows.length - 1)])?.focus();
+  } else if (e.key === "ArrowRight") {
+    if (open === "false") row.click();
+    else if (open === "true") row.nextElementSibling?.querySelector(".tree-row")?.focus();
+  } else if (e.key === "ArrowLeft") {
+    if (open === "true") row.click();
+    else row.closest(".drawer")?.previousElementSibling?.focus();
+  } else if (e.key === "Home" || e.key === "End") rows.at(e.key === "Home" ? 0 : -1)?.focus();
+  else return;
   e.preventDefault();
-  const rows = shownRows(), i = rows.indexOf(e.target) + (e.key === "ArrowDown" ? 1 : -1);
-  (i < 0 ? search : rows[Math.min(i, rows.length - 1)])?.focus();
 });
 const sortSel = $("sortSel");
 sortSel.value = sortBy;

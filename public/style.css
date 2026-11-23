@@ -1083,7 +1083,7 @@ a.ag-card-name:hover { text-decoration: underline; }
   }
   .p-acts.menu .p-extra { display: flex; animation: rise .2s var(--ease) both; }
   .p-acts.menu .p-more { background: var(--accent-soft); }
-  .p-info:not(:empty) { display: block; padding: 6px 10px 9px; margin-bottom: 4px; border-bottom: 1px solid var(--line); font: 11px/1.5 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
+  .p-info:not(:empty) { display: block; padding: 6px 10px 9px; margin-bottom: 4px; border-bottom: 1px solid var(--line); font: 11px/1.5 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; white-space: pre-line; }
   :root .ebar .p-extra :is(.p-web, .p-dl, .p-del) { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 10px; font-size: 15px; color: var(--ink); }
   :root .ebar .p-extra :is(.p-web, .p-dl, .p-del)[hidden] { display: none; }
   :root .ebar .p-extra :is(.p-web, .p-dl, .p-del) .ico { display: block; width: 18px; height: 18px; }
