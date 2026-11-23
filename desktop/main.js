@@ -361,7 +361,9 @@ function buildWindow() {
     Menu.buildFromTemplate(items).popup({ window: win });
   });
 
-  wc.loadURL(appURL.href);
+  // The page is fetched fresh on every launch: Chromium's HTTP cache is emptied first, so a deploy is never
+  // hidden behind a copy from an earlier visit (the service worker still serves it when offline).
+  wc.session.clearCache().catch(() => {}).finally(() => wc.loadURL(appURL.href));
 }
 
 function showWindow() {
