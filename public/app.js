@@ -4,6 +4,7 @@ import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 import { mdMeta } from "./mdmeta.js";
 import { mountGraph } from "./graph.js";
+import { addMindmap } from "./mindmap.js";
 import { t, lang, langChoice, translatePage } from "./i18n.js";
 import * as local from "./localsync.js";
 import { IMAGE_EXTS, mimeOf } from "./syncengine.js";
@@ -613,7 +614,7 @@ function parseFrontMatter(src) {
     block = null;
     const item = /^\s*-\s+(.*)$/.exec(line);   // YAML allows "- a" flush with the key, as mdMeta reads it
     if (item && listKey) { meta[listKey].push(item[1].replace(/^["']|["']$/g, "")); continue; }
-    const kv = /^([A-Za-z_]+):\s*(.*)$/.exec(line);
+    const kv = /^([A-Za-z_][\w-]*):\s*(.*)$/.exec(line);   // "mindmap-plugin: basic" too
     if (!kv) continue;
     const [, k, v] = kv;
     listKey = null;
@@ -753,7 +754,10 @@ async function renderMarkdown(src, f) {
   });
   for (const img of frag.querySelectorAll("img")) img.loading = "lazy";
   const content = document.createElement("div");
+  content.className = "md-text";
   content.append(frag);
+  // Obsidian's Enhancing Mindmap plugin marks its documents with this; they open as a mind map (see mindmap.js).
+  if (fm["mindmap-plugin"]) art.dataset.mindmap = "1";
   art.append(content);
   // A document that opens with its own # heading: that heading is the title, above the properties.
   const first = content.firstElementChild;
@@ -776,6 +780,8 @@ async function renderMarkdown(src, f) {
     if (a.dataset.open) continue;
     const href = a.getAttribute("href"), hash = decodePath(href.split("#").slice(1).join("#"));
     if (href.startsWith("#")) { if (hash) { a.dataset.open = f.id; a.dataset.heading = hash; } continue; }
+    // A link between blog posts (/posts/<abbrlink>.html, as the 思维导图 maps write them) opens the published post.
+    if (/^\/posts\/[\w-]+\.html(#.*)?$/.test(href)) { Object.assign(a, { href: BLOG + href, target: "_blank", rel: "noopener" }); continue; }
     if (!isRel(href)) { a.target = "_blank"; a.rel = "noopener"; continue; }
     // A relative link is never followed as written: it would load a page of this site in place of the app.
     const target = byPath.get(resolveRel(dir, href));
@@ -920,6 +926,8 @@ async function showFile(f, p) {
       }
       if (el.dataset.web) { p.web.href = el.dataset.web; p.web.hidden = false; }
       const shown = show(el);
+      // Built on the document that is on screen: a cached copy is a clone, which would lose the map's buttons.
+      if (shown && !shown.querySelector(":scope > .mm")) addMindmap(shown, shown.querySelector(":scope > .md-text"), { id: f.id, mindmap: !!shown.dataset.mindmap });
       if (token === p.token) setToc(p, shown || el);
       return;
     }

@@ -1210,3 +1210,150 @@ a.ag-card-name:hover { text-decoration: underline; }
 .sug[aria-selected=true] small { background: color-mix(in srgb, var(--on-accent) 18%, transparent); }
 @media (prefers-reduced-motion: reduce) { .suggest.pop, .suggest.pop .sug { animation: none; } }
 .ai-form label:has(.combo) { position: relative; z-index: 6; }   /* the suggestions lie over the rows below */
+
+/* Mind map (mindmap.js): a document's headings and lists as a tree, the title in the middle.
+   Everything is drawn from the style's own variables (accent, panel, line, fonts), so the map looks like the
+   style it is in; the few knobs below (--mm-r radius, --mm-shadow, --mm-bg canvas, branch colours) are what a
+   style overrides. Branch colours are hues pulled toward the style's accent, so they sit with it. */
+:root {
+  --mm-r: 12px;
+  --mm-shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 4px 14px rgba(0, 0, 0, .06);
+  --mm-shadow-up: 0 2px 4px rgba(0, 0, 0, .08), 0 10px 26px rgba(0, 0, 0, .12);
+  --mm-bg: radial-gradient(circle, color-mix(in srgb, var(--ink) 13%, transparent) 1px, transparent 1.3px) 0 0 / 22px 22px,
+    color-mix(in srgb, var(--ink) 2%, var(--panel));
+  --mm-mix: 62%;
+  --mm-c0: color-mix(in oklab, #e8590c var(--mm-mix), var(--accent)); --mm-c1: color-mix(in oklab, #1c7ed6 var(--mm-mix), var(--accent));
+  --mm-c2: color-mix(in oklab, #2f9e44 var(--mm-mix), var(--accent)); --mm-c3: color-mix(in oklab, #ae3ec9 var(--mm-mix), var(--accent));
+  --mm-c4: color-mix(in oklab, #0c8599 var(--mm-mix), var(--accent)); --mm-c5: color-mix(in oklab, #d6336c var(--mm-mix), var(--accent));
+  --mm-c6: color-mix(in oklab, #e67700 var(--mm-mix), var(--accent));
+}
+:root[data-mode="dark"] {
+  --mm-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 14px rgba(0, 0, 0, .35); --mm-shadow-up: 0 2px 6px rgba(0, 0, 0, .5), 0 12px 28px rgba(0, 0, 0, .5);
+  --mm-c0: color-mix(in oklab, #ff922b var(--mm-mix), var(--accent)); --mm-c1: color-mix(in oklab, #4dabf7 var(--mm-mix), var(--accent));
+  --mm-c2: color-mix(in oklab, #51cf66 var(--mm-mix), var(--accent)); --mm-c3: color-mix(in oklab, #cc5de8 var(--mm-mix), var(--accent));
+  --mm-c4: color-mix(in oklab, #22b8cf var(--mm-mix), var(--accent)); --mm-c5: color-mix(in oklab, #f06595 var(--mm-mix), var(--accent));
+  --mm-c6: color-mix(in oklab, #fcc419 var(--mm-mix), var(--accent));
+}
+/* Styles with a voice of their own: ink and paper in two inks, e-ink and blueprint in one, Swiss red and black,
+   terminal in phosphor, neon at full glow, blocks in bevelled pixels, clay soft and round. */
+:root[data-style="ink"] { --mm-r: 3px; --mm-shadow: none; --mm-shadow-up: none; --mm-bg: var(--panel);
+  --mm-c0: var(--accent); --mm-c1: var(--ink); --mm-c2: color-mix(in srgb, var(--accent) 60%, var(--ink)); --mm-c3: color-mix(in srgb, var(--ink) 65%, var(--panel));
+  --mm-c4: var(--accent); --mm-c5: var(--ink); --mm-c6: color-mix(in srgb, var(--accent) 60%, var(--ink)); }
+:root[data-style="paper"] { --mm-mix: 45%; --mm-r: 6px; --mm-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 8%, transparent), 0 3px 10px rgba(80, 50, 20, .07);
+  --mm-bg: repeating-linear-gradient(0deg, color-mix(in srgb, var(--accent) 6%, transparent) 0 1px, transparent 1px 28px), var(--panel); }
+:root[data-style="eink"] { --mm-r: 6px; --mm-shadow: none; --mm-shadow-up: none; --mm-bg: var(--panel);
+  --mm-c0: var(--ink); --mm-c1: var(--ink); --mm-c2: var(--ink); --mm-c3: var(--ink); --mm-c4: var(--ink); --mm-c5: var(--ink); --mm-c6: var(--ink); }
+:root[data-style="blueprint"] { --mm-r: 2px; --mm-shadow: none; --mm-shadow-up: 0 0 0 1px var(--ink);
+  --mm-bg: linear-gradient(color-mix(in srgb, var(--ink) 9%, transparent) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(90deg, color-mix(in srgb, var(--ink) 9%, transparent) 1px, transparent 1px) 0 0 / 24px 24px, var(--bg);
+  --mm-c0: var(--ink); --mm-c1: color-mix(in srgb, var(--ink) 80%, #ffe08a); --mm-c2: var(--ink); --mm-c3: color-mix(in srgb, var(--ink) 80%, #ffe08a);
+  --mm-c4: var(--ink); --mm-c5: color-mix(in srgb, var(--ink) 80%, #ffe08a); --mm-c6: var(--ink); }
+:root[data-style="swiss"] { --mm-r: 0; --mm-shadow: none; --mm-shadow-up: none; --mm-bg: var(--panel);
+  --mm-c0: var(--accent); --mm-c1: var(--ink); --mm-c2: var(--accent); --mm-c3: var(--ink); --mm-c4: var(--accent); --mm-c5: var(--ink); --mm-c6: var(--accent); }
+:root[data-style="terminal"] { --mm-r: 2px; --mm-shadow: none; --mm-shadow-up: 0 0 12px color-mix(in srgb, var(--accent) 45%, transparent);
+  --mm-bg: repeating-linear-gradient(0deg, color-mix(in srgb, var(--accent) 4%, transparent) 0 1px, transparent 1px 3px), var(--bg);
+  --mm-c0: var(--accent); --mm-c1: #c9e86a; --mm-c2: #5eead4; --mm-c3: var(--accent); --mm-c4: #facc15; --mm-c5: #86efac; --mm-c6: #5eead4; }
+:root[data-style="neon"] { --mm-mix: 85%; --mm-shadow: 0 0 10px color-mix(in srgb, var(--c, var(--accent)) 35%, transparent);
+  --mm-shadow-up: 0 0 18px color-mix(in srgb, var(--c, var(--accent)) 65%, transparent); --mm-bg: radial-gradient(circle, color-mix(in srgb, var(--accent) 22%, transparent) 1px, transparent 1.4px) 0 0 / 24px 24px, var(--bg); }
+:root[data-style="blocks"] { --mm-r: 0; --mm-shadow: var(--bevel); --mm-shadow-up: var(--bevel), 0 4px 0 rgba(0, 0, 0, .25); --mm-mix: 70%; }
+:root[data-style="clay"] { --mm-r: 18px; --mm-mix: 55%;
+  --mm-shadow: inset 0 2px 3px rgba(255, 255, 255, .55), inset 0 -3px 6px rgba(60, 40, 120, .08), 0 6px 14px rgba(60, 40, 120, .12);
+  --mm-shadow-up: inset 0 2px 3px rgba(255, 255, 255, .55), inset 0 -3px 6px rgba(60, 40, 120, .08), 0 12px 24px rgba(60, 40, 120, .2); }
+:root[data-style="notebook"] { --mm-r: 14px 10px 16px 9px; --mm-mix: 55%;
+  --mm-bg: linear-gradient(color-mix(in srgb, #5b8fd6 14%, transparent) 1px, transparent 1px) 0 0 / 26px 26px, var(--panel); }
+:root:is([data-style="sunset"], [data-style="eyecare"]) { --mm-mix: 45%; }
+
+.md-mm-toggle {
+  display: inline-flex; align-items: center; gap: 6px; margin: 0 0 12px; padding: 3px 12px 3px 9px; border: 0; border-radius: 999px;
+  font: inherit; font-size: .88em; line-height: 1.6; color: var(--muted); background: color-mix(in srgb, var(--ink) 6%, transparent); cursor: pointer;
+  transition: background .2s, color .2s;
+}
+.md-mm-toggle svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; }
+.md-mm-toggle:hover { color: var(--ink); }
+.md-mm-toggle[aria-pressed="true"] { color: var(--on-accent); background: var(--accent); }
+.md-head .md-web + .md-mm-toggle { margin-left: 10px; }
+.md-body.mm-on > .md-text, .md-body:not(.mm-on) > .mm { display: none; }
+.md-body.mm-on > .mm { animation: mm-in .35s var(--ease); }
+@keyframes mm-in { from { opacity: 0; transform: translateY(6px); } }
+:root[data-width="center"] .md-body.mm-on { max-width: none; }
+.mm { margin: 0 -8px; }
+.mm-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; font-size: 13px; color: var(--muted); }
+.mm-btn { min-width: 30px; height: 28px; padding: 0 10px; border: 0; border-radius: min(8px, var(--mm-r)); font: inherit; color: var(--muted);
+  background: color-mix(in srgb, var(--ink) 5%, transparent); cursor: pointer; transition: background .15s, color .15s, transform .15s; }
+.mm-btn:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 10%, transparent); }
+.mm-btn:active { transform: scale(.94); }
+.mm-pct { min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
+.mm-fit { margin-left: 6px; }
+.mm-view { overflow-x: auto; overflow-y: hidden; border-radius: calc(var(--mm-r) + 6px); background: var(--mm-bg); border: 1px solid var(--line); cursor: grab; }
+:root[data-style="blocks"] .mm-view { box-shadow: var(--bevel); border-color: #555; }
+.mm-view.dragging { cursor: grabbing; user-select: none; -webkit-user-select: none; }
+.mm-stage { position: relative; }
+.mm-canvas { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.mm-canvas.zooming { transition: transform .25s var(--ease); }
+.mm-links { position: absolute; left: 0; top: 0; overflow: visible; }
+.mm-link { fill: none; stroke-width: 1.5; stroke-linecap: round; transition: stroke-width .2s, opacity .2s; }
+.mm-link[data-depth="1"] { stroke-width: 3; }
+.mm-link[data-depth="2"] { stroke-width: 2; }
+:root:is([data-style="eink"], [data-style="swiss"], [data-style="blueprint"]) .mm-link[data-depth="1"] { stroke-width: 2; }
+:root[data-style="notebook"] .mm-link { stroke-dasharray: 1 0; }
+:root[data-style="terminal"] .mm-link { stroke-dasharray: 4 3; }
+:root[data-style="neon"] .mm-link { filter: drop-shadow(0 0 3px currentColor); }
+
+/* The node is placed by its transform; .mm-text is what you see, so it can lift on hover without moving the node. */
+.mm-node { position: absolute; left: 0; top: 0; max-width: 280px; width: max-content; outline: none; cursor: default; will-change: transform; }
+.mm-node.has-kids { cursor: pointer; }
+.mm-text {
+  position: relative; padding: 3px 6px 4px; overflow-wrap: anywhere; font-size: 14px; line-height: 1.45; color: var(--ink);
+  border-radius: min(8px, var(--mm-r)); transition: transform .18s var(--ease), box-shadow .18s, background .18s, opacity .25s;
+}
+.mm-node[data-depth="0"] > .mm-text {
+  max-width: 320px; padding: 12px 22px; border-radius: calc(var(--mm-r) + 4px); font: 600 19px/1.35 var(--font-display);
+  color: var(--on-accent); background: var(--accent); box-shadow: var(--mm-shadow), 0 0 0 5px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.mm-node[data-depth="0"] a { color: inherit; }
+.mm-node[data-depth="1"] > .mm-text {
+  padding: 7px 14px; border-radius: var(--mm-r); font: 600 15px/1.4 var(--font-display);
+  background: color-mix(in srgb, var(--c) 11%, var(--panel)); box-shadow: var(--mm-shadow), inset 0 0 0 1.5px color-mix(in srgb, var(--c) 55%, transparent);
+}
+.mm-node[data-depth="2"] > .mm-text {
+  padding: 4px 11px; border-radius: var(--mm-r); background: color-mix(in srgb, var(--c) 6%, var(--panel));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 30%, transparent);
+}
+.mm-node[data-depth="3"] > .mm-text { font-size: 13px; color: color-mix(in srgb, var(--ink) 85%, transparent); box-shadow: inset 0 -1.5px 0 var(--c); border-radius: 0; }
+:root[data-style="swiss"] .mm-node[data-depth="1"] > .mm-text { background: var(--c); color: var(--panel); box-shadow: none; }
+:root[data-style="eink"] .mm-node:is([data-depth="1"], [data-depth="2"]) > .mm-text { background: var(--panel); box-shadow: inset 0 0 0 1.5px var(--ink); }
+:root[data-style="blueprint"] .mm-node:is([data-depth="1"], [data-depth="2"]) > .mm-text { background: transparent; box-shadow: inset 0 0 0 1px var(--c); }
+:root[data-style="blueprint"] .mm-node[data-depth="0"] > .mm-text { box-shadow: 0 0 0 1px var(--ink), 0 0 0 5px var(--bg), 0 0 0 6px var(--ink); }
+:root[data-style="terminal"] .mm-node[data-depth="1"] > .mm-text::before { content: "> "; color: var(--c); }
+:root[data-style="blocks"] .mm-node:is([data-depth="1"], [data-depth="2"]) > .mm-text { background: color-mix(in srgb, var(--c) 22%, var(--panel)); box-shadow: var(--bevel); }
+.mm-text :is(p, ul, ol) { margin: 0; }
+.mm-text a { color: inherit; text-decoration-color: color-mix(in srgb, var(--c, var(--accent)) 60%, transparent); text-underline-offset: 3px; }
+.mm-text a:hover { color: var(--c, var(--accent)); }
+.mm-text code { font-size: .88em; }
+.mm-text img { max-width: 100%; margin: 4px 0; }
+.mm-text input[type=checkbox] { margin: 0 .35em 0 0; vertical-align: -.1em; }
+
+/* Hover lifts a node; a click lights its branch and dims the rest. */
+.mm-node:hover > .mm-text, .mm-node:focus-visible > .mm-text { transform: translateY(-1px) scale(1.035); }
+.mm-node:is([data-depth="1"], [data-depth="2"]):hover > .mm-text { box-shadow: var(--mm-shadow-up), inset 0 0 0 1.5px var(--c); }
+.mm-node[data-depth="3"]:hover > .mm-text { background: color-mix(in srgb, var(--c) 10%, transparent); }
+.mm-node:focus-visible > .mm-text { outline: 2px solid var(--c, var(--accent)); outline-offset: 3px; }
+.mm.focus .mm-node:not(.lit) > .mm-text { opacity: .28; }
+.mm.focus .mm-link:not(.lit) { opacity: .15 !important; }
+.mm.focus .mm-link.lit { stroke-width: 3; }
+.mm-node.sel > .mm-text { animation: mm-pulse .5s var(--ease); box-shadow: var(--mm-shadow-up), 0 0 0 3px color-mix(in srgb, var(--c) 35%, transparent); }
+@keyframes mm-pulse { 40% { transform: scale(1.08); } }
+
+.mm-fold {
+  position: absolute; top: 50%; display: grid; place-items: center; min-width: 18px; height: 18px; margin-top: -9px; padding: 0 4px; border-radius: 9px;
+  font: 600 10px/1 var(--font-body); color: var(--c); background: var(--panel); box-shadow: inset 0 0 0 1.5px var(--c);
+  opacity: 0; transform: scale(.7); transition: opacity .18s, transform .18s var(--spring), background .15s, color .15s; pointer-events: none;
+}
+.mm-node[data-depth="3"] > .mm-fold { top: 100%; }
+.mm-node[data-dir="1"] > .mm-fold { left: 100%; margin-left: 4px; }
+.mm-node[data-dir="-1"] > .mm-fold { right: 100%; margin-right: 4px; }
+.mm-node:hover > .mm-fold, .mm-node.closed > .mm-fold, .mm-node:focus-visible > .mm-fold { opacity: 1; transform: none; }
+.mm-node.closed:hover > .mm-fold { color: var(--panel); background: var(--c); }
+@media (hover: none) { .mm-node.has-kids > .mm-fold { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .mm-text, .mm-fold, .mm-link, .mm-canvas.zooming { transition: none; } .mm-node.sel > .mm-text, .md-body.mm-on > .mm { animation: none; } }
+.mm.focus .mm-node:not(.lit) > .mm-fold { opacity: .28; }
