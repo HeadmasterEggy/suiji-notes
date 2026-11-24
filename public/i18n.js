@@ -222,6 +222,7 @@ const EN = {
   "模型只返回了思考过程，没有给出回答（{reason}），请再试一次或换一个模型。": "The model only returned its reasoning, no answer ({reason}). Try again or pick another model.",
   "模型没有返回任何内容（{reason}），请再试一次或换一个模型。": "The model returned nothing ({reason}). Try again or pick another model.",
   "（回答在中途被截断了。请从断开的地方直接接着写，不要重复已经写过的内容，也不要加开场白。）": "(Your answer was cut off. Continue exactly where it stopped, without repeating anything already written and without any preamble.)",
+  "回答没有写完就停了。可以说「继续」让它接着写。": "The answer stopped before it was finished. Say \"continue\" to have it go on.",
   "回答太长，已经接着写了 {n} 次，仍未写完。可以说「继续」让它接着写。": "The answer is long and was continued {n} times without finishing. Say \"continue\" to have it go on.",
   "搜索 (⌘O)": "Search (⌘O)",
   "新对话": "New chat",
