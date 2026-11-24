@@ -6,8 +6,24 @@
 import { t } from "./i18n.js";
 
 const GAP_X = 52, GAP_Y = 12, PAD = 28, BRANCHES = 7;
-// Which documents the reader switched, by file id: a redraw after an edit keeps the view they chose.
-const chosen = new Map();
+// How the reader left each map, by file id, kept on this device: map or text, zoom, where it was scrolled to,
+// and which branches they folded or unfolded. Opening the document again (or a redraw after an edit) puts it
+// back that way. Branches are known by their text and the text above them, so an edit elsewhere keeps them.
+const KEY = "suiji:mindmap", KEEP = 150;
+let saved = null;
+const states = () => {
+  if (!saved) { try { saved = JSON.parse(localStorage.getItem(KEY)) || {}; } catch { saved = {}; } }
+  return saved;
+};
+const storeState = (id, st) => {
+  const all = states();
+  all[id] = { ...st, t: Date.now() };
+  const ids = Object.keys(all);
+  if (ids.length > KEEP) ids.sort((a, b) => all[a].t - all[b].t).slice(0, ids.length - KEEP).forEach((k) => delete all[k]);
+  try { localStorage.setItem(KEY, JSON.stringify(all)); } catch {}
+};
+// A short, stable name for a branch (its path of texts from the title).
+const hash = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return (h >>> 0).toString(36); };
 const el = (tag, cls, text) => Object.assign(document.createElement(tag), cls ? { className: cls } : {}, text != null ? { textContent: text } : {});
 
 // Headings nest by level; a list belongs to the heading above it, and a nested list to its item.
@@ -54,6 +70,8 @@ export function addMindmap(art, content, { id, mindmap }) {
   const root = outlineTree(content, title ? title.innerHTML : "");
   const total = count(root);
   if (!mindmap && total < 3) return;   // nothing that reads as a tree
+  const last = id != null ? states()[id] : null;
+  const opened = new Set(last?.open || []), shut = new Set(last?.shut || []);
 
   const view = el("div", "mm-view"), stage = el("div", "mm-stage"), canvas = el("div", "mm-canvas");
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -80,9 +98,10 @@ export function addMindmap(art, content, { id, mindmap }) {
     if (depth) n.el.style.setProperty("--c", `var(--mm-c${branch % BRANCHES})`);
     const text = el("div", "mm-text"); text.innerHTML = n.html || "&nbsp;";
     n.el.append(text);
+    n.key = hash((parent ? parent.key + "\n" : "") + text.textContent.trim());
     if (n.kids.length && depth) { n.fold = el("span", "mm-fold"); n.el.append(n.fold); n.el.classList.add("has-kids"); }
     // A big map opens two levels deep; the rest unfolds a branch at a time.
-    n.open = depth < 2 || total <= 120;
+    n.open = opened.has(n.key) ? true : shut.has(n.key) ? false : depth < 2 || total <= 120;
     n.el.hidden = true;
     n.path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     n.path.setAttribute("class", "mm-link"); n.path.dataset.depth = Math.min(depth, 3);
@@ -105,6 +124,7 @@ export function addMindmap(art, content, { id, mindmap }) {
     canvas.style.transform = `scale(${zoom})`;
     stage.style.width = canvas.offsetWidth * zoom + "px"; stage.style.height = canvas.offsetHeight * zoom + "px";
     if (keep) view.scrollLeft = (view.scrollLeft + keep) * zoom / before - keep;
+    remember();
   };
   // On a phone the text stays readable (never under 75%) and the rest scrolls sideways.
   const fitWidth = () => setZoom(Math.min(1, Math.max(view.clientWidth < 560 ? .75 : .5, (view.clientWidth - 2) / canvas.offsetWidth)));
@@ -212,7 +232,41 @@ export function addMindmap(art, content, { id, mindmap }) {
       delete box.dataset.moving;
     };
     if (DUR) requestAnimationFrame(frame); else frame(t0);
-    if (first) { fitWidth(); view.scrollLeft = Math.max(0, (root.tx - origin.x + root.w / 2) * zoom - view.clientWidth / 2); }
+    if (first && last?.z) {   // back where the reader left it
+      setZoom(last.z);
+      view.scrollLeft = ((last.x || 0) - origin.x) * zoom;   // x is in map units from the title, so a relayout keeps it
+      if (page && last.y != null) page.scrollTop = last.y;
+    } else if (first) { fitWidth(); view.scrollLeft = Math.max(0, (root.tx - origin.x + root.w / 2) * zoom - view.clientWidth / 2); }
+    if (first) watchPage(page);
+    remember();
+  }
+
+  // Saved a moment after the reader stops changing it. Only while this map is the one on screen, in the
+  // document (full screen has its own scrolling, and is left where it was).
+  let saveSoon = 0, pageY = last?.y ?? null;
+  function remember() {
+    if (id == null || !art.isConnected && !box.isConnected) return;   // replaced by another document
+    // Read now (a document that has been replaced no longer knows where it was scrolled), written a moment later.
+    const mapOn = art.classList.contains("mm-on");
+    if (mapOn && laid && !box.classList.contains("full")) { const page = scroller(); if (page) pageY = Math.round(page.scrollTop); }
+    const st = { on: mapOn };
+    if (laid) {
+      st.z = zoom; st.x = Math.round(view.scrollLeft / zoom + origin.x); if (pageY != null) st.y = pageY;
+      const def = (n) => n.depth < 2 || total <= 120;
+      st.open = nodes.filter((n) => n.fold && n.open && !def(n)).map((n) => n.key);
+      st.shut = nodes.filter((n) => n.fold && !n.open && def(n)).map((n) => n.key);
+    } else if (last) Object.assign(st, { z: last.z, x: last.x, y: last.y, open: last.open, shut: last.shut });
+    clearTimeout(saveSoon);
+    saveSoon = setTimeout(() => storeState(id, st), 250);
+  }
+  // The page scrolling up and down moves the map too: kept with it, until this document is replaced.
+  function watchPage(page) {
+    if (!page || page === document.scrollingElement) { if (page) addEventListener("scroll", onPage, { passive: true }); return; }
+    page.addEventListener("scroll", onPage, { passive: true });
+    function onPage() {
+      if (!art.isConnected) { (page === document.scrollingElement ? window : page).removeEventListener("scroll", onPage); return; }
+      if (art.classList.contains("mm-on") && !box.classList.contains("full")) remember();
+    }
   }
 
   // Clicking a node lights up its branch (the way from the title, and everything under it) and dims the rest;
@@ -233,7 +287,7 @@ export function addMindmap(art, content, { id, mindmap }) {
     if (to !== left) view.scrollTo({ left: to, behavior: still ? "auto" : "smooth" });
   }, still ? 0 : 200);
   const press = (n) => {
-    if (n.fold) { n.open = !n.open; layout(); if (n.open) reveal(n); }
+    if (n.fold) { n.open = !n.open; layout(); if (n.open) reveal(n); remember(); }
     lit(n === root || focus === n && !n.fold ? null : n);
   };
   canvas.addEventListener("click", (e) => {
@@ -251,6 +305,7 @@ export function addMindmap(art, content, { id, mindmap }) {
     e.preventDefault(); press(byEl.get(node));
   });
   view.addEventListener("click", (e) => { if (e.target === view || e.target === stage) lit(null); });
+  view.addEventListener("scroll", () => { if (!box.classList.contains("full")) remember(); }, { passive: true });
 
   // Formula fonts (KaTeX) arrive after the first layout; once they are in, nodes are measured again so a
   // formula never spills over its neighbour.
@@ -259,6 +314,7 @@ export function addMindmap(art, content, { id, mindmap }) {
     art.classList.toggle("mm-on", yes);
     toggle.setAttribute("aria-pressed", String(yes));
     if (yes && !laid && view.clientWidth) { laid = true; layout(true); settleFonts(); }
+    remember();
   };
   // Laid out once the map has a width (it is built off screen, and a cached document may be shown again later).
   new ResizeObserver(() => {
@@ -338,9 +394,9 @@ export function addMindmap(art, content, { id, mindmap }) {
   toggle.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2"/><path d="M10 8h2.5M3.5 8H6M9.4 6.6l2-2M6.6 9.4l-2 2M9.4 9.4l2 2M6.6 6.6l-2-2"/></svg>';
   toggle.append(el("span", null, t("思维导图")));
   toggle.title = t("以思维导图显示");
-  toggle.onclick = () => { const yes = !art.classList.contains("mm-on"); chosen.set(id, yes); on(yes); };
+  toggle.onclick = () => on(!art.classList.contains("mm-on"));
   const head = art.querySelector(".md-head");
   const props = head.querySelector(".md-props");
   if (props) props.before(toggle); else head.append(toggle);
-  on(chosen.has(id) ? chosen.get(id) : !!mindmap);
+  on(last && typeof last.on === "boolean" ? last.on : !!mindmap);
 }
