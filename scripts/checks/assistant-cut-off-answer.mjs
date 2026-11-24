@@ -7,6 +7,8 @@ const nd = (lines) => lines.map((l) => JSON.stringify(l) + "\n").join("");
 const cases = [
   ["length limit", [[{ t: "text", d: "The first half, " }, { t: "done", reason: "length" }], [{ t: "text", d: "and the second half." }, { t: "done", reason: "stop" }]]],
   ["stream cut off", [[{ t: "text", d: "The first half, " }], [{ t: "text", d: "and the second half." }, { t: "done", reason: "stop" }]]],
+  // DeepSeek stops with insufficient_system_resource when it is busy; the AI SDK calls that "other".
+  ["service stopped it", [[{ t: "text", d: "The first half, " }, { t: "done", reason: "other", raw: "insufficient_system_resource" }], [{ t: "text", d: "and the second half." }, { t: "done", reason: "stop", raw: "stop" }]]],
 ];
 const bad = [];
 for (const [name, replies] of cases) {
@@ -22,6 +24,22 @@ for (const [name, replies] of cases) {
     const texts = await app.page.$$eval(".ag-bot .ag-text", (els) => els.map((e) => e.innerText.trim()));
     if (texts.join(" ") !== "The first half, and the second half.") bad.push(`${name}: the answer reads ${JSON.stringify(texts)}, not carried on to the end`);
     else if (texts.length !== 1) bad.push(`${name}: the carried-on answer is split into ${texts.length} pieces`);
+  } finally { await app.close(); }
+}
+// Carrying on brings back only thinking: the answer so far stays, with a note that it is unfinished, not an error.
+{
+  const app = await openApp({});
+  try {
+    let n = 0;
+    const replies = [[{ t: "text", d: "The first half, " }, { t: "done", reason: "length" }], [{ t: "reasoning", d: "hmm" }, { t: "done", reason: "length" }]];
+    await app.page.route("**/api/agent", (r) => r.fulfill({ contentType: "application/x-ndjson", body: nd(replies[Math.min(n++, 1)]) }));
+    await app.page.click("#agentBtn");
+    await app.page.fill("#agInput", "hello");
+    await app.page.click("#agSend");
+    await app.page.waitForFunction(() => !document.querySelector("#agSend")?.hidden, null, { timeout: 8000 }).catch(() => {});
+    await app.page.waitForTimeout(300);
+    const r = await app.page.evaluate(() => ({ text: document.querySelector(".ag-bot .ag-text")?.innerText.trim(), fail: !!document.querySelector(".ag-fail"), note: document.querySelector(".ag-note")?.innerText || "" }));
+    if (r.text !== "The first half," || r.fail || !/没有写完|wasn't finished|stopped before/.test(r.note)) bad.push(`a continuation that only thinks: ${JSON.stringify(r)}`);
   } finally { await app.close(); }
 }
 // Tool steps that never end: the last step asks for an answer with no tools, and that answer shows.

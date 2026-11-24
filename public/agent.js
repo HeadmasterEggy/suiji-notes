@@ -448,12 +448,15 @@ function codeBars(box) {
   }
 }
 
+// The ways a service says an answer ended on its own. Any other reason means it was cut short: "length" (the
+// output limit), "error", DeepSeek's insufficient_system_resource, or the AI SDK's "other".
+const FINISHED = /^(stop|end_turn|eos|stop_sequence|tool[-_]calls|tool_use|function_call|content[-_]filter)$/i;
 // One model turn. carry is the text of a reply that was cut off: the turn writes on in the same place, so the
 // answer reads as one piece. final asks for an answer with no more tool calls.
 async function step(bubble, signal, { carry, final } = {}) {
   await refreshMagpie();
   const cfg = localModel();
-  let reasoning = "", calls = [], err = null, code = null, think = null, seq = 0, done = null;
+  let reasoning = "", calls = [], err = null, code = null, think = null, seq = 0, done = null, raw = null;
   const textEl = carry?.textEl || el("div", "ag-text"), wait = waiting();
   if (carry && textEl.isConnected) bubble.insertBefore(wait, textEl.nextSibling); else bubble.append(wait, textEl);
   const quiet = () => wait.remove();
@@ -475,7 +478,7 @@ async function step(bubble, signal, { carry, final } = {}) {
       else if (m.t === "reasoning") { quiet(); reasoning += m.d; (think ||= thoughts(bubble, textEl)).add(m.d); }
       else if (m.t === "tool") { quiet(); calls.push(m); }
       else if (m.t === "error") { err = m.message; code = m.code || null; }
-      else if (m.t === "done") done = m.reason || "stop";
+      else if (m.t === "done") { done = m.reason || "stop"; raw = m.raw || done; }
     }
   } finally {
     quiet();
@@ -487,6 +490,9 @@ async function step(bubble, signal, { carry, final } = {}) {
   // A turn that brings nothing back used to leave an empty bubble with no word of why. Say what happened:
   // the stream cut off before it finished, or the model finished without a reply (only thinking, a length
   // or content-filter stop, an empty answer). Local models send no "done", so only their empty answer counts.
+  // Carrying on brought nothing more (only thinking, or the request failed): the answer so far stays, and a
+  // note under it says it is unfinished, rather than an error that drops the whole reply.
+  if (carry && !text && !calls.length && !signal.aborted) { messages.pop(); return { calls, cut: false, stalled: err || true, out, textEl }; }
   if (!err && !text && !calls.length && !signal.aborted) {
     if (!cfg && !done) err = t("助手的回复中断了，没有收到内容，请再试一次。");
     else err = reasoning ? t("模型只返回了思考过程，没有给出回答（{reason}），请再试一次或换一个模型。", { reason: done || "stop" })
@@ -496,7 +502,7 @@ async function step(bubble, signal, { carry, final } = {}) {
   messages.push({ role: "assistant", content: [...(text ? [{ type: "text", text }] : []), ...calls.map((c) => ({ type: "tool-call", toolCallId: c.id, toolName: c.name, input: c.input }))], ...(reasoning ? { reasoning } : {}) });
   // The answer stopped partway: the model hit its output limit ("length"), or the server's stream ended
   // without saying it was done (the connection or the function's time ran out). Either way it can go on.
-  const cut = !!text && !calls.length && !signal.aborted && (done === "length" || done === "error" || !!err || (!cfg && !done));
+  const cut = !!text && !calls.length && !signal.aborted && (!!err || (!cfg && !done) || (!!done && !FINISHED.test(raw)));
   return { calls, cut, out, textEl };
 }
 // Tools that act in the interface right away: they only show things, never change a document.
@@ -565,7 +571,7 @@ async function send(text) {
     let more = 0, carry = null;
     for (let n = 0; ; ) {
       // The last step answers with what the tools found so far, rather than ending on a tool call with no answer.
-      const { calls, cut, out, textEl } = await step(bubble, busy.signal, { carry, final: n >= MAX_STEPS - 1 });
+      const { calls, cut, stalled, out, textEl } = await step(bubble, busy.signal, { carry, final: n >= MAX_STEPS - 1 });
       carry = null;
       if (cut) {
         if (more++ < MAX_MORE) {
@@ -575,6 +581,10 @@ async function send(text) {
           continue;
         }
         bubble.append(el("p", "ag-note", t("回答太长，已经接着写了 {n} 次，仍未写完。可以说「继续」让它接着写。", { n: MAX_MORE })));
+        break;
+      }
+      if (stalled) {
+        bubble.append(el("p", "ag-note", t("回答没有写完就停了。可以说「继续」让它接着写。") + (typeof stalled === "string" ? " (" + stalled + ")" : "")));
         break;
       }
       if (!calls.length || n++ >= MAX_STEPS - 1) break;
